@@ -1,14 +1,21 @@
 /**
- * La tabla de casos del guardia de autenticación.
+ * Prueba de CONTRATO, no una segunda fuente de verdad.
  *
- * El caso que importa es el último: producción SIN `PROXY_SECRET`. Un deploy
- * que pierde la variable no puede reabrir la suplantación por header — tiene
- * que caerse cerrado. En un CRM, esa puerta es leer la cartera de clientes de
- * otra empresa.
+ * La tabla de casos completa vive donde vive la implementación:
+ * `packages/db/src/http/proxy-verified.test.ts`. Aquí se afirma que lo que
+ * `@abraxa/crm` re-exporta es EXACTAMENTE esa función y no una copia — que es
+ * lo que había hasta el cierre de la auditoría del PR #9. La primera prueba es
+ * la que falla en cuanto alguien vuelve a pegar el cuerpo aquí.
+ *
+ * Se conservan los dos casos que de verdad le importan a este carril, porque
+ * son la razón por la que el archivo existió: el fail-closed en producción y
+ * que un secreto inventado no sirve. En un CRM esa puerta es leer la cartera de
+ * clientes de otra empresa.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Request } from 'express';
 import { HEADER } from '@abraxa/config';
+import { proxyVerified as canonico } from '@abraxa/db';
 import { proxyVerified } from './proxy-verified';
 
 const pedir = (secreto?: string): Pick<Request, 'headers'> => ({
@@ -30,7 +37,12 @@ afterEach(() => {
   else process.env.PROXY_SECRET = entornoPrevio.proxy;
 });
 
-describe('proxyVerified', () => {
+describe('proxyVerified — el re-export de @abraxa/crm', () => {
+  /** ★ La prueba del hallazgo: una copia correcta hoy es una copia que diverge. */
+  it('es la MISMA función que la canónica de @abraxa/db, no una copia', () => {
+    expect(proxyVerified).toBe(canonico);
+  });
+
   it('con secreto configurado, acepta el correcto', () => {
     process.env.PROXY_SECRET = SECRETO;
     expect(proxyVerified(pedir(SECRETO))).toBe(true);
@@ -41,23 +53,12 @@ describe('proxyVerified', () => {
     expect(proxyVerified(pedir('otro-secreto-cualquiera'))).toBe(false);
   });
 
-  it('con secreto configurado, rechaza cuando no viene ninguno', () => {
-    process.env.PROXY_SECRET = SECRETO;
-    expect(proxyVerified(pedir())).toBe(false);
-  });
-
   it('rechaza un secreto de otra longitud sin que timingSafeEqual lance', () => {
     process.env.PROXY_SECRET = SECRETO;
     expect(proxyVerified(pedir('corto'))).toBe(false);
   });
 
-  it('en desarrollo sin secreto, deja pasar para poder trabajar sin BFF', () => {
-    delete process.env.PROXY_SECRET;
-    process.env.NODE_ENV = 'development';
-    expect(proxyVerified(pedir())).toBe(true);
-  });
-
-  /** El caso que justifica el archivo. */
+  /** El caso que justificó el archivo. */
   it('en PRODUCCIÓN sin secreto, CIERRA la vía de headers', () => {
     delete process.env.PROXY_SECRET;
     process.env.NODE_ENV = 'production';

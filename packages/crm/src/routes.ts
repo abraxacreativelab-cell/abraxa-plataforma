@@ -1,19 +1,27 @@
 /**
  * Rutas HTTP del CRM. `apps/api` las monta en `/crm`.
  *
- * ── Sobre el contexto ──────────────────────────────────────────────────────
+ * ── Sobre el contexto: ya no hay un `contextoDe` aquí ─────────────────────
  *
- * `TenantContext` se arma con `TenancyPort.contextFor()` desde una sesión
- * verificada server-side. Mientras H2 no esté registrado, estas rutas
- * responden 501 nombrando a quién se espera — eso lo hace `usePort` de H1 solo.
+ * Lo hubo, y estaba bien escrito: comprobaba `proxyVerified()` ANTES de mirar
+ * un solo header, que es justo lo que a tres carriles se les olvidó. Pero era
+ * la QUINTA copia de la misma función en el repo, y una copia correcta hoy es
+ * una copia que mañana diverge — que fue exactamente lo que pasó entre el
+ * 2026-07-30 y el 07-31 con H3, H6, H7 y H4.
  *
- * Lo que NO se hace es leer el tenant de un header y seguir adelante. La
- * puerta se cierra AHORA y no cuando aterrice tenancy: `contextoDe` exige
- * primero el secreto compartido del BFF (`proxyVerified`), y sin él ningún
- * header vale nada. Es el mismo criterio que H0 aplicó a `@abraxa/agents` el
- * 2026-07-31, y por la misma razón: una ruta que "mientras tanto" confía en el
- * navegador es una escalada de privilegios entre clientes esperando un merge
- * para activarse.
+ * El PR #16 de H0 puso la pieza en un solo lugar. Se importa:
+ *
+ *     import { contextoDePeticion, responderError } from '@abraxa/db';
+ *
+ * Hace las tres puertas en orden —proxy verificado, identidad presente,
+ * membresía validada por H2 vía `usePort('tenancy').contextFor()`— y es la
+ * ÚNICA forma correcta de convertir una petición en `TenantContext`. Mientras
+ * H2 no esté registrado, `usePort` responde 501 nombrando a quién se espera;
+ * jamás inventa un contexto. Ver `packages/db/src/http/tenant-context.ts`.
+ *
+ * `eslint.config.mjs` marca como error leer `x-user-email` / `x-tenant-slug` /
+ * `x-proxy-secret` fuera de la pieza canónica, así que este archivo tampoco
+ * PUEDE volver a escribir el suyo.
  *
  * ── Sobre el pendiente de montaje ──────────────────────────────────────────
  *
@@ -25,48 +33,24 @@
  */
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { PlatformError, usePort } from '@abraxa/db';
+import { PlatformError, contextoDePeticion, responderError } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
-import { HEADER } from '@abraxa/config';
-import { proxyVerified } from './http/proxy-verified';
 import { useContacts } from './port-registration';
 import type { IdentityChannel, Lifecycle, UpdateContactInput } from './port';
 
 export const router: Router = Router();
 
-/** Contexto verificado, o el 401/501/403 que corresponda. */
-async function contextoDe(req: Request): Promise<TenantContext> {
-  // ── Puerta 1: ¿de verdad habla el BFF? ───────────────────────────────────
-  if (!proxyVerified(req)) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      'Sólo por el proxy verificado de la aplicación (sesión server-side). ' +
-        `El header ${HEADER.userEmail} no acredita nada por sí solo.`,
-    );
-  }
-
-  // ── Puerta 2: ¿quién y de qué empresa? ───────────────────────────────────
-  const userEmail = req.header(HEADER.userEmail);
-  const tenantSlug = req.header(HEADER.tenantSlug);
-  if (!userEmail || !tenantSlug) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      `Faltan las cabeceras ${HEADER.userEmail} y ${HEADER.tenantSlug}. ` +
-        'Las pone el BFF desde la sesión verificada, no el navegador.',
-    );
-  }
-
-  // ── Puerta 3: la membresía. La valida H2; el slug del navegador NO se cree.
-  return usePort('tenancy').contextFor({ userEmail, tenantSlug });
-}
-
+/**
+ * Traduce el error a HTTP.
+ *
+ * Delega en `responderError()` de `@abraxa/db` —que nunca filtra `details`
+ * internos— y sólo agrega la línea de bitácora para lo que NO es un
+ * `PlatformError`, que es lo único que de verdad hay que ir a mirar. Un 403 de
+ * aislamiento no es un incidente; un `TypeError` sí.
+ */
 function responder(res: Response, err: unknown): void {
-  if (PlatformError.is(err)) {
-    res.status(err.status).json(err.toResponse());
-    return;
-  }
-  console.error('[crm] error no controlado', err);
-  res.status(500).json({ error: { code: 'INTERNAL', message: 'Error interno' } });
+  if (!PlatformError.is(err)) console.error('[crm] error no controlado', err);
+  responderError(res, err);
 }
 
 /** Envoltura para no repetir el try/catch quince veces. */
@@ -74,7 +58,7 @@ function ruta(manejador: (ctx: TenantContext, req: Request) => Promise<unknown>)
   return (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const ctx = await contextoDe(req);
+        const ctx = await contextoDePeticion(req);
         res.json(await manejador(ctx, req));
       } catch (err) {
         responder(res, err);

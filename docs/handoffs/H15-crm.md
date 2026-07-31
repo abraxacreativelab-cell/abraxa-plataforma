@@ -110,49 +110,46 @@ las rutas HTTP.
 **Le consumen:** H6 (resuelve el contacto de cada webhook) · H8 (tres nodos, cuatro
 disparadores) · H7 (siembra el embudo al terminar el Ritual) · H10 (`form_submitted`).
 
-### El alta del carril es un acto de H0, no de H15 — y por eso el gate del PR sale en rojo
+### El alta del carril es un acto de H0 — y ya está hecha, en `main`
 
-Este carril nació después del mapa, así que tuvo que darse de alta solo — y el archivo del mapa
-no es suyo. Durante la construcción, la entrada de `h15-crm` se listaba a sí misma en sus `paths`
-(`.ownership.json` y `scripts/ownership-gate.test.mjs`) para que el gate aceptara ese primer
-commit. Contra la base de la rama eso era inocuo: el único otro dueño era `h1-fundacion`, que
-`--check-overlap` excluye a propósito.
-
-**El 2026-07-31 dejó de serlo.** El PR #15 (H0) le dio a `h0-integracion` los paths `scripts/**` y
-`.ownership.json`. Con eso, el mapa FUSIONADO dejaba dos archivos con dos dueños concurrentes:
+Este carril nació después del mapa, así que durante la construcción tuvo que darse de alta solo:
+la entrada de `h15-crm` se listaba a sí misma en sus `paths` (`.ownership.json` y
+`scripts/ownership-gate.test.mjs`) para que el gate aceptara el primer commit. Contra la base de
+la rama eso era inocuo —el único otro dueño era `h1-fundacion`, que `--check-overlap` excluye a
+propósito—. **El 2026-07-31 dejó de serlo:** el PR #15 le dio a `h0-integracion` los paths
+`scripts/**` y `.ownership.json`, y el mapa fusionado quedaba con dos archivos con dos dueños
+concurrentes:
 
 ```
-$ node scripts/ownership-gate.mjs --check-overlap     # árbol ya fusionado
+$ node scripts/ownership-gate.mjs --check-overlap     # con los dos paths en h15-crm
 ✖ Archivos con dos dueños concurrentes:
   · .ownership.json                  →  h0-integracion, h15-crm
   · scripts/ownership-gate.test.mjs  →  h0-integracion, h15-crm
 ```
 
-…y el test `H0 no se solapa con ningún carril de construcción` fallaba. Ese gate corre en el PR
-de **los otros catorce carriles**: el daño no era de H15, era de todos. La verificación del §10
+…y con él fallaba el test `H0 no se solapa con ningún carril de construcción`, **que corre en el
+PR de los otros quince carriles**. El daño no era de H15: era de todos. La verificación del §10
 decía «✔» porque se había corrido contra la base vieja de la rama — verde ≠ correcto.
 
-Los dos paths se quitaron. `--check-overlap` y el test de H0 salen en 0 contra el árbol
-fusionado.
+**El arbitraje lo hizo H0 desde `main`, que es donde tenía que hacerse** (PR #16 / commit
+`e404024`): la entrada de `h15-crm` y la cuenta `15 → 16` del test ya están en `main`, escritas
+por su dueño. Consecuencia práctica:
 
-**La consecuencia, asumida a propósito:** el `ownership-gate` de este PR marca esos dos archivos
-como ajenos («Es de `h0-integracion`»). Es la atribución correcta —dar de alta un carril es un
-acto del orquestador, no del carril— y es preferible a la alternativa, que era dejar `main` en
-rojo para los quince después del merge. Son **dos hunks** para que H0 los apruebe al mergear:
+> **Este PR ya NO toca `.ownership.json` ni `scripts/ownership-gate.test.mjs`.** Después de
+> mergear `main`, los dos archivos son idénticos a los de `main` y el gate del PR sale limpio:
+> `✔ Dentro del carril` y `✔ Mapa de propiedad consistente`. Corrido contra el árbol fusionado,
+> no contra la base.
 
-1. `.ownership.json`: la entrada `h15-crm` (sin los dos paths de H0).
-2. `scripts/ownership-gate.test.mjs`: la cuenta `15 → 16` y la línea del lockfile.
-
-**Deuda para H0 (carril `h0-integracion`, no se toca desde aquí):** mientras el gate exija que
-cada carril posea todo lo que su diff toca, ningún carril nuevo podrá darse de alta con el gate
-en verde. El arreglo permanente vive en `scripts/ownership-gate.mjs` y es de H0: que
-`verificarSolapamiento` y `verificarPR` traten `.ownership.json` como el registro compartido que
-es —la misma excepción que ya se le concede a `h1-fundacion`— en vez de como un archivo de
-producto.
+**Deuda para H0 (carril `h0-integracion`, no se toca desde aquí):** el patrón funciona pero exige
+que el orquestador vaya por delante. Mientras el gate exija que cada carril posea todo lo que su
+diff toca, **ningún carril nuevo puede darse de alta solo con el gate en verde**. El arreglo
+permanente vive en `scripts/ownership-gate.mjs` y es de H0: que `verificarSolapamiento` y
+`verificarPR` traten `.ownership.json` como el registro compartido que es —la misma excepción que
+ya se le concede a `h1-fundacion`— en vez de como un archivo de producto.
 
 **Y al mergear:** quitar `"lockfile": true` de `h15-crm` (sólo hacía falta para dar de alta el
 workspace `packages/crm`) y dejar la prueba del lockfile en `['h1-fundacion']` en la misma
-edición, no en dos pasadas.
+edición, no en dos pasadas. Las dos líneas son de `h0-integracion`.
 
 ---
 
@@ -399,16 +396,37 @@ cuando H11 sirva las herramientas de verdad desde `AreasPort` el respaldo deja d
 que probablemente no valga la pena tocarlo. **Anotado por si el orquestador quiere el enlace vivo
 antes de H11.**
 
-### 9.6 Deuda declarada: `proxy-verified.ts` duplicado
+### 9.6 ~~Deuda declarada: `proxy-verified.ts` duplicado~~ — SALDADA (2026-07-31)
 
-`packages/crm/src/http/proxy-verified.ts` es copia byte por byte del de `@abraxa/agents`, que a
-su vez es copia del canónico de H2 (`packages/tenancy/src/middleware/proxy.ts`). Cuando H2
-mergee, los dos se colapsan a `export { proxyVerified } from '@abraxa/tenancy'` y sus pruebas se
-quedan como pruebas de contrato.
-
-La copia existe por la misma razón que la de H3: encadenar el cierre de un agujero de
+La copia existía por la misma razón que la de H3: encadenar el cierre de un agujero de
 autenticación al merge de otro carril es exactamente cómo un agujero llega a producción "porque
 estábamos esperando". Y en un CRM esa puerta es **leer la cartera de clientes de otra empresa**.
+
+Con el PR #16 de H0 el destino cambió y la deuda se pagó aquí mismo:
+
+- La pieza canónica **no** quedó en `@abraxa/tenancy` sino en **`@abraxa/db`** —el único paquete
+  del que dependen los quince carriles—, así que adoptarla no toca ningún `package.json` ni el
+  lockfile.
+- `packages/crm/src/http/proxy-verified.ts` es hoy `export { proxyVerified } from '@abraxa/db';`
+  y su prueba es de **contrato**: la primera aserción es `expect(proxyVerified).toBe(canonico)`,
+  que se pone roja en cuanto alguien vuelva a pegar el cuerpo.
+- `packages/crm/src/routes.ts` ya **no tiene** su propio `contextoDe`. Usa
+  `contextoDePeticion(req)` y `responderError(res, err)` de `@abraxa/db`.
+
+Era la **quinta** copia del mismo resolvedor. **La de aquí no tenía agujero** —comprobaba
+`proxyVerified()` antes de mirar un header, que es justo lo que a H4, H6 y H7 se les escapó— y
+eso se dice tal cual para no inflar el hallazgo. Lo que sí había era **deriva**: la copia
+entregaba el correo sin normalizar a `TenancyPort.contextFor()` (`'Ana@Panaderia.MX'`) mientras
+la pieza canónica lo recorta y lo pasa a minúsculas antes. Hoy da igual porque `contextFor`
+vuelve a normalizar; con otra implementación del port, o con el doble de otro carril, no. Fijado
+en `routes.test.ts` («el correo llega normalizado»).
+
+La evidencia dura del cierre no es una prueba de vitest: es **`npm run lint`**. Con el `main` del
+PR #16, `eslint.config.mjs` marca como error leer `x-user-email`, `x-tenant-slug` o
+`x-proxy-secret` fuera de la pieza canónica. Las versiones anteriores de estos dos archivos daban
+**6 errores** (`routes.ts` 44:22, 49:32, 50:33, 54:31, 54:53 · `http/proxy-verified.ts` 52:39):
+el merge de `main` dejaba el carril en rojo. No hay forma de escribir una sexta copia sin que CI
+lo diga.
 
 ---
 
@@ -438,6 +456,8 @@ Con evidencia, no con "lo probé":
 | 18 | Un grupo de WhatsApp no entra por **ninguna** de las tres puertas | `contacts/service.test.ts`, `identity.test.ts` |
 | 19 | Un trato en dólares se guarda y se pinta en dólares; el tablero **no** suma monedas | `pipeline/service.test.ts` |
 | 20 | Un filtro por etiqueta muy grande se acota y **avisa** que la lista es parcial | `contacts/service.test.ts` |
+| 21 | Un `curl` con `x-user-email` inventado **no** llega a la capa de membresías | `routes.test.ts` · la aserción es `llamadas.length === 0`, no el código HTTP |
+| 22 | El CRM **no** tiene su propio `contextoDe` ni su propia copia del guardia | `routes.test.ts`, `http/proxy-verified.test.ts` · `expect(proxyVerified).toBe(canonico)` |
 
 > **El criterio 14 estuvo mal verificado y por eso se anota aquí.** La primera vez se corrió
 > contra la BASE de la rama, donde el único otro dueño de `.ownership.json` era `h1-fundacion`.

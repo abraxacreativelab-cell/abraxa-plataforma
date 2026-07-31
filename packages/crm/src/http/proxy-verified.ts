@@ -1,60 +1,19 @@
 /**
- * ════════════════════════════════════════════════════════════════════════════
- *  ¿Esta petición viene de verdad del BFF?
- * ════════════════════════════════════════════════════════════════════════════
+ * La deuda que este carril dejó anotada, saldada.
  *
- *   navegador → NextAuth (Google) → BFF verificado server-side → API
- *                                        ↓
- *      inyecta x-user-email VERIFICADO (de la sesión, NUNCA de un header que
- *      mandó el cliente) + x-proxy-secret
+ * Este archivo era la QUINTA copia byte-por-byte del mismo guardia. Nació con
+ * una razón buena —cuando se escribió, `@abraxa/tenancy` no estaba en `main` y
+ * encadenar el cierre de un agujero de autenticación al merge de otro carril es
+ * exactamente cómo un agujero llega a producción "porque estábamos esperando"—
+ * y con la deuda declarada en `docs/handoffs/H15-crm.md` §9.
  *
- * Sin esta comprobación, `x-user-email` es un header como cualquier otro y
- * cualquiera se declara quien quiera con un `curl` — y en un CRM eso es leer
- * la cartera de clientes de otra empresa.
+ * La copia canónica ya no está en tenancy sino en `@abraxa/db` (PR #16), que es
+ * el único paquete del que dependen los quince carriles: adoptarla no exige
+ * tocar ningún `package.json` ni el lockfile. Ver
+ * `packages/db/src/http/proxy-verified.ts`.
  *
- * ── Fail-closed en producción ─────────────────────────────────────────────
- *
- * Sin `PROXY_SECRET` configurado, en producción devuelve `false` y la vía de
- * headers queda CERRADA. Si un deploy pierde la variable —una rotación a
- * medias, un `.env` truncado— el sistema no reabre la suplantación por header:
- * se cae de forma segura.
- *
- * En desarrollo, sin secreto, se permite la vía directa para poder trabajar
- * sin levantar el BFF.
- *
- * Se lee `process.env` directamente y no `env()` de `@abraxa/config` a
- * propósito: `env()` valida TODO el entorno y lanza si falta cualquier otra
- * cosa. Una decisión de seguridad no puede depender de que quince variables
- * ajenas estén bien puestas.
- *
- * ── Por qué hay una copia en este paquete ─────────────────────────────────
- *
- * La copia canónica es de H2 (`packages/tenancy/src/middleware/proxy.ts`) y
- * H3 tiene otra igual por la misma razón: mientras H2 no esté en `main`,
- * `@abraxa/tenancy` existe pero está vacío. Encadenar el cierre de un agujero
- * de autenticación al merge de otro carril es exactamente cómo un agujero
- * llega a producción "porque estábamos esperando".
- *
- * DEUDA DECLARADA: cuando H2 mergee, este archivo se colapsa a
- * `export { proxyVerified } from '@abraxa/tenancy'` y su prueba se queda como
- * prueba de contrato. Anotado en docs/handoffs/H15-crm.md §9.
+ * Se conserva el archivo, y no se borra el módulo, para que nada de fuera tenga
+ * que cambiar de import. Su prueba se quedó como prueba de CONTRATO: afirma que
+ * esto es la MISMA función y no una copia que un día volvió a divergir.
  */
-import { timingSafeEqual } from 'node:crypto';
-import type { Request } from 'express';
-import { HEADER } from '@abraxa/config';
-
-/** `true` sólo si la petición trae el secreto compartido del BFF. */
-export function proxyVerified(req: Pick<Request, 'headers'>): boolean {
-  const secret = process.env.PROXY_SECRET;
-
-  if (!secret) return process.env.NODE_ENV !== 'production';
-
-  const recibido = String(req.headers[HEADER.proxySecret] ?? '');
-  const a = Buffer.from(recibido);
-  const b = Buffer.from(secret);
-
-  // La comparación de longitud va antes porque `timingSafeEqual` lanza si los
-  // buffers difieren en tamaño. La longitud de un secreto no es información
-  // que valga la pena proteger contra un ataque de tiempo.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
+export { proxyVerified } from '@abraxa/db';
