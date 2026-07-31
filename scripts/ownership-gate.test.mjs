@@ -8,6 +8,7 @@ import {
   duenosDe,
   revisarMigracion,
   pathsEfectivos,
+  excepcionVigente,
   carrilDeRama,
   CARRIL_ORQUESTADOR,
 } from './ownership-gate.mjs';
@@ -66,12 +67,8 @@ describe('el mapa de propiedad', () => {
    * `REFERENCES` (H6-inbox.md:110) y H8 dice textualmente "no construyas el
    * CRM" (H8-flows.md:38).
    *
-   * Esta cuenta se actualiza al ALTA de un carril, y sólo entonces. Que sea un
-   * número escrito a mano es a propósito: abrir un carril nuevo tiene que ser
-   * una decisión visible en un diff, no algo que pase solo. Los dos lados de
-   * este merge afirmaban 15 por razones distintas —la rama contaba su propia
-   * alta, main la de H0— y el mapa fusionado tiene 16: quedarse con cualquiera
-   * de los dos lados dejaba `npm test` rojo desde el primer commit en main.
+   * Que sea un número escrito a mano es a propósito: abrir un carril nuevo
+   * tiene que ser una decisión visible en un diff, no algo que pase solo.
    */
   it('tiene las 14 entradas de construcción, más la de H0, más la de H15', () => {
     expect(Object.keys(ownership)).toHaveLength(16);
@@ -122,20 +119,48 @@ describe('el mapa de propiedad', () => {
    * un permiso general justamente para que agregarse a ella sea un cambio
    * visible que alguien tiene que aprobar.
    *
-   * H15 está aquí por una razón mecánica, no por conveniencia: es el único
-   * carril que crea un WORKSPACE nuevo (`packages/crm`), y `npm ci` se niega a
-   * instalar si el lockfile no lo conoce —"Missing: @abraxa/crm@0.1.0 from lock
-   * file"—. Sin esa entrada, CI no llega ni a compilar. El diff es aditivo: dos
-   * nodos del workspace, cero versiones de terceros movidas.
+   * H15 está aquí por una razón mecánica: es el único carril que crea un
+   * WORKSPACE nuevo (`packages/crm`), y `npm ci` se niega a instalar si el
+   * lockfile no lo conoce ("Missing: @abraxa/crm@0.1.0 from lock file"). Sin
+   * esa entrada, CI no llega ni a compilar.
    *
-   * QUITAR `"lockfile": true` de h15-crm en cuanto el carril mergee. Ya no lo
-   * necesita: sólo hacía falta para el commit del alta.
+   * QUITAR `"lockfile": true` de h15-crm en cuanto el carril mergee.
    */
   it('el lockfile sólo lo mueven H1 y quien crea un workspace nuevo', () => {
     const conLockfile = Object.entries(ownership)
       .filter(([, c]) => c.lockfile === true)
       .map(([n]) => n);
     expect(conLockfile.sort()).toEqual(['h1-fundacion', 'h15-crm']);
+  });
+
+  /**
+   * Las leyes del repo y el borde HTTP compartido tienen dueño ÚNICO — sin
+   * apoyarse en que `verificarSolapamiento` excluye a h1-fundacion a mano.
+   *
+   * Un mapa que necesita una excepción para ser consistente no es un mapa
+   * consistente: es uno que todavía no ha fallado.
+   */
+  it('las leyes del repo son de H0 y de nadie más', () => {
+    for (const archivo of [
+      '.ownership.json',
+      'CONTRIBUTING.md',
+      'eslint.config.mjs',
+      'scripts/ownership-gate.mjs',
+      'scripts/ownership-gate.test.mjs',
+    ]) {
+      expect(duenosDe(archivo, ownership), archivo).toEqual([CARRIL_ORQUESTADOR]);
+    }
+  });
+
+  it('el borde HTTP compartido es de H0; el resto de packages/db sigue siendo de H1', () => {
+    expect(duenosDe('packages/db/src/http/tenant-context.ts', ownership)).toEqual([
+      CARRIL_ORQUESTADOR,
+    ]);
+    expect(duenosDe('packages/db/src/http/proxy-verified.ts', ownership)).toEqual([
+      CARRIL_ORQUESTADOR,
+    ]);
+    expect(duenosDe('packages/db/src/tenant-db.ts', ownership)).toEqual(['h1-fundacion']);
+    expect(duenosDe('packages/db/ports.ts', ownership)).toEqual(['h1-fundacion']);
   });
 
   it('un archivo ajeno se atribuye a su dueño real', () => {
@@ -154,12 +179,20 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
     expect(conExcepcion).toEqual([CARRIL_ORQUESTADOR]);
   });
 
-  it('viene con fecha, PR y razón escrita, no sólo con rutas', () => {
+  it('viene con fecha, vencimiento, PR y razón escrita, no sólo con rutas', () => {
     const e = h0.excepcionTransversal;
     expect(e.fecha).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(e.venceEn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(e.venceEn > e.fecha, 'vence después de que se concede').toBe(true);
     expect(e.pr).toBeTypeOf('string');
     expect(e.razon.length).toBeGreaterThan(40);
     expect(e.paths.length).toBeGreaterThan(0);
+  });
+
+  it('la que está escrita hoy en el mapa sigue vigente', () => {
+    // Si esto se pone rojo, la excepción caducó: retírala de .ownership.json.
+    // No es una prueba frágil, es el recordatorio con dientes.
+    expect(excepcionVigente(h0.excepcionTransversal).vigente).toBe(true);
   });
 
   it('es acotada: rutas explícitas, nunca el paquete entero de otro', () => {
@@ -173,9 +206,12 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
     const globs = pathsEfectivos(CARRIL_ORQUESTADOR, h0);
     expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(true);
     expect(perteneceA('packages/agents/src/http/proxy-verified.ts', globs)).toBe(true);
-    // El resto del árbol de H3 sigue cerrado para H0.
+    expect(perteneceA('packages/vault/src/http/context.ts', globs)).toBe(true);
+    expect(perteneceA('packages/tenancy/src/middleware/proxy.ts', globs)).toBe(true);
+    // El resto de los árboles ajenos sigue cerrado para H0.
     expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
     expect(perteneceA('packages/vault/src/resolver.ts', globs)).toBe(false);
+    expect(perteneceA('packages/tenancy/src/middleware/tenant.ts', globs)).toBe(false);
   });
 
   it('un carril de construcción NO puede concederse una', () => {
@@ -192,6 +228,66 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
   it('la excepción NO transfiere propiedad: el dueño real no cambia', () => {
     // Es lo que hace que `--check-overlap` siga siendo verdad.
     expect(duenosDe('packages/agents/src/routes.ts', ownership)).toEqual(['h3-agents']);
+    expect(duenosDe('packages/vault/src/http/context.ts', ownership)).toEqual(['h4-vault']);
+    expect(duenosDe('packages/tenancy/src/middleware/proxy.ts', ownership)).toEqual(['h2-tenancy']);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// El candado #6: la excepción caduca sola.
+//
+// El PR #12 se concedió una excepción, la usó, mergeó — y la dejó escrita. Un
+// permiso temporal que nadie retira es un permiso permanente, y "acuérdate de
+// borrarlo" no es un mecanismo. Ahora lo es.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('excepcionVigente — el permiso que se retira solo', () => {
+  const HOY = new Date('2026-08-01T12:00:00Z');
+  const viva = { venceEn: '2026-08-14', paths: ['packages/x/y.ts'] };
+
+  it('vigente mientras no llegue su fecha', () => {
+    expect(excepcionVigente(viva, HOY).vigente).toBe(true);
+  });
+
+  it('el último día todavía vale (vence AL final del día)', () => {
+    expect(excepcionVigente({ ...viva, venceEn: '2026-08-01' }, HOY).vigente).toBe(true);
+  });
+
+  it('al día siguiente ya no', () => {
+    const r = excepcionVigente({ ...viva, venceEn: '2026-07-31' }, HOY);
+    expect(r.vigente).toBe(false);
+    expect(r.motivo).toContain('venció');
+  });
+
+  it('sin `venceEn` no vale: falla CERRADO', () => {
+    // El caso exacto del PR #12. Un permiso sin caducidad no se honra.
+    const r = excepcionVigente({ paths: ['packages/x/y.ts'] }, HOY);
+    expect(r.vigente).toBe(false);
+    expect(r.motivo).toContain('venceEn');
+  });
+
+  it('sin excepción tampoco, y sin reventar', () => {
+    expect(excepcionVigente(undefined, HOY).vigente).toBe(false);
+    expect(excepcionVigente(null, HOY).vigente).toBe(false);
+  });
+
+  it('una excepción vencida NO amplía los paths de H0', () => {
+    const cfg = {
+      paths: ['docs/**'],
+      excepcionTransversal: { venceEn: '2026-07-01', paths: ['packages/agents/src/routes.ts'] },
+    };
+    const globs = pathsEfectivos(CARRIL_ORQUESTADOR, cfg, HOY);
+    expect(globs).toEqual(['docs/**']);
+    expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(false);
+  });
+
+  it('una vigente sí, y sólo sobre sus rutas', () => {
+    const cfg = {
+      paths: ['docs/**'],
+      excepcionTransversal: { venceEn: '2026-08-14', paths: ['packages/agents/src/routes.ts'] },
+    };
+    const globs = pathsEfectivos(CARRIL_ORQUESTADOR, cfg, HOY);
+    expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(true);
+    expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
   });
 });
 
