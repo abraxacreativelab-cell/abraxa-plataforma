@@ -55,11 +55,13 @@ export function createWhatsAppDriver(opts: OpcionesDriverWhatsApp = {}): DriverC
     displayAddress: (address) => address,
 
     async send({ channelId, address, body, media }) {
-      const instancia = await instanciaDe(channelId);
+      // El teléfono primero: si no lo es, no hay por qué ir a la base a leer el
+      // canal ni abrir una conexión con Evolution.
       const destino = normalizarTelefono(address);
       if (!destino) {
         throw new PlatformError('VALIDATION', `Teléfono inválido: "${address}"`);
       }
+      const instancia = await instanciaDe(channelId);
 
       const primeraMedia = media?.[0];
       const r = primeraMedia

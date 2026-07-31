@@ -323,6 +323,12 @@ export async function asegurarHilo(
       contact_name: datos.contactName ?? null,
       status: 'open',
       ai_enabled: true,
+      // Explícitos aunque la migración los ponga por default: un hilo recién
+      // creado tiene que salir de aquí con `assigned_to` en NULL de forma
+      // observable, porque de ese campo cuelga la regla que no se negocia.
+      assigned_to: null,
+      ai_paused_until: null,
+      unread: 0,
     })
     .select()
     .single();

@@ -25,8 +25,17 @@ import type { ChannelRow, MessageRow, ThreadRow } from './types';
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
 
+/**
+ * Un canal — y SU FILA en la base.
+ *
+ * Las dos cosas, porque el webhook trae el canal como objeto pero la respuesta
+ * del agente sale por `enviarEnHilo`, que vuelve a LEER la fila para saber por
+ * qué driver despacharla. Un canal que sólo existe como objeto de JavaScript
+ * hace que el puente falle con `NOT_FOUND` — que es exactamente lo que pasaría
+ * en producción con una fila borrada, y no lo que estas pruebas quieren medir.
+ */
 function canal(sobre: Partial<ChannelRow> = {}): ChannelRow {
-  return {
+  const fila: ChannelRow = {
     id: 'canal-a',
     tenant_id: TENANT_A,
     type: 'sms',
@@ -43,6 +52,10 @@ function canal(sobre: Partial<ChannelRow> = {}): ChannelRow {
     updated_at: '2026-07-01T00:00:00Z',
     ...sobre,
   };
+
+  const otras = db.tabla('channels').filter((f) => f.id !== fila.id);
+  db.sembrar('channels', [...otras, fila as unknown as Record<string, unknown>]);
+  return fila;
 }
 
 function sobreCon(mensajes: Array<Record<string, unknown>>, channelId = 'canal-a'): {

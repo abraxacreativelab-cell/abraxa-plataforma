@@ -16,6 +16,7 @@
  *  mano.
  */
 import type { ChannelType, InboundMessage } from '@abraxa/db';
+import type { CorredorDeAgentes } from '../bridge/responder';
 import type { DriverCompleto, EventoCanal } from '../drivers/types';
 import { leerSobre } from '../drivers/types';
 
@@ -128,7 +129,7 @@ export function createFakeDriver(opts: OpcionesDriverFalso = {}): DriverFalso {
 export function createFakeAgents(
   responder: (input: string) => string | Promise<string> = () => 'respuesta del agente',
 ): {
-  run: DriverAgentes['run'];
+  run: CorredorDeAgentes['run'];
   llamadas: Array<{ role: string; input: string; threadId?: string | undefined }>;
 } {
   const llamadas: Array<{ role: string; input: string; threadId?: string | undefined }> = [];
@@ -152,5 +153,3 @@ export function createFakeAgents(
     },
   };
 }
-
-type DriverAgentes = import('../bridge/responder').CorredorDeAgentes;
