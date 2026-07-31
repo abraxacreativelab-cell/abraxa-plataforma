@@ -14,7 +14,7 @@ import { env, HEADER, isProduction } from '@abraxa/config';
 import { PlatformError, usePort } from '@abraxa/db';
 import { z } from 'zod';
 import { PLAN_CATALOG, PLAN_DE_PAGO, PLAN_POR_DEFECTO, MONEDA, MONTO } from './catalog';
-import { gateway } from './gateway';
+import { gateway, type EventoDeStripe } from './gateway';
 import { enlaceDeEntrada, enviarBienvenida } from './correo';
 import { altaDesdeSesion, type ResultadoDeAlta } from './service';
 import { marcarError, marcarProcesado, registrarEvento, slugOcupado } from './store';
@@ -126,7 +126,7 @@ router.post(
     // el `event.id` de un payload sin firma válida no es un dato confiable, y
     // escribirlo dejaría que cualquiera llene la tabla desde fuera. Va a los
     // logs, que es donde se investiga un ataque.
-    let evento;
+    let evento: EventoDeStripe;
     try {
       evento = gateway().verificarEvento(raw, req.header('stripe-signature') ?? '');
     } catch (e) {

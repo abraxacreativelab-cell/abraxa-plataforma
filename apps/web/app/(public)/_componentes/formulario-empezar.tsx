@@ -43,6 +43,13 @@ export function FormularioEmpezar() {
   const [enviando, setEnviando] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // La landing pinta este formulario DOS veces (arriba y en el precio). Con
+  // ids fijos habría dos campos con el mismo id en la misma página: los <label>
+  // apuntarían al primer input y picar el segundo rótulo movería el foco a un
+  // campo que no se ve. `useId` da un id único por instancia.
+  const idNombre = React.useId();
+  const idPista = React.useId();
+
   const slug = vistaPreviaSlug(nombre);
   const listo = nombre.trim().length >= 2;
 
@@ -87,13 +94,13 @@ export function FormularioEmpezar() {
 
   return (
     <form onSubmit={enviar} className="flex w-full flex-col gap-3" noValidate>
-      <label htmlFor="negocio" className="text-sm text-muted-foreground">
+      <label htmlFor={idNombre} className="text-sm text-muted-foreground">
         ¿Cómo se llama tu negocio?
       </label>
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <Input
-          id="negocio"
+          id={idNombre}
           name="negocio"
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
@@ -101,7 +108,7 @@ export function FormularioEmpezar() {
           autoComplete="organization"
           maxLength={120}
           disabled={enviando}
-          aria-describedby="pista-slug"
+          aria-describedby={idPista}
           className="h-11 flex-1 text-base"
         />
         <Button type="submit" size="lg" disabled={!listo || enviando} className="h-11 sm:w-auto">
@@ -109,7 +116,7 @@ export function FormularioEmpezar() {
         </Button>
       </div>
 
-      <p id="pista-slug" className="min-h-5 text-sm text-muted-foreground">
+      <p id={idPista} className="min-h-5 text-sm text-muted-foreground">
         {slug ? (
           <>
             Tu espacio va a ser{' '}
