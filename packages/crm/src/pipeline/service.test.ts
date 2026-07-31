@@ -177,3 +177,70 @@ describe('estadisticasEmbudo', () => {
     expect(propuesta?.amount).toBe(1000);
   });
 });
+
+/**
+ * La moneda: el mismo defecto que la auditoría encontró en H4 (un monto en USD
+ * guardado como MXN), sólo que aquí el usuario ni siquiera podía declararla.
+ */
+describe('moneda', () => {
+  it('un trato en dólares se guarda en dólares, no en pesos', async () => {
+    await sembrarEmbudoPorDefecto(A);
+    const { contactId } = await crearContacto(A, { displayName: 'Cliente gringo' });
+
+    await moverEtapa(A, { contactId, stage: 'propuesta', amount: 5000, currency: 'usd' });
+
+    const contacto = await leerContacto(A, contactId);
+    expect(contacto?.placements[0]?.amount).toBe(5000);
+    expect(contacto?.placements[0]?.currency).toBe('USD');
+  });
+
+  it('sin moneda no se toca la que ya tenía la fila', async () => {
+    await sembrarEmbudoPorDefecto(A);
+    const { contactId } = await crearContacto(A, { displayName: 'Cliente' });
+    await moverEtapa(A, { contactId, stage: 'propuesta', amount: 5000, currency: 'USD' });
+    await moverEtapa(A, { contactId, stage: 'negociacion', amount: 6000 });
+
+    expect((await leerContacto(A, contactId))?.placements[0]?.currency).toBe('USD');
+  });
+
+  it('una moneda que no es ISO-4217 se rechaza en vez de guardarse', async () => {
+    await sembrarEmbudoPorDefecto(A);
+    const { contactId } = await crearContacto(A, { displayName: 'Cliente' });
+    await expect(
+      moverEtapa(A, { contactId, stage: 'propuesta', amount: 1, currency: 'pesos' }),
+    ).rejects.toThrow(PlatformError);
+  });
+
+  it('el tablero NO suma monedas distintas: las desglosa', async () => {
+    await sembrarEmbudoPorDefecto(A);
+    const mx = await crearContacto(A, { displayName: 'MX' });
+    const us = await crearContacto(A, { displayName: 'US' });
+
+    await moverEtapa(A, { contactId: mx.contactId, stage: 'propuesta', amount: 1000 });
+    await moverEtapa(A, {
+      contactId: us.contactId,
+      stage: 'propuesta',
+      amount: 1000,
+      currency: 'USD',
+    });
+
+    const stats = await estadisticasEmbudo(A);
+    const propuesta = stats.stages.find((e) => e.slug === 'propuesta');
+
+    // Antes esto era `amount: 2000` — mil dólares más mil pesos igual a dos mil.
+    expect(propuesta?.amounts).toEqual({ MXN: 1000, USD: 1000 });
+    // `amount` es SÓLO el de la moneda que se va a pintar, nunca una mezcla.
+    expect(propuesta?.amount).toBe(propuesta?.amounts?.[stats.currency]);
+    expect(propuesta?.amount).toBe(1000);
+  });
+});
+
+describe('moverEtapa exige que el contacto exista', () => {
+  it('un id que no existe es 404 y no deja fila en el embudo', async () => {
+    await sembrarEmbudoPorDefecto(A);
+    await expect(
+      moverEtapa(A, { contactId: 'uuid-que-no-existe', stage: 'propuesta' }),
+    ).rejects.toThrow(PlatformError);
+    expect(fake.tabla('contact_stages')).toHaveLength(0);
+  });
+});

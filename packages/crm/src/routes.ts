@@ -211,12 +211,18 @@ router.post(
 router.post(
   '/contacts/:id/stage',
   ruta((ctx, req) => {
-    const b = cuerpo<{ stage: string; pipeline?: string; amount?: number }>(req);
+    const b = cuerpo<{
+      stage: string;
+      pipeline?: string;
+      amount?: number;
+      currency?: string;
+    }>(req);
     return useContacts().moveStage(ctx, {
       contactId: String(req.params.id),
       stage: b.stage,
       pipeline: b.pipeline,
       amount: b.amount,
+      currency: b.currency,
       actor: ctx.userEmail ?? undefined,
     });
   }),

@@ -14,14 +14,40 @@ import { Icon } from '@abraxa/ui';
 import { dinero } from './formato';
 import type { EtapaConteo } from './tipos';
 
-export function Tablero({ etapas }: { etapas: EtapaConteo[] }) {
+/**
+ * `moneda` llega desde `pipelineStats`, derivada de los datos. No se asume
+ * 'MXN': un embudo cotizado en dólares se pintaba como pesos, y las sumas
+ * mezclaban monedas. Cuando una etapa tiene dinero en MÁS de una moneda, se
+ * listan todas — un solo número ahí sería mentira.
+ */
+export function Tablero({ etapas, moneda = 'MXN' }: { etapas: EtapaConteo[]; moneda?: string }) {
   const abiertas = etapas.filter((e) => e.slug !== 'ganado' && e.slug !== 'perdido');
   const ganado = etapas.find((e) => e.slug === 'ganado');
   const perdido = etapas.find((e) => e.slug === 'perdido');
 
   const maximo = Math.max(1, ...abiertas.map((e) => e.count));
-  const enJuego = abiertas.reduce((s, e) => s + e.amount, 0);
   const contactosAbiertos = abiertas.reduce((s, e) => s + e.count, 0);
+
+  /* El total en juego, por moneda. Sumar a través de monedas produce un número
+     que no significa nada; aquí simplemente no se puede escribir. */
+  const enJuegoPorMoneda = new Map<string, number>();
+  for (const e of abiertas) {
+    const desglose = e.amounts ?? (e.amount ? { [moneda]: e.amount } : {});
+    for (const [m, v] of Object.entries(desglose)) {
+      if (v) enJuegoPorMoneda.set(m, (enJuegoPorMoneda.get(m) ?? 0) + v);
+    }
+  }
+  const enJuego = [...enJuegoPorMoneda.entries()].sort((a, b) => b[1] - a[1]);
+
+  /** Lo que se imprime en una celda: una moneda o varias, nunca una suma falsa. */
+  const montoDe = (e: EtapaConteo): string => {
+    const desglose = e.amounts ?? (e.amount ? { [moneda]: e.amount } : {});
+    return Object.entries(desglose)
+      .filter(([, v]) => v)
+      .sort((a, b) => b[1] - a[1])
+      .map(([m, v]) => dinero(v, m))
+      .join(' · ');
+  };
 
   return (
     <section className="rounded-lg border border-border bg-card/40 p-5">
@@ -31,12 +57,12 @@ export function Tablero({ etapas }: { etapas: EtapaConteo[] }) {
         </h2>
         <p className="text-xs text-muted-foreground/70">
           <span className="tabular text-foreground">{contactosAbiertos}</span> en juego
-          {enJuego > 0 && (
-            <>
+          {enJuego.map(([m, v]) => (
+            <span key={m}>
               {' · '}
-              <span className="tabular text-foreground">{dinero(enJuego)}</span>
-            </>
-          )}
+              <span className="tabular text-foreground">{dinero(v, m)}</span>
+            </span>
+          ))}
         </p>
       </header>
 
@@ -56,7 +82,7 @@ export function Tablero({ etapas }: { etapas: EtapaConteo[] }) {
               {e.count}
             </span>
             <span className="tabular hidden w-24 shrink-0 text-right text-xs text-muted-foreground/70 sm:block">
-              {e.amount > 0 ? dinero(e.amount) : ''}
+              {montoDe(e)}
             </span>
           </li>
         ))}
@@ -68,7 +94,7 @@ export function Tablero({ etapas }: { etapas: EtapaConteo[] }) {
             <p className="flex items-center gap-2 text-xs text-[hsl(var(--color-success-fg))]">
               <Icon name="check" className="h-3.5 w-3.5" />
               <span className="tabular">{ganado.count}</span> ganados
-              {ganado.amount > 0 && <span className="tabular">· {dinero(ganado.amount)}</span>}
+              {montoDe(ganado) && <span className="tabular">· {montoDe(ganado)}</span>}
             </p>
           )}
           {perdido && (

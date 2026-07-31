@@ -1,6 +1,6 @@
 export const meta = {
   name: '@abraxa/vault',
   handoff: 'H4',
-  /** Lo pone en `true` H4 cuando el paquete ya hace su trabajo de verdad. */
-  ready: false,
+  /** La bóveda ya resuelve, inyecta, ingiere y detecta huecos. */
+  ready: true,
 } as const;

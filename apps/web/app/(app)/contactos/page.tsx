@@ -34,11 +34,22 @@ export default async function Page() {
       </header>
 
       <div className="space-y-8">
-        {embudo.estado === 'datos' && <Tablero etapas={embudo.datos.stages} />}
+        {embudo.estado === 'datos' && (
+          <Tablero etapas={embudo.datos.stages} moneda={embudo.datos.currency} />
+        )}
         {embudo.estado === 'error' && <LoadError failure={embudo.falla} />}
 
         {contactos.estado === 'datos' && (
-          <Lista contactos={contactos.datos.contacts} ahora={ahora} />
+          <>
+            {contactos.datos.filterTruncated && (
+              <p className="rounded-md border border-border bg-card/40 px-4 py-3 text-xs text-muted-foreground">
+                El filtro tocó más contactos de los que caben en una consulta: esta lista está
+                <strong className="text-foreground"> incompleta</strong>. Afina el filtro o usa la
+                búsqueda.
+              </p>
+            )}
+            <Lista contactos={contactos.datos.contacts} ahora={ahora} />
+          </>
         )}
         {contactos.estado === 'error' && <LoadError failure={contactos.falla} />}
         {contactos.estado === 'sin-cablear' && <SinCablear motivo={contactos.motivo} />}

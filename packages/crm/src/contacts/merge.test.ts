@@ -215,3 +215,59 @@ describe('detectarDuplicados', () => {
     expect(fake.tabla('contacts').filter((c) => c.merged_into)).toHaveLength(0);
   });
 });
+
+/**
+ * Lo que la fusión destruía sin dejar rastro (auditoría del PR #9).
+ *
+ * La decisión de negocio no cambia: si el ganador ya ocupa ese embudo, se
+ * queda donde está. Lo que cambia es que la posición descartada —y su monto—
+ * dejan de evaporarse.
+ */
+describe('fusionar no evapora dinero', () => {
+  it('guarda la posición descartada y su monto en la bitácora y en la ficha', async () => {
+    await sembrarEmbudoPorDefecto(A);
+
+    // A ("Santiago", por WhatsApp) va en Negociación con 250,000.
+    const perdedor = await crearContacto(A, { displayName: 'Santiago' });
+    await moverEtapa(A, { contactId: perdedor.contactId, stage: 'negociacion', amount: 250000 });
+
+    // B ("Santiago Alcalá", por el formulario) está en Nuevo, sin monto.
+    const ganador = await crearContacto(A, { displayName: 'Santiago Alcalá' });
+    await moverEtapa(A, { contactId: ganador.contactId, stage: 'nuevo' });
+
+    await fusionar(A, { winnerId: ganador.contactId, loserId: perdedor.contactId });
+
+    // El criterio no cambió: al ganador NO se le retrocede.
+    const vivo = await leerContacto(A, ganador.contactId);
+    expect(vivo?.placements[0]?.stageSlug).toBe('nuevo');
+
+    // Pero los 250,000 quedaron anotados, con su etapa.
+    const bitacora = fake.tabla('contact_merges')[0];
+    const descartadas = (bitacora?.payload as { discardedPlacements?: Array<{ amount: unknown }> })
+      ?.discardedPlacements;
+    expect(descartadas).toHaveLength(1);
+    expect(Number(descartadas?.[0]?.amount)).toBe(250000);
+
+    // Y el emprendedor puede leerlo donde va a buscarlo: en la ficha.
+    const evento = fake
+      .tabla('contact_events')
+      .find((e) => e.contact_id === ganador.contactId && e.type === 'merged');
+    expect(String(evento?.summary)).toMatch(/Se descartó su posición/);
+    expect(String(evento?.summary)).toMatch(/250,000/);
+  });
+
+  it('sin posiciones descartadas el resumen no inventa nada', async () => {
+    const g = await crearContacto(A, { displayName: 'Bueno' });
+    const p = await crearContacto(A, { displayName: 'Duplicado' });
+    await fusionar(A, { winnerId: g.contactId, loserId: p.contactId });
+
+    const evento = fake
+      .tabla('contact_events')
+      .find((e) => e.contact_id === g.contactId && e.type === 'merged');
+    expect(String(evento?.summary)).not.toMatch(/descartó/);
+    const bitacora = fake.tabla('contact_merges')[0];
+    expect(
+      (bitacora?.payload as { discardedPlacements?: unknown[] })?.discardedPlacements,
+    ).toHaveLength(0);
+  });
+});

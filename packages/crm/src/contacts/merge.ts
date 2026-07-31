@@ -30,7 +30,7 @@
 import { PlatformError } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import type { FilaContacto, FilaEtiqueta, FilaIdentidad, FilaPosicion } from '../types';
-import { ahora, db, esDuplicado, fallo, lista, sinAcentos } from '../store';
+import { aNumero, ahora, db, esDuplicado, fallo, lista, sinAcentos } from '../store';
 import { colaTelefonica } from '../identity';
 import { registrarEvento } from '../timeline/service';
 import { seguirFusion } from './service';
@@ -136,6 +136,19 @@ export async function fusionar(
   ) as unknown as Array<{ pipeline_id: string }>;
   const embudosOcupados = new Set(delGanador.map((p) => p.pipeline_id));
 
+  /* Las que se van a DESCARTAR: el perdedor estaba en un embudo que el ganador
+     ya ocupa. La decisión de no mover al ganador es correcta y no cambia aquí
+     —retrocederlo en el embudo sin que nadie lo pidiera sería peor—, pero el
+     `delete` de abajo se llevaba la posición Y SU MONTO sin dejar rastro: ni
+     `payload.loser` (que es la fila de `contacts`, sin `stage_id` ni `amount`)
+     ni el evento `merged` los guardaban. Un trato de 250,000 en Negociación
+     desaparecía del tablero entre dos recargas y nadie podía decir de qué
+     etapa salió. Y "deshacer la fusión poniendo `merged_into = NULL`" —lo que
+     promete el handoff §6.2— devolvía un contacto sin embudo.
+
+     No cambia el criterio de negocio: sólo deja de perder la información. */
+  const descartadas = posiciones.filter((p) => embudosOcupados.has(p.pipeline_id));
+
   for (const pos of posiciones) {
     /* Si el ganador YA está en ese embudo, se queda donde está: la etapa del
        ganador es la que el emprendedor eligió al fusionar hacia él. Mover al
@@ -167,7 +180,14 @@ export async function fusionar(
     winner_id: winnerId,
     loser_id: loserId,
     merged_by: i.actor ?? null,
-    payload: { loser: perdedor, movedIdentities: movidas, movedEvents: movidosEventos },
+    payload: {
+      loser: perdedor,
+      movedIdentities: movidas,
+      movedEvents: movidosEventos,
+      // Lo único que la fusión destruye de verdad. Sin esto, "la bitácora
+      // guarda qué se movió" era falso justo para el dato que cuesta dinero.
+      discardedPlacements: descartadas,
+    },
   });
   if (bitacora.error) throw fallo(bitacora.error, 'registrar la fusión');
 
@@ -193,12 +213,75 @@ export async function fusionar(
   await registrarEvento(ctx, {
     contactId: winnerId,
     type: 'merged',
-    summary: `Se fusionó "${perdedor.display_name ?? loserId}" en este contacto`,
-    payload: { loserId, movedIdentities: movidas, movedEvents: movidosEventos },
+    summary:
+      `Se fusionó "${perdedor.display_name ?? loserId}" en este contacto` +
+      (await resumenDescartes(ctx, descartadas)),
+    payload: {
+      loserId,
+      movedIdentities: movidas,
+      movedEvents: movidosEventos,
+      discardedPlacements: descartadas,
+    },
     actor: i.actor ?? 'system',
   });
 
   return { winnerId, movedIdentities: movidas, movedEvents: movidosEventos };
+}
+
+/**
+ * La frase que se le agrega al evento `merged` cuando la fusión descartó una
+ * posición de embudo.
+ *
+ * Se escribe en la ficha y no sólo en `contact_merges` porque la ficha es donde
+ * el emprendedor va a buscar por qué su tablero bajó de 250,000 a 0. Una
+ * bitácora que hay que consultar por SQL no es una respuesta para él.
+ *
+ * Nunca lanza: es texto de bitácora. Si el catálogo de embudos no se puede
+ * leer, se cae al identificador — decir menos es aceptable, tumbar la fusión ya
+ * consumada no lo es.
+ */
+async function resumenDescartes(
+  ctx: TenantContext,
+  descartadas: FilaPosicion[],
+): Promise<string> {
+  if (descartadas.length === 0) return '';
+
+  let nombres = new Map<string, string>();
+  let etapas = new Map<string, string>();
+  try {
+    const [e, s] = await Promise.all([
+      db(ctx).from('pipelines').select('id, name'),
+      db(ctx).from('pipeline_stages').select('id, name'),
+    ]);
+    nombres = new Map(
+      (lista(e, 'embudos para la bitácora') as unknown as Array<{ id: string; name: string }>).map(
+        (f) => [f.id, f.name],
+      ),
+    );
+    etapas = new Map(
+      (lista(s, 'etapas para la bitácora') as unknown as Array<{ id: string; name: string }>).map(
+        (f) => [f.id, f.name],
+      ),
+    );
+  } catch {
+    /* se sigue con los ids */
+  }
+
+  const piezas = descartadas.map((p) => {
+    const embudo = nombres.get(p.pipeline_id) ?? p.pipeline_id;
+    const etapa = etapas.get(p.stage_id) ?? p.stage_id;
+    const monto = aNumero(p.amount);
+    const dinero =
+      monto === null || monto === 0
+        ? ''
+        : ` · ${monto.toLocaleString('es-MX', { style: 'currency', currency: p.currency ?? 'MXN', maximumFractionDigits: 0 })}`;
+    return `${embudo} · ${etapa}${dinero}`;
+  });
+
+  return (
+    `. Se descartó su posición en ${piezas.join('; ')} — el ganador ya estaba ` +
+    'en ese embudo y no se le retrocede. Queda en la bitácora de la fusión.'
+  );
 }
 
 async function leerFila(ctx: TenantContext, id: string): Promise<FilaContacto> {

@@ -44,6 +44,13 @@ const CICLOS: ReadonlySet<string> = new Set([
 /** Profundidad máxima de la cadena de fusiones antes de gritar. */
 const MAX_SALTOS_FUSION = 20;
 
+/**
+ * Cuántos ids como máximo se resuelven en el primer paso de un filtro por
+ * etiqueta o por etapa antes de que la URL de PostgREST reviente. 1000 UUIDs
+ * son ~40 KB de query string; nginx corta muy antes.
+ */
+const TOPE_FILTRO = 1000;
+
 // ════════════════════════════════════════════════════════════════════════════
 // Traducción fila → port
 // ════════════════════════════════════════════════════════════════════════════
@@ -228,29 +235,54 @@ export async function listarContactos(
 
   /* Filtrar por etapa o por etiqueta obliga a resolver primero QUÉ contactos
      cumplen, porque viven en otra tabla. Se hace en dos pasos y no con un
-     `select` embebido para que la consulta siga siendo legible y probable. */
+     `select` embebido para que la consulta siga siendo legible y probable.
+
+     ── El tope, y por qué no se trunca callando ────────────────────────────
+     El segundo paso mete los ids en `.in('id', [...])`, que supabase-js
+     serializa como query string. 600 UUIDs son ~24 KB de URL; PostgREST detrás
+     de nginx corta las cabeceras muy por debajo de eso
+     (`large_client_header_buffers` son 8 KB por defecto), así que la pantalla
+     devolvía un 414 y el emprendedor veía un error genérico de red en vez de
+     su lista. En pruebas no aparecía porque un doble en memoria no tiene URL
+     que desbordar.
+
+     Se acota, y cuando el tope se alcanza se DICE (`filterTruncated`).
+     Truncar en silencio cambiaría un error visible por un dato falso, que es
+     peor. */
   let idsPermitidos: string[] | null = null;
+  let filtroTruncado = false;
 
   if (i.tag) {
     const filas = lista(
-      await db(ctx).from('contact_tags').select('contact_id').eq('tag', i.tag),
+      await db(ctx)
+        .from('contact_tags')
+        .select('contact_id')
+        .eq('tag', i.tag)
+        .limit(TOPE_FILTRO + 1),
       'contactos por etiqueta',
     ) as unknown as Array<{ contact_id: string }>;
-    idsPermitidos = filas.map((f) => f.contact_id);
+    if (filas.length > TOPE_FILTRO) filtroTruncado = true;
+    idsPermitidos = filas.slice(0, TOPE_FILTRO).map((f) => f.contact_id);
   }
 
   if (i.stageId || i.pipelineId) {
-    let q = db(ctx).from('contact_stages').select('contact_id');
+    let q = db(ctx)
+      .from('contact_stages')
+      .select('contact_id')
+      .limit(TOPE_FILTRO + 1);
     if (i.stageId) q = q.eq('stage_id', i.stageId);
     if (i.pipelineId) q = q.eq('pipeline_id', i.pipelineId);
     const filas = lista(await q, 'contactos por etapa') as unknown as Array<{ contact_id: string }>;
-    const porEtapa = new Set(filas.map((f) => f.contact_id));
+    if (filas.length > TOPE_FILTRO) filtroTruncado = true;
+    const porEtapa = new Set(filas.slice(0, TOPE_FILTRO).map((f) => f.contact_id));
     idsPermitidos =
       idsPermitidos === null ? [...porEtapa] : idsPermitidos.filter((id) => porEtapa.has(id));
   }
 
   // Un filtro que no dejó a nadie: la respuesta es vacía, no "todos".
-  if (idsPermitidos !== null && idsPermitidos.length === 0) return { contacts: [], total: 0 };
+  if (idsPermitidos !== null && idsPermitidos.length === 0) {
+    return { contacts: [], total: 0, ...(filtroTruncado ? { filterTruncated: true } : {}) };
+  }
 
   let q = db(ctx).from('contacts').select('*', { count: 'exact' });
 
@@ -280,6 +312,7 @@ export async function listarContactos(
       return aContacto(f, p.identities, p.tags, p.placements);
     }),
     total: r.count ?? filas.length,
+    ...(filtroTruncado ? { filterTruncated: true } : {}),
   };
 }
 
@@ -538,10 +571,34 @@ export async function crearContacto(
 
   const contactId = await insertarContacto(ctx, i);
 
-  const yaHayPrincipal = new Set<string>();
-  for (const ident of identidades) {
-    const principal = ident.isPrimary || !yaHayPrincipal.has(ident.channel);
-    if (principal) yaHayPrincipal.add(ident.channel);
+  /* Cuál es la principal de cada canal se decide ANTES de escribir nada, no
+     sobre la marcha.
+
+     El índice parcial `(tenant_id, contact_id, channel) WHERE is_primary` de
+     120 admite UNA sola. Calcularlo dentro del bucle con
+     `ident.isPrimary || !yaHayPrincipal.has(canal)` mandaba dos identidades
+     marcadas `isPrimary: true` del mismo canal —"una persona con dos
+     teléfonos", el caso de la portada de este carril— con `is_primary: true`
+     las dos: la segunda chocaba con 23505 y el `catch` de abajo la descartaba
+     anotando "ya pertenece a otro contacto", que era FALSO. El número se
+     perdía, la operación devolvía 200 y la ficha mandaba a buscar un duplicado
+     inexistente.
+
+     La regla: gana la primera del canal que venga marcada; si ninguna viene
+     marcada, la primera del canal. Las demás entran como secundarias, que es
+     el dato correcto y no una pérdida. */
+  const principalDelCanal = new Map<string, number>();
+  identidades.forEach((ident, indice) => {
+    const elegida = principalDelCanal.get(ident.channel);
+    if (elegida === undefined) {
+      principalDelCanal.set(ident.channel, indice);
+    } else if (ident.isPrimary && !identidades[elegida]?.isPrimary) {
+      principalDelCanal.set(ident.channel, indice);
+    }
+  });
+
+  for (const [indice, ident] of identidades.entries()) {
+    const principal = principalDelCanal.get(ident.channel) === indice;
 
     const r = await db(ctx)
       .from('contact_identities')
@@ -558,17 +615,48 @@ export async function crearContacto(
 
     if (r.error && !esDuplicado(r.error)) throw fallo(r.error, 'crear identidad');
     if (r.error && esDuplicado(r.error)) {
-      /* La identidad ya es de otro contacto. NO se roba ni se falla: se anota.
-         Robarla partiría el historial del otro contacto sin avisar, y fallar
-         obligaría a limpiar antes de poder dar de alta a nadie. La propuesta
-         de fusión sale sola en findDuplicates(). */
-      await registrarEvento(ctx, {
-        contactId,
-        type: 'identity_added',
-        summary: `No se agregó ${ident.channel}:${ident.identifier} — ya pertenece a otro contacto`,
-        payload: { channel: ident.channel, identifier: ident.identifier, conflict: true },
-        actor: i.actor ?? 'system',
-      });
+      /* Aquí caen DOS 23505 distintos y decir el equivocado manda a quien lo
+         lea a buscar un contacto duplicado que no existe. Se distinguen
+         preguntando quién es el dueño de verdad. */
+      const dueno = await buscarIdentidad(ctx, ident.channel, ident.identifier);
+
+      if (dueno && dueno.contact_id !== contactId) {
+        /* La identidad ya es de otro contacto. NO se roba ni se falla: se
+           anota. Robarla partiría el historial del otro contacto sin avisar, y
+           fallar obligaría a limpiar antes de poder dar de alta a nadie. La
+           propuesta de fusión sale sola en findDuplicates(). */
+        await registrarEvento(ctx, {
+          contactId,
+          type: 'identity_added',
+          summary: `No se agregó ${ident.channel}:${ident.identifier} — ya pertenece a otro contacto`,
+          payload: {
+            channel: ident.channel,
+            identifier: ident.identifier,
+            conflict: true,
+            ownedBy: dueno.contact_id,
+          },
+          actor: i.actor ?? 'system',
+        });
+      } else if (!dueno) {
+        /* Nadie es dueño: el choque fue contra el índice de principal única.
+           El dato es bueno; lo que sobra es la marca. Se reintenta como
+           secundaria en vez de tirar el teléfono. */
+        const reintento = await db(ctx)
+          .from('contact_identities')
+          .insert({
+            contact_id: contactId,
+            channel: ident.channel,
+            identifier: ident.identifier,
+            raw: ident.raw,
+            display: ident.display,
+            verified: ident.verified,
+            is_primary: false,
+          })
+          .select('id');
+        if (reintento.error && !esDuplicado(reintento.error)) {
+          throw fallo(reintento.error, 'crear identidad');
+        }
+      }
     }
   }
 
@@ -600,10 +688,14 @@ export async function actualizarContacto(
   contactId: string,
   i: UpdateContactInput,
 ): Promise<void> {
+  // Se lee SIEMPRE, no sólo cuando cambian los nombres: el UPDATE de abajo va
+  // acotado por tenant y sobre un id inexistente afecta 0 filas sin error, así
+  // que sin esto un PATCH a un uuid ajeno respondía 200 sin haber hecho nada.
+  const actual = await exigirContacto(ctx, contactId);
+
   const patch: Record<string, unknown> = { updated_at: ahora() };
 
   if (i.displayName !== undefined || i.firstName !== undefined || i.lastName !== undefined) {
-    const actual = await leerFilaContacto(ctx, contactId);
     patch.first_name = i.firstName !== undefined ? i.firstName.trim() || null : actual.first_name;
     patch.last_name = i.lastName !== undefined ? i.lastName.trim() || null : actual.last_name;
     patch.display_name = nombreVisible({
@@ -648,10 +740,46 @@ async function leerFilaContacto(ctx: TenantContext, contactId: string): Promise<
   return fila;
 }
 
+/**
+ * El contacto existe Y es de este tenant, o 404.
+ *
+ * ── Por qué hace falta una función para esto ────────────────────────────────
+ *
+ * Todos los `contactId` de las rutas vienen del request. La lectura está
+ * protegida —`tenantDb(ctx)` filtra por `tenant_id` y un id ajeno simplemente
+ * no aparece—, pero la ESCRITURA tenía dos agujeros:
+ *
+ *   1. Falso éxito. `UPDATE … WHERE id = <uuid que no existe>` acotado por
+ *      tenant afecta 0 filas, y PostgREST no lo considera error. Después
+ *      `registrarEvento` reventaba con 23503 y se lo tragaba por diseño. La
+ *      ruta respondía `{ok:true}`: el usuario veía "asignado" y no se había
+ *      asignado nada, ni quedaba anotado en ningún lado.
+ *
+ *   2. Escritura que cruza la frontera. Las FK de las tablas hijas apuntaban a
+ *      `app.contacts(id)` a secas, así que una identidad del tenant A podía
+ *      colgarse de un contacto del tenant B. La migración 123 lo vuelve
+ *      irrepresentable en la base; esto lo convierte en un 404 legible ANTES,
+ *      que es lo que el emprendedor necesita leer.
+ *
+ * `moveStage` ya fallaba fuerte por accidente (su INSERT tropezaba con la FK).
+ * Que unas operaciones fallaran y otras mintieran era parte del problema.
+ */
+export async function exigirContacto(
+  ctx: TenantContext,
+  contactId: string,
+): Promise<FilaContacto> {
+  return leerFilaContacto(ctx, contactId);
+}
+
 export async function agregarIdentidad(
   ctx: TenantContext,
   i: { contactId: string; identity: IdentityInput; actor?: string },
 ): Promise<{ identityId: string; alreadyOwnedBy: string | null }> {
+  // El contacto tiene que existir Y ser de este tenant antes de colgarle una
+  // fila hija. Sin esto, un `contactId` de otra empresa produce una identidad
+  // del tenant A apuntando a un contacto del tenant B (ver migración 123).
+  await exigirContacto(ctx, i.contactId);
+
   const { channel, identifier, raw } = normalizarIdentidad(
     i.identity.channel,
     i.identity.identifier,
@@ -666,8 +794,11 @@ export async function agregarIdentidad(
     return { identityId: previa.id, alreadyOwnedBy: previa.contact_id };
   }
 
-  if (i.identity.isPrimary) await bajarPrincipal(ctx, i.contactId, channel);
-
+  /* Entra SIEMPRE como secundaria y se promueve después.
+     `bajarPrincipal()` corría ANTES del INSERT: si el INSERT fallaba —un 23505
+     de carrera, una caída de red— el contacto se quedaba sin ninguna identidad
+     principal en ese canal, y el nodo `send_message` de H8 deja de tener a
+     quién escribirle. Ahora un fallo del INSERT no cambia nada. */
   const r = await db(ctx)
     .from('contact_identities')
     .insert({
@@ -677,7 +808,7 @@ export async function agregarIdentidad(
       raw,
       display: i.identity.display ?? null,
       verified: i.identity.verified ?? false,
-      is_primary: i.identity.isPrimary ?? false,
+      is_primary: false,
     })
     .select('id');
 
@@ -689,6 +820,15 @@ export async function agregarIdentidad(
 
   const filas = (r.data ?? []) as Array<{ id: string }>;
   const identityId = filas[0]?.id ?? '';
+
+  if (i.identity.isPrimary && identityId) {
+    await bajarPrincipal(ctx, i.contactId, channel);
+    const ascenso = await db(ctx)
+      .from('contact_identities')
+      .update({ is_primary: true })
+      .eq('id', identityId);
+    if (ascenso.error) throw fallo(ascenso.error, 'marcar identidad principal');
+  }
 
   await registrarEvento(ctx, {
     contactId: i.contactId,
@@ -719,6 +859,8 @@ export async function asignarDueno(
   ctx: TenantContext,
   i: { contactId: string; ownerEmail: string | null; actor?: string },
 ): Promise<void> {
+  await exigirContacto(ctx, i.contactId);
+
   const correo = i.ownerEmail?.trim().toLowerCase() || null;
   const r = await db(ctx)
     .from('contacts')
@@ -741,6 +883,7 @@ export async function agregarEtiqueta(
 ): Promise<{ added: boolean }> {
   const tag = i.tag.trim();
   if (!tag) throw new PlatformError('VALIDATION', 'La etiqueta no puede estar vacía');
+  await exigirContacto(ctx, i.contactId);
 
   const r = await db(ctx)
     .from('contact_tags')
@@ -771,6 +914,8 @@ export async function quitarEtiqueta(
   ctx: TenantContext,
   i: { contactId: string; tag: string; actor?: string },
 ): Promise<{ removed: boolean }> {
+  await exigirContacto(ctx, i.contactId);
+
   const tag = i.tag.trim();
   // `.select()` después del DELETE devuelve las filas borradas. Sin él,
   // PostgREST no dice cuántas fueron y `removed` sería siempre una suposición.
@@ -801,6 +946,8 @@ export async function tocar(
   contactId: string,
   at?: string,
 ): Promise<void> {
+  await exigirContacto(ctx, contactId);
+
   const r = await db(ctx)
     .from('contacts')
     .update({ last_activity_at: at ?? ahora() })

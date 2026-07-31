@@ -22,6 +22,7 @@ import type { FilaEmbudo, FilaEtapa, FilaPosicion } from '../types';
 import { aNumero, ahora, aSlug, db, esDuplicado, fallo, lista } from '../store';
 import { EMBUDO_POR_DEFECTO, ETAPAS_POR_DEFECTO } from './defaults';
 import { registrarEvento } from '../timeline/service';
+import { exigirContacto } from '../contacts/service';
 import { emitir } from '../events';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -204,6 +205,37 @@ export async function sembrarEmbudoPorDefecto(
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// Moneda
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * `currency` existía en la columna (121: `text NOT NULL DEFAULT 'MXN'`) y en
+ * `ContactPlacement`, pero NINGUNA ruta podía escribirla: `moveStage` no
+ * recibía moneda. Un negocio que cotiza en dólares mandaba
+ * `{"stage":"propuesta","amount":5000}` para 5,000 USD y la fila quedaba en
+ * MXN, que la ficha imprimía como "$5,000.00" en pesos. Es el mismo defecto que
+ * la auditoría encontró en H4 —un monto en USD guardado como MXN— sólo que
+ * aquí el usuario ni siquiera podía declarar la moneda. El tipo del port
+ * prometía una capacidad que el backend no cumplía.
+ *
+ * Se valida la FORMA (ISO-4217: tres letras) y no contra un catálogo cerrado:
+ * una lista blanca en este archivo es una migración de otro carril cada vez que
+ * alguien vende en una moneda nueva.
+ */
+export function normalizarMoneda(entrada?: string | null): string | undefined {
+  if (entrada === undefined || entrada === null) return undefined;
+  const m = String(entrada).trim().toUpperCase();
+  if (!m) return undefined;
+  if (!/^[A-Z]{3}$/.test(m)) {
+    throw new PlatformError(
+      'VALIDATION',
+      `"${entrada}" no es un código de moneda ISO-4217 (tres letras, como MXN o USD).`,
+    );
+  }
+  return m;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // El nodo move_stage
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -214,11 +246,20 @@ export async function moverEtapa(
     stage: string;
     pipeline?: string;
     amount?: number;
+    /** ISO-4217. Si no se dice, la columna se queda con su DEFAULT 'MXN'. */
+    currency?: string;
     actor?: string;
   },
 ): Promise<{ moved: boolean; stageId: string; previousStageId: string | null }> {
+  // 404 legible antes de tocar el embudo. `moverEtapa` ya fallaba con un id
+  // inexistente, pero por accidente —su INSERT tropezaba con la FK— y con un
+  // VALIDATION que hablaba de "referencia inexistente" en vez de decir que el
+  // contacto no existe. Ver `exigirContacto` en contacts/service.ts.
+  await exigirContacto(ctx, i.contactId);
+
   const embudo = await resolverEmbudo(ctx, i.pipeline);
   const etapa = await resolverEtapa(ctx, embudo.id, i.stage);
+  const moneda = normalizarMoneda(i.currency);
 
   const actuales = lista(
     await db(ctx)
@@ -234,10 +275,16 @@ export async function moverEtapa(
   // ── La regla anti-bucle ─────────────────────────────────────────────────
   if (anterior === etapa.id) {
     // El monto sí se puede actualizar sin que eso sea "un cambio de etapa".
-    if (i.amount !== undefined && aNumero(actual?.amount ?? null) !== i.amount) {
+    const cambiaMonto = i.amount !== undefined && aNumero(actual?.amount ?? null) !== i.amount;
+    const cambiaMoneda = moneda !== undefined && actual?.currency !== moneda;
+    if (cambiaMonto || cambiaMoneda) {
       const r = await db(ctx)
         .from('contact_stages')
-        .update({ amount: i.amount, updated_at: ahora() })
+        .update({
+          ...(i.amount !== undefined ? { amount: i.amount } : {}),
+          ...(moneda !== undefined ? { currency: moneda } : {}),
+          updated_at: ahora(),
+        })
         .eq('contact_id', i.contactId)
         .eq('pipeline_id', embudo.id);
       if (r.error) throw fallo(r.error, 'actualizar monto');
@@ -254,6 +301,7 @@ export async function moverEtapa(
         entered_at: t,
         updated_at: t,
         ...(i.amount !== undefined ? { amount: i.amount } : {}),
+        ...(moneda !== undefined ? { currency: moneda } : {}),
       })
       .eq('contact_id', i.contactId)
       .eq('pipeline_id', embudo.id);
@@ -266,6 +314,7 @@ export async function moverEtapa(
         pipeline_id: embudo.id,
         stage_id: etapa.id,
         amount: i.amount ?? null,
+        ...(moneda !== undefined ? { currency: moneda } : {}),
         entered_at: t,
         updated_at: t,
       });
@@ -317,12 +366,34 @@ export async function moverEtapa(
 // Tablero
 // ════════════════════════════════════════════════════════════════════════════
 
+/**
+ * El tablero.
+ *
+ * `amounts` es un mapa `{ MXN: 120000, USD: 5000 }` y NO un número pelón.
+ * Antes se sumaba `amount` ignorando `currency` y el resultado se pintaba con
+ * MXN duro: el día que cualquier vía —una importación, H10, un `update` a
+ * mano— escribiera `currency='USD'`, el tablero sumaba 1,000 USD + 1,000 MXN y
+ * mostraba "$2,000". Agrupar no es una mejora cosmética: es lo que hace que
+ * sumar mezclado deje de ser representable.
+ *
+ * `amount` se conserva por compatibilidad con quien ya lo consume, y es la suma
+ * de la moneda MAYORITARIA del embudo, no de todas — nunca un total mezclado.
+ */
 export async function estadisticasEmbudo(
   ctx: TenantContext,
   i: { pipeline?: string } = {},
 ): Promise<{
   pipelineId: string;
-  stages: Array<{ stageId: string; slug: string; name: string; count: number; amount: number }>;
+  /** La moneda con más dinero en este embudo. Es la que debe pintar la UI. */
+  currency: string;
+  stages: Array<{
+    stageId: string;
+    slug: string;
+    name: string;
+    count: number;
+    amount: number;
+    amounts: Record<string, number>;
+  }>;
 }> {
   const embudo = await resolverEmbudo(ctx, i.pipeline);
 
@@ -352,21 +423,40 @@ export async function estadisticasEmbudo(
       .map((c) => c.id),
   );
 
-  const conteo = new Map<string, { count: number; amount: number }>();
+  const conteo = new Map<string, { count: number; amounts: Record<string, number> }>();
+  const totalPorMoneda = new Map<string, number>();
+
   for (const p of posiciones) {
     if (fusionados.has(p.contact_id)) continue;
-    const previo = conteo.get(p.stage_id) ?? { count: 0, amount: 0 };
-    conteo.set(p.stage_id, {
-      count: previo.count + 1,
-      amount: previo.amount + (aNumero(p.amount) ?? 0),
-    });
+    const previo = conteo.get(p.stage_id) ?? { count: 0, amounts: {} };
+    const monto = aNumero(p.amount) ?? 0;
+    const moneda = p.currency || 'MXN';
+    previo.count += 1;
+    if (monto !== 0) {
+      previo.amounts[moneda] = (previo.amounts[moneda] ?? 0) + monto;
+      totalPorMoneda.set(moneda, (totalPorMoneda.get(moneda) ?? 0) + monto);
+    }
+    conteo.set(p.stage_id, previo);
   }
+
+  /* La moneda que la UI va a pintar se DERIVA de los datos, no se asume. Si el
+     embudo está vacío o nadie puso monto, MXN es el default de la columna. */
+  const dominante =
+    [...totalPorMoneda.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'MXN';
 
   return {
     pipelineId: embudo.id,
+    currency: dominante,
     stages: etapas.map((e) => {
-      const c = conteo.get(e.id) ?? { count: 0, amount: 0 };
-      return { stageId: e.id, slug: e.slug, name: e.name, count: c.count, amount: c.amount };
+      const c = conteo.get(e.id) ?? { count: 0, amounts: {} };
+      return {
+        stageId: e.id,
+        slug: e.slug,
+        name: e.name,
+        count: c.count,
+        amount: c.amounts[dominante] ?? 0,
+        amounts: c.amounts,
+      };
     }),
   };
 }

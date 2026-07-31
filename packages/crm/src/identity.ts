@@ -70,6 +70,24 @@ export function normalizarIdentidad(
     );
   }
 
+  /* La guarda de grupo vive AQUÍ y no en el llamador.
+     Estaba sólo dentro de `resolverPorIdentidad`, así que `create` y
+     `addIdentity` sí dejaban entrar un grupo: `normalizarTelefono` le recorta
+     el `@g.us` y `120363041234567890@g.us` queda como `+120363041234567890`,
+     un teléfono internacional perfectamente creíble. Se creaba la tarjeta de un
+     grupo — exactamente lo que la guarda existía para impedir.
+     Es el mismo argumento con el que este archivo justifica tener la
+     normalización en un solo lugar: una regla que depende de que cada llamador
+     se acuerde es una regla que un día no se aplica. */
+  if (CANALES_TELEFONO.has(channel) && esGrupo(limpio)) {
+    throw new PlatformError(
+      'VALIDATION',
+      `"${limpio}" es un grupo de WhatsApp, no una persona. ` +
+        'Un grupo no tiene ficha de CRM: crea una por cada grupo al que agreguen ' +
+        'el número del negocio y la lista se vuelve basura en una semana.',
+    );
+  }
+
   let identifier: string;
   if (CANALES_TELEFONO.has(channel)) identifier = normalizarTelefono(limpio);
   else if (CANALES_CORREO.has(channel)) identifier = normalizarCorreo(limpio);

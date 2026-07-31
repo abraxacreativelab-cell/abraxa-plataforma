@@ -99,6 +99,9 @@ detectaron antes de que se escribiera código, y los dos eran evitables.
 | 2026-07-30 | Se lanzaron H1–H5 al mismo tiempo. Las cuatro de la ola 1 iban a crear cada una su propio `packages/db/ports.ts` | Freno duro al inicio de cada prompt: `test -f packages/db/ports.ts` |
 | 2026-07-30 | Las 5 conversaciones en el mismo directorio → un solo `HEAD` de git | 14 worktrees aislados |
 | 2026-07-30 | Nadie estaba construyendo H1 — se asumió que lo hacía el orquestador | H1 es una conversación de construcción, **no** es H0 |
+| 2026-07-31 | `packages/agents/src/routes.ts:34-48` armaba el `TenantContext` con `x-user-email` **crudo**. Inofensivo sólo porque `usePort('tenancy')` devuelve 501; el merge del PR #6 lo convertía en escalada de privilegios entre clientes | `proxyVerified()` antes de mirar un solo header de identidad, fail-closed en producción, con `routes.test.ts` corriendo **con el port de tenancy registrado** (el único mundo donde la falla es explotable) |
+| 2026-07-31 | `packages/db/src/index.ts:6` re-exportaba `serviceClient()` —bypass de RLS— y **ninguna** regla de lint lo impedía. La promesa de H1 ("el aislamiento está en el lint") era falsa | `no-restricted-imports` con `importNames` en `eslint.config.mjs`, más la ruta profunda al barril. Verificado que nadie lo usaba fuera de `packages/db` |
+| 2026-07-31 | `.ownership.json` no tenía fila para H0 → el orquestador no podía commitear **ni documentación**: `resolverHandoff` mata la rama que no tiene entrada | Fila `h0-integracion` + `excepcionTransversal` (§8.1) |
 
 ---
 
@@ -124,6 +127,49 @@ que falta algo, **emite un handoff nuevo** — no lo construye él.
 
 Así el revisor sigue siendo independiente de quien construye, que es la única razón por la que
 una revisión vale algo.
+
+### 8.1 La única excepción: seguridad que no puede esperar
+
+La frontera tiene un agujero honesto, porque el 2026-07-31 se encontró uno real: un header de
+identidad sin verificar en el árbol de H3, con el detonador puesto en el merge de H2.
+
+Emitir un handoff para eso significaba dejar el agujero abierto hasta que alguien despertara. Y
+"lo dejamos anotado" es exactamente cómo GARDEN acumuló 145 tablas sin RLS.
+
+Por eso `.ownership.json` tiene, dentro de `h0-integracion`, un campo `excepcionTransversal`:
+
+```json
+"excepcionTransversal": {
+  "fecha": "2026-07-31",
+  "pr": "…",
+  "razon": "…",
+  "paths": ["packages/agents/src/routes.ts", "…"]
+}
+```
+
+Cinco candados, y ninguno depende de que alguien se acuerde:
+
+1. **Sólo H0.** `pathsEfectivos()` la ignora en cualquier otra rama — un carril de construcción
+   no puede concederse permiso para salirse de su carril. Probado en `ownership-gate.test.mjs`.
+2. **Rutas explícitas.** Nunca `packages/<otro>/**`. La prueba rechaza el glob de paquete entero.
+3. **Fecha, PR y razón escrita**, o la prueba falla.
+4. **No transfiere propiedad.** `duenosDe()` no la mira, así que `--check-overlap` sigue diciendo
+   la verdad y el archivo sigue siendo de su handoff.
+5. **Se anuncia en la salida del gate.** Un permiso que se aplica en silencio es un permiso que
+   nadie audita.
+
+**Se vacía en cuanto el PR mergea.** Si al abrir un PR de H0 la excepción trae rutas de un
+trabajo ya integrado, quítalas: no es un permiso permanente, es una llave prestada.
+
+**No aplica a nada que no sea seguridad.** Un bug, un refactor o una mejora vuelven a la regla
+de siempre: se emite un handoff.
+
+### 8.2 Deuda declarada (abierta)
+
+| Qué | Dónde | Se cierra cuando |
+|---|---|---|
+| `proxyVerified()` está duplicado: la copia canónica es de H2 (`packages/tenancy/src/middleware/proxy.ts`), la de trabajo es `packages/agents/src/http/proxy-verified.ts`. Misma lógica y misma tabla de casos probada, byte por byte | `packages/agents/src/http/proxy-verified.ts` | Mergee el **PR #6**. El archivo se colapsa a `export { proxyVerified } from '@abraxa/tenancy'` y su test se queda como prueba de contrato |
+| `adminDb()` sigue permitido fuera de `routes/` y `services/` — 7 archivos legítimos lo usan para tablas globales (`app.model_pricing`, `app.tenants`, `app.plans`). Prohibirlo del todo rompería `main`, el PR #6 y el PR #7 | `eslint.config.mjs` | Alguien decida si las tablas globales merecen su propio helper tipado (`globalDb()`) en `packages/db`. Es de H1, no de H0 |
 
 ---
 

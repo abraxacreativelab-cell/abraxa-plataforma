@@ -97,7 +97,7 @@ async function pedir<T>(ruta: string, sinCablearEn404 = false): Promise<Resultad
 
 export const cargarContactos = (
   busqueda?: string,
-): Promise<Resultado<{ contacts: Contact[]; total: number }>> =>
+): Promise<Resultado<{ contacts: Contact[]; total: number; filterTruncated?: boolean }>> =>
   pedir(`/crm/contacts${busqueda ? `?q=${encodeURIComponent(busqueda)}` : ''}`, true);
 
 export const cargarEmbudo = (): Promise<Resultado<EstadisticasEmbudo>> =>

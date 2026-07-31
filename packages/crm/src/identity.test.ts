@@ -112,6 +112,32 @@ describe('normalizarIdentidad', () => {
   });
 });
 
+/**
+ * La guarda de grupo vive en `normalizarIdentidad`, que es el ÚNICO punto por
+ * el que pasan los tres caminos (`create`, `addIdentity`, `resolveByIdentity`).
+ * Estaba sólo en `resolveByIdentity`, y por los otros dos un grupo entraba al
+ * CRM disfrazado de teléfono internacional: `normalizarTelefono` le recorta el
+ * `@g.us` y deja `+120363041234567890`.
+ */
+describe('normalizarIdentidad — grupos', () => {
+  it('rechaza un JID de grupo en vez de convertirlo en teléfono', () => {
+    expect(() => normalizarIdentidad('whatsapp', '120363041234567890@g.us')).toThrow(
+      /grupo de WhatsApp/,
+    );
+    expect(() => normalizarIdentidad('whatsapp', 'status@broadcast')).toThrow(/grupo de WhatsApp/);
+    expect(() => normalizarIdentidad('whatsapp', '528146811675-1600000000')).toThrow(
+      /grupo de WhatsApp/,
+    );
+  });
+
+  it('y no se lleva por delante un número de persona', () => {
+    expect(normalizarIdentidad('whatsapp', '5218146811675@s.whatsapp.net').identifier).toBe(
+      '+528146811675',
+    );
+    expect(normalizarIdentidad('whatsapp', '+52 81 4681 1675').identifier).toBe('+528146811675');
+  });
+});
+
 describe('esGrupo', () => {
   it('reconoce los grupos de WhatsApp', () => {
     expect(esGrupo('120363000000000000@g.us')).toBe(true);

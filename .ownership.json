@@ -1,4 +1,47 @@
 {
+  "h0-integracion": {
+    "label": "H0 · Orquestación e integración",
+    "migrations": null,
+    "nota": [
+      "H0 no construye producto: mergea, ordena migraciones, despliega y verifica",
+      "(docs/handoffs/H0-orquestador.md §8). Hasta el 2026-07-31 no tenía fila aquí, y como",
+      "`resolverHandoff` exige que la rama tenga entrada propia, el orquestador no podía",
+      "commitear NI SIQUIERA documentación: su PR moría en el gate antes de compilar.",
+      "Sus `paths` son los de su rol —el plan, el deploy, los guiones y las dos leyes del",
+      "repo— y se solapan a propósito con h1-fundacion, que ya mergeó y está dormido.",
+      "",
+      "`excepcionTransversal` es la ÚNICA puerta por la que H0 toca código de producto: una",
+      "corrección de SEGURIDAD que cruza carriles y que no puede esperar a que despierte su",
+      "dueño. Es acotada (rutas explícitas, no globs de paquete), fechada, con su PR anotado,",
+      "y el gate sólo la honra para h0-integracion — un carril de construcción no puede",
+      "concederse una. No cuenta para `--check-overlap`: el archivo SIGUE siendo de su",
+      "handoff, y por eso se vacía en cuanto el PR mergea.",
+      "",
+      "Si la corrección no es de seguridad, o puede esperar, la regla es la de siempre: se",
+      "emite un handoff nuevo, no se escribe en el árbol ajeno.",
+      "",
+      "`ramas` existe porque H0 no abre UN PR: mergea, aplica migraciones, corrige handoffs y",
+      "despliega, muchas veces y a veces con dos PRs vivos al mismo tiempo. El gate exigía que",
+      "la rama se llamara igual que la entrada, así que el segundo PR de H0 moría antes de",
+      "compilar. Un alias dice sólo 'esta rama es este carril' — NO reparte propiedad. Darle a",
+      "H0 una segunda ENTRADA con los mismos paths sí lo haría, y pondría dos dueños sobre cada",
+      "archivo de docs/: `--check-overlap` corre en el PR de TODOS los carriles y se pondría",
+      "rojo para todos. Por eso es un alias y no una entrada."
+    ],
+    "ramas": ["h0-integracion", "h0-docs-ola2"],
+    "paths": ["docs/**", "deploy/**", "scripts/**", ".ownership.json", "eslint.config.mjs"],
+    "excepcionTransversal": {
+      "fecha": "2026-07-31",
+      "pr": "h0-integracion — cierre del hueco de x-user-email",
+      "razon": "packages/agents/src/routes.ts:34-48 armaba el TenantContext con el header x-user-email crudo. Inofensivo mientras usePort('tenancy') lanza 501; el día que mergee el PR #6 (H2) se convierte en escalada de privilegios entre clientes. Se cierra antes de que se active, no después.",
+      "paths": [
+        "packages/agents/src/routes.ts",
+        "packages/agents/src/routes.test.ts",
+        "packages/agents/src/http/**"
+      ]
+    }
+  },
+
   "h1-fundacion": {
     "label": "H1 · Fundación del monorepo",
     "migrations": [1, 9],
@@ -145,12 +188,35 @@
     "label": "H15 · CRM: contactos, identidades por canal, embudo y línea de tiempo",
     "migrations": [120, 129],
     "lockfile": true,
+    "nota": [
+      "`.ownership.json` y `scripts/ownership-gate.test.mjs` SALIERON de estos `paths`, y",
+      "esa ausencia es deliberada.",
+      "",
+      "Estaban porque el alta de un carril nuevo se escribe justamente en esos dos",
+      "archivos. Contra la base de esta rama era inocuo: el único otro dueño era",
+      "h1-fundacion, que `verificarSolapamiento` excluye a propósito. El 2026-07-31 el PR",
+      "#15 le dio a `h0-integracion` los paths `scripts/**` y `.ownership.json`, y con eso",
+      "el mapa FUSIONADO dejaba dos archivos con dos dueños concurrentes:",
+      "`node scripts/ownership-gate.mjs --check-overlap` sale 1 y el test 'H0 no se solapa",
+      "con ningún carril de construcción' falla. Ese gate corre en el PR de los OTROS 14",
+      "carriles: el daño no era de H15, era de todos. Verificado corriendo el gate contra",
+      "el árbol fusionado, no contra la base vieja de la rama.",
+      "",
+      "Consecuencia asumida: el `ownership-gate` de ESTE PR marca esos dos archivos como",
+      "ajenos ('Es de h0-integracion'). Es la atribución correcta —dar de alta un carril es",
+      "un acto del orquestador, no del carril— y es preferible a la alternativa, que era",
+      "dejar main en rojo para los quince después del merge. Son dos hunks: la entrada de",
+      "abajo y la cuenta 15→16 del test.",
+      "",
+      "`lockfile: true` sigue aquí porque este carril crea un WORKSPACE nuevo",
+      "(`packages/crm`) y `npm ci` se niega a instalar si el lockfile no lo conoce",
+      "('Missing: @abraxa/crm@0.1.0 from lock file'). QUITARLO en cuanto el carril mergee,",
+      "junto con la línea que lo enumera en `ownership-gate.test.mjs`."
+    ],
     "paths": [
       "packages/crm/**",
       "apps/web/app/(app)/contactos/**",
-      "docs/handoffs/H15-crm.md",
-      ".ownership.json",
-      "scripts/ownership-gate.test.mjs"
+      "docs/handoffs/H15-crm.md"
     ]
   }
 }

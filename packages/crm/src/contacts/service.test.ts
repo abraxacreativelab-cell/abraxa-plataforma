@@ -299,3 +299,146 @@ describe('listarContactos', () => {
     expect(r.total).toBe(0);
   });
 });
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Los defectos que el gate en verde no podía ver (auditoría del PR #9)
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  Las cuatro pruebas de este bloque FALLABAN con el código anterior. No
+ *  prueban rutas nuevas: prueban que las que ya existían dejen de perder datos
+ *  en silencio y de responder 200 sin haber hecho nada.
+ */
+describe('pérdida silenciosa — lo que el typecheck no ve', () => {
+  it('dos teléfonos marcados AMBOS como principal: se guardan los dos', async () => {
+    /* El caso literal de la portada del carril, "una persona con dos
+       teléfonos". Antes: la segunda salía con `is_primary: true` porque el `||`
+       cortocircuitaba, chocaba con el índice parcial de 120, `esDuplicado()`
+       era cierto y el teléfono se descartaba anotando "ya pertenece a otro
+       contacto" — un contacto que no existe. */
+    const { contactId } = await crearContacto(A, {
+      displayName: 'Santiago',
+      identities: [
+        { channel: 'whatsapp', identifier: '+528146811675', isPrimary: true },
+        { channel: 'whatsapp', identifier: '+525512345678', isPrimary: true },
+      ],
+    });
+
+    const contacto = await leerContacto(A, contactId);
+    expect(contacto?.identities.map((x) => x.identifier).sort()).toEqual([
+      '+525512345678',
+      '+528146811675',
+    ]);
+    // Una sola principal: el índice parcial sigue siendo el árbitro.
+    expect(contacto?.identities.filter((x) => x.isPrimary)).toHaveLength(1);
+
+    // Y NADIE anotó una razón falsa.
+    const mentira = fake
+      .tabla('contact_events')
+      .find((e) => String(e.summary ?? '').includes('ya pertenece a otro contacto'));
+    expect(mentira).toBeUndefined();
+  });
+
+  it('asignar un responsable a un contacto que no existe es 404, no {ok:true}', async () => {
+    await expect(
+      asignarDueno(A, { contactId: 'uuid-que-no-existe', ownerEmail: 'ana@abraxa.club' }),
+    ).rejects.toThrow(PlatformError);
+    // Y no dejó basura: ni la fila, ni el evento.
+    expect(fake.tabla('contact_events')).toHaveLength(0);
+  });
+
+  it('un contactId de OTRA empresa no puede recibir una identidad', async () => {
+    /* Sin `exigirContacto`, `tenantDb` estampaba `tenant_id = A` y la FK
+       simple sólo exigía que el contacto existiera EN ALGÚN LADO: quedaba una
+       identidad del tenant A colgada de un contacto del tenant B. La migración
+       123 lo vuelve irrepresentable en la base; esto lo convierte en un 404
+       antes de llegar allá. */
+    const deB = await crearContacto(B, { displayName: 'Cliente de otra empresa' });
+
+    await expect(
+      agregarIdentidad(A, {
+        contactId: deB.contactId,
+        identity: { channel: 'whatsapp', identifier: '+528146811675' },
+      }),
+    ).rejects.toThrow(PlatformError);
+
+    expect(fake.tabla('contact_identities')).toHaveLength(0);
+  });
+
+  it('etiquetar y tocar un id ajeno tampoco escribe nada', async () => {
+    const deB = await crearContacto(B, { displayName: 'Cliente de otra empresa' });
+    await expect(agregarEtiqueta(A, { contactId: deB.contactId, tag: 'vip' })).rejects.toThrow(
+      PlatformError,
+    );
+    expect(fake.tabla('contact_tags')).toHaveLength(0);
+  });
+});
+
+describe('un grupo de WhatsApp no entra por ninguna puerta', () => {
+  it('ni por create', async () => {
+    await expect(
+      crearContacto(A, {
+        displayName: 'Grupo',
+        identities: [{ channel: 'whatsapp', identifier: '120363041234567890@g.us' }],
+      }),
+    ).rejects.toThrow(/grupo de WhatsApp/);
+    expect(fake.tabla('contacts')).toHaveLength(0);
+  });
+
+  it('ni por addIdentity', async () => {
+    const { contactId } = await crearContacto(A, { displayName: 'Santiago' });
+    await expect(
+      agregarIdentidad(A, {
+        contactId,
+        identity: { channel: 'whatsapp', identifier: '120363041234567890@g.us' },
+      }),
+    ).rejects.toThrow(/grupo de WhatsApp/);
+  });
+
+  it('ni por resolveByIdentity, que es donde ya estaba la guarda', async () => {
+    await expect(
+      resolverPorIdentidad(A, { channel: 'whatsapp', identifier: '120363041234567890@g.us' }),
+    ).rejects.toThrow(/grupo de WhatsApp/);
+  });
+});
+
+/**
+ * El filtro que reventaba la URL de PostgREST.
+ *
+ * No se puede reproducir el 414 con un doble en memoria —no hay URL que
+ * desbordar, que es justamente por qué esto pasó el gate en verde—, así que lo
+ * que se prueba es la defensa: que el primer paso se acote y que el resultado
+ * DIGA que está incompleto en vez de mentir por omisión.
+ */
+describe('filtro por etiqueta con muchos contactos', () => {
+  it('se acota y avisa que la lista es parcial', () => {
+    const contactos = Array.from({ length: 1200 }, (_, n) => ({
+      id: `c-${n}`,
+      tenant_id: 'tenant-a',
+      display_name: `Contacto ${n}`,
+      lifecycle: 'lead',
+      custom: {},
+      merged_into: null,
+      last_activity_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+    fake.sembrar('contacts', contactos);
+    fake.sembrar(
+      'contact_tags',
+      contactos.map((c) => ({ tenant_id: 'tenant-a', contact_id: c.id, tag: 'cliente' })),
+    );
+
+    return listarContactos(A, { tag: 'cliente', limit: 10 }).then((r) => {
+      expect(r.filterTruncated).toBe(true);
+      expect(r.contacts.length).toBeLessThanOrEqual(10);
+    });
+  });
+
+  it('con pocos contactos no marca nada', async () => {
+    const { contactId } = await crearContacto(A, { displayName: 'Santiago', tags: ['cliente'] });
+    const r = await listarContactos(A, { tag: 'cliente' });
+    expect(r.contacts.map((c) => c.id)).toEqual([contactId]);
+    expect(r.filterTruncated).toBeUndefined();
+  });
+});

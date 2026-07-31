@@ -229,6 +229,13 @@ export interface ListContactsInput {
 export interface ListContactsResult {
   contacts: Contact[];
   total: number;
+  /**
+   * `true` si el filtro por etiqueta o por etapa tocó más contactos de los que
+   * caben en una sola URL de PostgREST y se acotó. La lista es correcta pero
+   * PARCIAL: quien la pinta tiene que decirlo. Callarlo cambiaría un error
+   * visible por un dato falso.
+   */
+  filterTruncated?: boolean;
 }
 
 export interface RecordEventInput {
@@ -309,6 +316,15 @@ export interface ContactsPort {
       /** Slug o id. Ausente = el embudo por defecto del tenant. */
       pipeline?: string;
       amount?: number;
+      /**
+       * ISO-4217 (`MXN`, `USD`…). Ausente = se conserva lo que ya tuviera la
+       * fila, o el DEFAULT `'MXN'` de la columna si es nueva.
+       *
+       * Existe porque sin él `ContactPlacement.currency` prometía una capacidad
+       * que ninguna ruta podía ejercer: un trato de 5,000 USD se guardaba como
+       * MXN y se pintaba como pesos.
+       */
+      currency?: string;
       actor?: string;
     },
   ): Promise<{ moved: boolean; stageId: string; previousStageId: string | null }>;
@@ -377,12 +393,28 @@ export interface ContactsPort {
    */
   ensureDefaultPipeline(ctx: TenantContext): Promise<{ pipelineId: string; created: boolean }>;
 
-  /** Cuántos contactos y cuánto dinero hay en cada etapa. Es el tablero. */
+  /**
+   * Cuántos contactos y cuánto dinero hay en cada etapa. Es el tablero.
+   *
+   * El dinero viene DESGLOSADO POR MONEDA (`amounts`), no como un total. Sumar
+   * `amount` a través de monedas distintas produce un número que no significa
+   * nada, y la UI lo pintaba con `MXN` duro. `currency` dice cuál es la moneda
+   * mayoritaria del embudo —la que la UI debe pintar— y `amount` es el total de
+   * ESA moneda, nunca una mezcla.
+   */
   pipelineStats(
     ctx: TenantContext,
     i?: { pipeline?: string },
   ): Promise<{
     pipelineId: string;
-    stages: Array<{ stageId: string; slug: string; name: string; count: number; amount: number }>;
+    currency: string;
+    stages: Array<{
+      stageId: string;
+      slug: string;
+      name: string;
+      count: number;
+      amount: number;
+      amounts: Record<string, number>;
+    }>;
   }>;
 }

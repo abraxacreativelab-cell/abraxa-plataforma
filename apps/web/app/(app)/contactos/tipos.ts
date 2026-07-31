@@ -77,10 +77,18 @@ export interface EtapaConteo {
   slug: string;
   name: string;
   count: number;
+  /** Total de la moneda mayoritaria del embudo. NUNCA una mezcla. */
   amount: number;
+  /** Desglose por moneda: `{ MXN: 120000, USD: 5000 }`. */
+  amounts?: Record<string, number>;
 }
 
 export interface EstadisticasEmbudo {
   pipelineId: string;
+  /**
+   * La moneda que hay que pintar, derivada de los datos. El tablero la asumía
+   * `MXN` y por eso un embudo en dólares se mostraba como pesos.
+   */
+  currency?: string;
   stages: EtapaConteo[];
 }
