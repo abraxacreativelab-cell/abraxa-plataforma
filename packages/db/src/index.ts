@@ -13,5 +13,18 @@ export {
   listPorts,
   __clearPorts,
 } from './port-registry';
+/**
+ * El borde HTTP compartido. `contextoDePeticion(req)` es la ÚNICA forma
+ * correcta de convertir una petición en un `TenantContext`: ningún router de
+ * dominio escribe su propio `contextoDe`. Ver `src/http/tenant-context.ts`.
+ */
+export {
+  contextoDePeticion,
+  correoVerificadoDe,
+  proxyVerified,
+  responderError,
+  type PeticionEntrante,
+  type RespuestaSaliente,
+} from './http/index';
 export { APP_SCHEMA, type DomainTable, type DomainTableRegistry } from './tables';
 export { meta } from './meta';

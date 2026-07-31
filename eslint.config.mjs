@@ -21,6 +21,72 @@ const ADMIN_DB_MESSAGE = [
   'app.industry_templates, app.billing_events), y vive en el servicio que las administra.',
 ].join(' ');
 
+/**
+ * El agujero que cerró H0 el 2026-07-31.
+ *
+ * `packages/db/src/index.ts:6` re-exporta `serviceClient()` —el cliente con
+ * service_role, que hace BYPASS de RLS— y hasta hoy NINGUNA regla impedía
+ * importarlo desde cualquier paquete. La promesa de H1 ("el aislamiento no
+ * depende de disciplina, está en el lint") era falsa para el peor caso: la
+ * regla existente sólo tapaba `@supabase/supabase-js`, `pg` y la ruta profunda
+ * al módulo `client` — no el nombre re-exportado por la puerta principal.
+ *
+ * Verificado antes de poner la regla: `serviceClient` no se usa en ningún lado
+ * fuera de packages/db (ni en main, ni en el PR #6, ni en el PR #7). Prohibirlo
+ * no rompe nada — sólo cierra la puerta antes de que alguien la use.
+ */
+const SERVICE_CLIENT_MESSAGE = [
+  'serviceClient() hace BYPASS de RLS y es privado de packages/db.',
+  'Usa tenantDb(ctx) para datos de negocio. Si de verdad necesitas acceso sin filtrar',
+  '(alta de tenants, tablas globales), usa adminDb() y deja escrito por qué.',
+  'RLS es la red de abajo; tenantDb(ctx) es la de arriba. Sin las dos, GARDEN otra vez.',
+].join(' ');
+
+/**
+ * El defecto de diseño que cerró H0 el 2026-07-31.
+ *
+ * CUATRO carriles escribieron su propio `contextoDe` a partir de las cabeceras
+ * de identidad, y TRES salieron mal de la misma manera: leían `x-user-email`
+ * sin comprobar antes el secreto compartido del BFF.
+ *
+ *   H3 agents   packages/agents/src/routes.ts:34-48    (PR #12, cerrado)
+ *   H6 inbox    packages/inbox/src/routes/index.ts:179 (PR #10, abierto)
+ *   H7 ritual   packages/onboarding/src/routes.ts:30   (PR #8,  abierto)
+ *   H4 bóveda   packages/vault/src/http/context.ts     (¡ya en main!)
+ *
+ * Un carril que se equivoca es un error; cuatro es un defecto de diseño. La
+ * causa raíz era que el patrón correcto no existía como pieza importable, así
+ * que cada carril lo reconstruía de memoria. Ahora existe —
+ * `contextoDePeticion()` de `@abraxa/db` — y esta regla es lo que impide que
+ * el quinto lo vuelva a escribir.
+ *
+ * Sólo aplica a los árboles de dominio. Los tres lugares donde leer estas
+ * cabeceras es el trabajo (la pieza canónica, el middleware de H2 y sus
+ * arneses de prueba) están exentos por ruta, no por convención.
+ */
+const IDENTITY_HEADER_MESSAGE = [
+  'No leas las cabeceras de identidad a mano.',
+  'Usa contextoDePeticion(req) de @abraxa/db: exige proxyVerified() ANTES de mirar',
+  'un solo header, falla cerrado en producción sin PROXY_SECRET y valida la membresía',
+  'contra H2. Si sólo necesitas la persona y todavía no hay empresa, usa correoVerificadoDe(req).',
+  'Cuatro carriles escribieron su propio contextoDe y tres dejaron abierta la suplantación',
+  'de identidad por header. Ningún router de dominio escribe el suyo.',
+].join(' ');
+
+const IDENTITY_HEADER_RULES = [
+  // `HEADER.userEmail`, `HEADER.tenantSlug`, `HEADER.proxySecret`
+  {
+    selector:
+      "MemberExpression[object.name='HEADER'][property.name=/^(userEmail|tenantSlug|proxySecret)$/]",
+    message: IDENTITY_HEADER_MESSAGE,
+  },
+  // …y la misma cabecera escrita a mano, que es como se saltaría la regla de arriba.
+  {
+    selector: "Literal[value=/^x-(user-email|tenant-slug|proxy-secret)$/]",
+    message: IDENTITY_HEADER_MESSAGE,
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -70,9 +136,21 @@ export default tseslint.config(
           paths: [
             { name: '@supabase/supabase-js', message: RAW_CLIENT_MESSAGE },
             { name: 'pg', message: RAW_CLIENT_MESSAGE },
+            // El bypass de RLS por su nombre, entrando por la puerta principal.
+            {
+              name: '@abraxa/db',
+              importNames: ['serviceClient'],
+              message: SERVICE_CLIENT_MESSAGE,
+            },
           ],
           patterns: [
             { group: ['**/db/src/client', '**/db/src/client.js'], message: RAW_CLIENT_MESSAGE },
+            // …y por la puerta de atrás: importar el barril por ruta profunda
+            // era la forma de saltarse `importNames` sin que nadie se enterara.
+            {
+              group: ['**/db/src/index', '**/db/src/index.js', '**/packages/db/src/**'],
+              message: SERVICE_CLIENT_MESSAGE,
+            },
           ],
         },
       ],
@@ -80,8 +158,20 @@ export default tseslint.config(
   },
 
   // Dentro de routes/ y services/ ni siquiera adminDb: todo por tenantDb(ctx).
+  //
+  // `packages/*/src/routes.ts` está en la lista además de `routes/**` porque un
+  // paquete chico expone sus rutas en UN archivo, no en una carpeta —
+  // packages/agents/src/routes.ts es exactamente ese caso, y quedaba fuera de
+  // la regla por una barra.
   {
-    files: ['packages/*/src/routes/**/*.ts', 'packages/*/src/services/**/*.ts'],
+    files: [
+      'packages/*/src/routes.ts',
+      'packages/*/src/routes/**/*.ts',
+      'packages/*/src/services.ts',
+      'packages/*/src/services/**/*.ts',
+      'apps/*/src/routes.ts',
+      'apps/*/src/routes/**/*.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -91,9 +181,43 @@ export default tseslint.config(
             { name: 'pg', message: RAW_CLIENT_MESSAGE },
             { name: '@abraxa/db', importNames: ['adminDb', 'serviceClient'], message: ADMIN_DB_MESSAGE },
           ],
+          patterns: [
+            { group: ['**/db/src/client', '**/db/src/client.js'], message: RAW_CLIENT_MESSAGE },
+            {
+              group: ['**/db/src/index', '**/db/src/index.js', '**/packages/db/src/**'],
+              message: SERVICE_CLIENT_MESSAGE,
+            },
+          ],
         },
       ],
     },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // La regla que impide que un quinto carril reescriba `contextoDe`.
+  //
+  // Exentos, por ruta y con razón escrita:
+  //   · packages/db/src/http/**        la pieza canónica: es su trabajo
+  //   · packages/tenancy/src/middleware/**  el middleware de H2, que resuelve
+  //     la sesión sin empresa (alta, invitaciones) y es identidad por oficio
+  //   · packages/tenancy/src/testing/**     el arnés que FABRICA peticiones
+  //   · **/*.test.ts                   una prueba tiene que poder mandar el
+  //     header equivocado a propósito; es justo lo que se está probando
+  //   · apps/web/**                    el BFF es quien PONE la cabecera; es el
+  //     único lugar del sistema donde eso es correcto (y hoy no existe aún)
+  // ─────────────────────────────────────────────────────────────────────────
+  {
+    files: ['packages/*/src/**/*.{ts,tsx}', 'apps/api/src/**/*.ts', 'apps/worker/src/**/*.ts'],
+    ignores: [
+      // Donde se DECLARA el contrato de cabeceras (H1). No lo lee: lo define.
+      'packages/config/src/constants.ts',
+      'packages/db/src/http/**',
+      'packages/tenancy/src/middleware/**',
+      'packages/tenancy/src/testing/**',
+      '**/*.test.ts',
+      '**/*.test.tsx',
+    ],
+    rules: { 'no-restricted-syntax': ['error', ...IDENTITY_HEADER_RULES] },
   },
 
   // El paquete de UI corre en el navegador.
