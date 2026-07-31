@@ -103,8 +103,16 @@ Tres cosas que no son obvias:
 
 ## Las reglas que no se negocian
 
-1. **Un humano escribe en el hilo → `assigned_to` se llena y la IA se calla.**
-   Nada peor que el agente contestando encima de su dueño.
+1. **Un humano escribe en el hilo → la IA se calla.** Nada peor que el agente
+   contestando encima de su dueño. Por las **dos** vías, que no son la misma:
+   - desde la bandeja → `enviarEnHilo` llena `assigned_to` y el hilo queda
+     tomado hasta que alguien lo suelte;
+   - desde **el teléfono del dueño**, que es el camino más común — el
+     emprendedor casi nunca tiene la pantalla abierta. Ese mensaje vuelve por el
+     webhook como un eco `fromMe`; `ingest.ts` lo reconoce (si hubiera salido de
+     aquí, ya estaría en la base y el eco chocaría con el índice único) y **pausa
+     la IA una hora** (`MINUTOS_PAUSA_POR_ECO_HUMANO`). Se pausa y no se asigna
+     porque el eco no trae identidad y porque una pausa vence sola.
 2. **La IA nunca contesta dos veces al mismo mensaje.** La unicidad vive en la
    base, no en un `SELECT` previo.
 3. **Si el agente falla, silencio.** El mensaje queda marcado
@@ -112,6 +120,68 @@ Tres cosas que no son obvias:
    silencio es mejor que un robot roto.
 4. **`threadId` SIEMPRE a `AgentPort.run`.** Es lo que ata el costo al hilo en
    `usage_ledger` y lo que le da memoria al agente.
+5. **Toda ruta con sesión pasa primero por `proxyVerified`.** El secreto
+   compartido del BFF se comprueba **antes** de leer `x-user-email`. La
+   membresía no es la identidad: `contextFor()` valida que ese correo pertenezca
+   a esa empresa, no que el correo sea de quien llama. Y este carril es el que
+   obliga a que `apps/api` sea alcanzable desde fuera (Evolution tiene que poder
+   hacer POST al webhook), así que aquí no hay red privada que valga.
+6. **Desconectar una línea no borra el historial.** Ver abajo.
+
+---
+
+## Reconectar una línea caída (sin perder nada)
+
+La línea se cae —se quedó sin batería el teléfono, venció la sesión de
+Baileys— y el canal queda en `disconnected`. **No hace falta borrar el canal:**
+
+```
+GET /inbox/channels/:id/status     → devuelve un QR nuevo cuando la instancia
+                                     no está `open`. Se escanea y ya.
+```
+
+Y si de verdad se quiere dar de baja la línea:
+
+```
+DELETE /inbox/channels/:id             → baja lógica: la línea deja de
+                                         funcionar, `config` se vacía y el
+                                         canal queda `disconnected`.
+                                         Los hilos y mensajes SE CONSERVAN.
+                                         (Si el canal no tiene ni un hilo, la
+                                         fila sí se borra: no hay nada que
+                                         proteger.)
+
+DELETE /inbox/channels/:id?purge=true  → destructivo e irreversible. Borra los
+                                         hilos y los mensajes, y devuelve —y
+                                         registra en el log— cuántos destruyó.
+```
+
+`threads.channel_id` **no** lleva `ON DELETE CASCADE` (migración `040`): sin esa
+red, «reconectar mi WhatsApp» borraba seis meses de conversaciones con clientes
+y la API contestaba `{ ok: true }`.
+
+---
+
+## Las dos URL que NO son la misma
+
+`API_BASE_URL` significaba dos cosas incompatibles a la vez, y con el valor que
+trae `.env.example` la línea se conecta, el QR se escanea y **no entra ni un
+mensaje**: Evolution está haciendo POST a su propio `localhost`.
+
+| Variable | Qué es | Quién la usa | Ejemplo |
+|---|---|---|---|
+| `PUBLIC_WEBHOOK_BASE_URL` | La URL **pública** por la que los servidores de Evolution alcanzan `/inbox/webhooks/:id`. Tiene que salir a internet. | `drivers/whatsapp/index.ts` | `https://api.abraxa.club` |
+| `API_BASE_URL` | La base **interna** con la que el BFF de Next llama a `apps/api`. Nunca la ve el navegador. | `apps/web/app/(app)/bandeja/api/bff.ts` | `http://localhost:3100` |
+
+Si `PUBLIC_WEBHOOK_BASE_URL` no está puesta se sigue usando `API_BASE_URL` —para
+no romper un despliegue que hoy funcione porque le pusieron el valor público—,
+pero si de ahí sale una dirección de loopback o de un rango privado, el driver lo
+**avisa en el log** en vez de callarse. Ese aviso es lo único que separa «no
+llega ningún WhatsApp» de una tarde revisando Evolution.
+
+> **Pendiente de H1** (dueño de `.env.example` y de `packages/config/**`):
+> declarar `PUBLIC_WEBHOOK_BASE_URL` en la plantilla de entorno y en el esquema
+> de `env.ts`. H6 no puede tocar esos archivos.
 
 ---
 

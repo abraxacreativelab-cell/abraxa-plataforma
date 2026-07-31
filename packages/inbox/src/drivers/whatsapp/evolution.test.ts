@@ -10,10 +10,10 @@
  *   4xx      → nos rechazó                            → no reintentable
  *   5xx      → problema suyo                          → reintentable
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PlatformError } from '@abraxa/db';
 import { createEvolutionClient, type FetchLike } from './evolution';
-import { createWhatsAppDriver, urlDelWebhook } from './index';
+import { createWhatsAppDriver, esInalcanzableDesdeFuera, urlDelWebhook } from './index';
 
 const OPCIONES = { baseUrl: 'http://evo.local', apiKey: 'llave-de-prueba' };
 
@@ -230,9 +230,101 @@ describe('el driver de WhatsApp', () => {
 });
 
 describe('urlDelWebhook', () => {
+  const PUBLICA_ORIGINAL = process.env.PUBLIC_WEBHOOK_BASE_URL;
+  const API_ORIGINAL = process.env.API_BASE_URL;
+
+  /**
+   * Se restauran las dos variables una por una, no reemplazando `process.env`
+   * entero: ese idiom deja un objeto que ya no es el del proceso y en la suite
+   * de rutas costó una tarde de fantasmas.
+   */
+  afterEach(() => {
+    if (PUBLICA_ORIGINAL === undefined) delete process.env.PUBLIC_WEBHOOK_BASE_URL;
+    else process.env.PUBLIC_WEBHOOK_BASE_URL = PUBLICA_ORIGINAL;
+    if (API_ORIGINAL === undefined) delete process.env.API_BASE_URL;
+    else process.env.API_BASE_URL = API_ORIGINAL;
+    vi.restoreAllMocks();
+  });
+
   it('arma la URL pública con el token escapado', () => {
     expect(urlDelWebhook('https://api.abraxa.club/', 'c-1', 'a+b')).toBe(
       'https://api.abraxa.club/inbox/webhooks/c-1?token=a%2Bb',
     );
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // `API_BASE_URL` significaba dos cosas incompatibles: la base INTERNA con la
+  // que el BFF llama a la API, y la URL PÚBLICA por la que Evolution alcanza el
+  // webhook. Con el valor interno —que es el que trae `.env.example`— la línea
+  // se conecta, el QR se escanea, y no entra ni un solo mensaje.
+  // ══════════════════════════════════════════════════════════════════════════
+  it('la URL pública tiene su propia variable y GANA sobre API_BASE_URL', () => {
+    process.env.PUBLIC_WEBHOOK_BASE_URL = 'https://api.abraxa.club';
+    process.env.API_BASE_URL = 'http://localhost:3100';
+
+    expect(urlDelWebhook(undefined, 'c-1', 't')).toBe(
+      'https://api.abraxa.club/inbox/webhooks/c-1?token=t',
+    );
+  });
+
+  it('avisa cuando el respaldo da una dirección a la que Evolution no puede llegar', () => {
+    const avisos: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((m: unknown) => {
+      avisos.push(String(m));
+    });
+
+    delete process.env.PUBLIC_WEBHOOK_BASE_URL;
+    process.env.API_BASE_URL = 'http://localhost:3100';
+
+    const url = urlDelWebhook(undefined, 'c-1', 't');
+
+    // Se sigue armando: romper el aprovisionamiento sería peor que avisar.
+    expect(url).toBe('http://localhost:3100/inbox/webhooks/c-1?token=t');
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]).toContain('PUBLIC_WEBHOOK_BASE_URL');
+  });
+
+  it('un respaldo PÚBLICO no dice nada: no se rompe a quien ya lo tenía bien', () => {
+    const avisos: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((m: unknown) => {
+      avisos.push(String(m));
+    });
+
+    delete process.env.PUBLIC_WEBHOOK_BASE_URL;
+    process.env.API_BASE_URL = 'https://api.abraxa.club';
+
+    expect(urlDelWebhook(undefined, 'c-1', 't')).toBe(
+      'https://api.abraxa.club/inbox/webhooks/c-1?token=t',
+    );
+    expect(avisos).toEqual([]);
+  });
+});
+
+describe('esInalcanzableDesdeFuera', () => {
+  it('caza los defaults de desarrollo que se quedan puestos', () => {
+    for (const u of [
+      'http://localhost:3100',
+      'http://127.0.0.1:3100',
+      'http://10.0.0.4:3100',
+      'http://192.168.68.50:3100',
+      'http://172.17.0.2:3100',
+      'http://api.local',
+    ]) {
+      expect(esInalcanzableDesdeFuera(u), u).toBe(true);
+    }
+  });
+
+  it('no se mete con direcciones públicas ni con las que no entiende', () => {
+    // Conservador a propósito: el objetivo es cazar el default de desarrollo,
+    // no adivinar la topología de red de nadie. `172.32.` queda FUERA del rango
+    // privado de la RFC 1918 — el rango termina en `172.31.`.
+    for (const u of [
+      'https://api.abraxa.club',
+      'http://172.32.0.1:3100',
+      'https://198.51.100.7',
+      'no-es-una-url',
+    ]) {
+      expect(esInalcanzableDesdeFuera(u), u).toBe(false);
+    }
   });
 });

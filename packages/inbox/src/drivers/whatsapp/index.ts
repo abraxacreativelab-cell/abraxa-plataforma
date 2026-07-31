@@ -154,14 +154,72 @@ export function createWhatsAppDriver(opts: OpcionesDriverWhatsApp = {}): DriverC
 }
 
 /**
- * La URL a la que Evolution manda los eventos.
+ * ¿Es una dirección a la que Evolution NO puede llegar desde fuera?
+ *
+ * Deliberadamente conservador: sólo se marca lo que es imposible por
+ * definición —loopback y los rangos privados de la RFC 1918— y `.local`. Una
+ * URL pública rara no se toca; el objetivo es cazar el default de desarrollo
+ * que se quedó puesto, no adivinar topologías de red ajenas.
+ */
+export function esInalcanzableDesdeFuera(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === 'localhost' || host === '::1' || host.endsWith('.local')) return true;
+  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return true;
+  return /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  La URL a la que Evolution manda los eventos. PÚBLICA, y por eso su propia
+ *  variable.
+ * ════════════════════════════════════════════════════════════════════════════
  *
  * `channelId` puede faltar cuando el canal aún no tiene fila (es el orden que
  * impone `provisionChannel`, que corre antes del INSERT en algunos caminos): en
  * ese caso `crearCanal()` vuelve a fijar el webhook con el id real.
+ *
+ * ── Por qué ya NO se lee `API_BASE_URL` (2026-07-31) ───────────────────────
+ *
+ * `API_BASE_URL` significaba dos cosas incompatibles a la vez:
+ *
+ *   · Aquí, la URL PÚBLICA por la que los servidores de Evolution —que están en
+ *     internet— alcanzan `/inbox/webhooks/:id`.
+ *   · En `apps/web/app/(app)/bandeja/api/bff.ts`, la base INTERNA con la que el
+ *     BFF de Next llama a `apps/api`: `http://localhost:3100`, o el nombre del
+ *     servicio dentro de la red de contenedores.
+ *
+ * Un solo valor no puede ser las dos. Con el valor interno —que es el que trae
+ * `.env.example`— la instancia de WhatsApp se aprovisiona sin error, la línea
+ * aparece conectada, el QR se escanea… y no entra ni un solo mensaje, porque
+ * Evolution está haciendo POST a su propio `localhost`. Con el valor público,
+ * el BFF sale a internet y vuelve para hablar con un proceso que tiene al lado.
+ *
+ * Ahora la URL pública es `PUBLIC_WEBHOOK_BASE_URL`. Se mantiene el respaldo a
+ * `API_BASE_URL` para no romper un despliegue que hoy funcione porque le puso
+ * el valor público — pero si de ese respaldo sale una dirección a la que nadie
+ * puede llegar desde internet, se AVISA en vez de callar. Ese aviso es la única
+ * pista que separa «no llega ningún WhatsApp» de una tarde revisando Evolution.
  */
 export function urlDelWebhook(base: string | undefined, channelId: unknown, token: string): string {
-  const raiz = (base ?? process.env.API_BASE_URL ?? 'http://localhost:3100').replace(/\/+$/, '');
+  const publica = process.env.PUBLIC_WEBHOOK_BASE_URL;
+  const respaldo = process.env.API_BASE_URL;
+  const raiz = (base ?? publica ?? respaldo ?? 'http://localhost:3100').replace(/\/+$/, '');
+
+  if (!base && !publica && esInalcanzableDesdeFuera(raiz)) {
+    log.warn(
+      `el webhook de WhatsApp quedaría en ${raiz}, una dirección a la que Evolution NO puede ` +
+        'llegar desde internet: la línea se conectará pero no entrará ningún mensaje. ' +
+        'Configura PUBLIC_WEBHOOK_BASE_URL con la URL pública de la API ' +
+        '(p. ej. https://api.abraxa.club). API_BASE_URL es la base INTERNA que usa el BFF ' +
+        'y no sirve para esto.',
+    );
+  }
+
   const id = typeof channelId === 'string' ? channelId : 'sin-id';
   return `${raiz}/inbox/webhooks/${id}?token=${encodeURIComponent(token)}`;
 }

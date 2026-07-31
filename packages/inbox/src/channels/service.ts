@@ -19,6 +19,8 @@
  */
 import { PlatformError, tenantDb } from '@abraxa/db';
 import type { ChannelType, TenantContext } from '@abraxa/db';
+import { zonaValida } from '../bridge/hours';
+import { IDS_POR_LOTE } from '../config';
 import { driverFor, hasDriver } from '../drivers/registry';
 import { log } from '../logger';
 import type { BusinessHours, ChannelRow } from '../types';
@@ -193,8 +195,58 @@ export async function ajustarCanal(
   return sanearCanal(normalizarFila(data as Record<string, unknown>));
 }
 
-/** Baja de la línea con el proveedor y borrado de la fila. */
-export async function borrarCanal(ctx: TenantContext, channelId: string): Promise<void> {
+export interface ResultadoBaja {
+  /** `true` si la FILA del canal desapareció. */
+  borrado: boolean;
+  /** Hilos que tenía el canal. Se conservan salvo `purgar`. */
+  hilos: number;
+  /** Mensajes de esos hilos. */
+  mensajes: number;
+  /** Qué pasó, en una frase, para que la UI la pueda enseñar tal cual. */
+  detalle: string;
+}
+
+export interface OpcionesBaja {
+  /**
+   * Destruir además TODO el historial del canal. Hay que pedirlo por su
+   * nombre: `DELETE /inbox/channels/:id?purge=true`.
+   */
+  purgar?: boolean;
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Baja de la línea. Por defecto NO se lleva el historial por delante.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * Esto hacía `DELETE FROM channels`, y la migración 040 traía
+ * `threads.channel_id … ON DELETE CASCADE`. Sumadas, las dos cosas convertían
+ * el camino natural de reconexión —la línea se cae, borro el canal y lo vuelvo
+ * a crear para escanear un QR nuevo— en la destrucción irreversible de todas
+ * las conversaciones con todos los clientes. Con `{ ok: true }` de respuesta,
+ * sin confirmación y sin una línea de log que dijera cuántas filas se llevó.
+ *
+ * Ahora:
+ *
+ *   · Siempre se da de baja la línea con el proveedor y se vacía la `config`
+ *     (ahí viven el token del webhook y la instancia: si la línea ya no es
+ *     nuestra, sus secretos tampoco tienen por qué seguir guardados).
+ *   · Si el canal tiene historial, la fila se conserva en `disconnected`. El
+ *     canal deja de funcionar, que es lo que el usuario quería, y no se pierde
+ *     nada.
+ *   · Si no tiene ni un hilo, no hay nada que proteger: la fila se borra y la
+ *     lista de canales queda limpia.
+ *   · `purgar: true` es el borrado destructivo, explícito, y devuelve —y
+ *     registra— exactamente cuántos hilos y cuántos mensajes destruyó.
+ *
+ * Y para reconectar NO hace falta nada de esto: `GET /inbox/channels/:id/status`
+ * devuelve un QR nuevo cuando la instancia no está `open`.
+ */
+export async function borrarCanal(
+  ctx: TenantContext,
+  channelId: string,
+  opts: OpcionesBaja = {},
+): Promise<ResultadoBaja> {
   const db = tenantDb(ctx);
   const { data } = await db.from('channels').select('*').eq('id', channelId).maybeSingle();
   if (!data) throw new PlatformError('NOT_FOUND', 'Canal no encontrado.');
@@ -203,14 +255,97 @@ export async function borrarCanal(ctx: TenantContext, channelId: string): Promis
   const driver = hasDriver(fila.type) ? driverFor(fila.type) : null;
   if (driver?.teardownChannel) {
     // Que el proveedor no responda no puede dejar al cliente con un canal
-    // muerto que no se puede borrar. Queda en el log.
+    // muerto que no se puede dar de baja. Queda en el log.
     await driver
       .teardownChannel({ channelId: fila.id, config: fila.config })
       .catch((e: unknown) => log.warn(`baja del canal ${fila.name} con el proveedor: ${String(e)}`));
   }
 
-  const { error } = await db.from('channels').delete().eq('id', channelId);
-  if (error) throw new PlatformError('INTERNAL', `No se pudo borrar el canal: ${error.message}`);
+  // Qué hay en juego. Se cuenta ANTES de tocar nada, y se responde siempre:
+  // una operación destructiva tiene que decir qué destruyó.
+  const { data: filasHilos } = await db.from('threads').select('id').eq('channel_id', fila.id);
+  const idsHilos = ((filasHilos as Array<{ id: string }> | null) ?? []).map((h) => h.id);
+
+  let mensajes = 0;
+  for (const lote of enLotes(idsHilos)) {
+    const { count } = await db
+      .from('messages')
+      .select('id', { head: true, count: 'exact' })
+      .in('thread_id', lote);
+    mensajes += count ?? 0;
+  }
+
+  if (opts.purgar) {
+    if (idsHilos.length > 0) {
+      // El orden importa: los mensajes cuelgan de los hilos.
+      for (const lote of enLotes(idsHilos)) {
+        const { error: errMsg } = await db.from('messages').delete().in('thread_id', lote);
+        if (errMsg) {
+          throw new PlatformError(
+            'INTERNAL',
+            `No se pudieron borrar los mensajes: ${errMsg.message}`,
+          );
+        }
+      }
+      const { error: errHilos } = await db.from('threads').delete().eq('channel_id', fila.id);
+      if (errHilos) {
+        throw new PlatformError('INTERNAL', `No se pudieron borrar los hilos: ${errHilos.message}`);
+      }
+    }
+    const { error } = await db.from('channels').delete().eq('id', fila.id);
+    if (error) throw new PlatformError('INTERNAL', `No se pudo borrar el canal: ${error.message}`);
+
+    // Que quede escrito. Un borrado irreversible sin rastro en el log es la
+    // clase de cosa que nadie puede reconstruir después.
+    log.warn(
+      `PURGA del canal ${fila.name} (${fila.id}): ${idsHilos.length} hilo(s) y ` +
+        `${mensajes} mensaje(s) destruidos de forma irreversible`,
+    );
+    return {
+      borrado: true,
+      hilos: idsHilos.length,
+      mensajes,
+      detalle: `Canal eliminado junto con ${idsHilos.length} conversación(es) y ${mensajes} mensaje(s).`,
+    };
+  }
+
+  // Sin historial no hay nada que proteger: la fila se va y la lista queda
+  // limpia.
+  if (idsHilos.length === 0) {
+    const { error } = await db.from('channels').delete().eq('id', fila.id);
+    if (error) throw new PlatformError('INTERNAL', `No se pudo borrar el canal: ${error.message}`);
+    log.info(`canal ${fila.name} eliminado (no tenía conversaciones)`);
+    return { borrado: true, hilos: 0, mensajes: 0, detalle: 'Canal eliminado.' };
+  }
+
+  // Baja lógica. La línea deja de funcionar; el historial se queda.
+  const { error } = await db
+    .from('channels')
+    .update({
+      status: 'disconnected',
+      // Los secretos de una línea que ya no es nuestra no se guardan.
+      config: {},
+      external_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', fila.id);
+  if (error) {
+    throw new PlatformError('INTERNAL', `No se pudo dar de baja el canal: ${error.message}`);
+  }
+
+  log.info(
+    `canal ${fila.name} desconectado; se conservan ${idsHilos.length} hilo(s) y ` +
+      `${mensajes} mensaje(s)`,
+  );
+  return {
+    borrado: false,
+    hilos: idsHilos.length,
+    mensajes,
+    detalle:
+      `La línea quedó desconectada. Se conservan ${idsHilos.length} conversación(es) y ` +
+      `${mensajes} mensaje(s): el historial con tus clientes no se borra al desconectar. ` +
+      'Para eliminarlo todo de forma irreversible: ?purge=true.',
+  };
 }
 
 /**
@@ -226,7 +361,38 @@ export function validarHorario(h: BusinessHours): BusinessHours {
         'Sin ella se interpretaría en UTC y el agente se callaría a la hora equivocada.',
     );
   }
+
+  // Y que la zona EXISTA (2026-07-31).
+  //
+  // Faltaba justo la mitad de esta comprobación, y la mitad que faltaba era la
+  // que se cuela: exigir que `tz` venga puesta pero no que signifique algo deja
+  // pasar `"America/MexicoCity"`, `"GMT-6"` o `"CST"`. `momentoLocal()` no
+  // podía hacer nada con eso salvo caer a UTC, y hasta hoy caía en silencio —
+  // así que el síntoma llegaba como "mi agente contesta a deshoras", con la
+  // pantalla de configuración mostrando el horario correcto.
+  //
+  // Se rechaza en la captura, que es el único momento en que hay una persona
+  // delante capaz de corregirlo.
+  if (h.tz && !zonaValida(h.tz)) {
+    throw new PlatformError(
+      'VALIDATION',
+      `La zona horaria "${h.tz}" no existe. Usa un identificador de la IANA, ` +
+        'por ejemplo "America/Mexico_City" o "America/Monterrey".',
+    );
+  }
   return h;
+}
+
+/**
+ * Parte una lista de ids en lotes que quepan en una query string.
+ *
+ * Devuelve `[]` para una lista vacía, y eso importa: quien la recorre no tiene
+ * que acordarse de comprobar el caso de cero antes del bucle.
+ */
+function enLotes(ids: string[], tamano = IDS_POR_LOTE): string[][] {
+  const salida: string[][] = [];
+  for (let i = 0; i < ids.length; i += tamano) salida.push(ids.slice(i, i + tamano));
+  return salida;
 }
 
 function estadoValido(s: string | undefined): ChannelRow['status'] {

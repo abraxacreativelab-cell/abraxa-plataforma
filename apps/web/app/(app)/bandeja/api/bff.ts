@@ -48,6 +48,19 @@ export function modoDemo(): boolean {
   return process.env.NODE_ENV !== 'production' && process.env.ABRAXA_INBOX_DEMO === '1';
 }
 
+/**
+ * La base INTERNA de `apps/api`. Servidor a servidor, nunca desde el navegador.
+ *
+ * `API_BASE_URL` significaba dos cosas incompatibles hasta el 2026-07-31: ésta,
+ * y la URL PÚBLICA del webhook de Evolution (`drivers/whatsapp/index.ts`). Un
+ * solo valor no puede ser las dos —una es `http://localhost:3100` o el nombre
+ * del servicio en la red de contenedores; la otra tiene que ser alcanzable
+ * desde internet— y la línea se veía activa mientras no entraba ni un mensaje.
+ *
+ * La pública se llama ahora `PUBLIC_WEBHOOK_BASE_URL`. Ésta se queda con el
+ * nombre viejo y con su significado interno, que es el que ya tenía aquí: así
+ * ningún despliegue actual se rompe por el cambio.
+ */
 const API = (process.env.API_BASE_URL ?? 'http://localhost:3100').replace(/\/+$/, '');
 
 /** Llama a `apps/api` con las cabeceras del contrato. */

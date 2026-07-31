@@ -28,6 +28,14 @@
  *
  *  Un mensaje sin `external_id` no se puede deduplicar, y por eso el parser lo
  *  descarta antes de llegar hasta aquí.
+ *
+ *  ── Y por eso mismo el eco `fromMe` dice quién escribió ────────────────────
+ *
+ *  Si un saliente salió de la plataforma, ya está en la base y su eco choca con
+ *  el índice único: se devuelve `duplicado` y ahí muere. Un eco `fromMe` que SÍ
+ *  se inserta es, por definición, un mensaje que alguien escribió fuera —el
+ *  dueño desde su propio teléfono— y eso tiene que callar a la IA igual que
+ *  escribir desde la bandeja. Ver `callarSiLoEscribioUnHumano()`.
  */
 import { tenantDb } from '@abraxa/db';
 import type { InboundMessage, TenantContext } from '@abraxa/db';
@@ -36,12 +44,13 @@ import {
   type CorredorDeAgentes,
   type ResultadoPuente,
 } from './bridge/responder';
+import { MAX_SALIENTES_EN_VUELO, MINUTOS_PAUSA_POR_ECO_HUMANO } from './config';
 import { contextoDeCanal } from './context';
 import { driverFor } from './drivers/registry';
 import type { EventoCanal, SobreWebhook } from './drivers/types';
-import { asegurarHilo, cargarHilo, tocarHilo } from './inbox/service';
+import { asegurarHilo, cargarHilo, parchearHilo, tocarHilo } from './inbox/service';
 import { log } from './logger';
-import type { AiOutcome, ChannelRow, MediaItem, MessageRow } from './types';
+import type { AiOutcome, ChannelRow, MediaItem, MessageRow, ThreadRow } from './types';
 
 export interface ResultadoMensaje {
   externalId: string;
@@ -177,6 +186,13 @@ export async function ingerirMensaje(
     ...(m.receivedAt ? { cuando: m.receivedAt } : {}),
   });
 
+  // ── La regla #1, también por el camino del teléfono ──────────────────────
+  //
+  // Si este saliente NO salió de la plataforma, lo escribió un humano desde el
+  // teléfono. La IA se calla. Va ANTES de releer el hilo, para que la pausa ya
+  // esté puesta cuando el puente lo mire.
+  if (m.fromMe) await callarSiLoEscribioUnHumano(ctx, hilo, texto, opts.ahora);
+
   // ── El puente ─────────────────────────────────────────────────────────────
   if (opts.responder === false) {
     return { externalId: m.externalId, duplicado: false, threadId: hilo.id, messageId: mensaje.id };
@@ -210,6 +226,90 @@ export async function ingerirMensaje(
     messageId: mensaje.id,
     ai,
   };
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  El dueño contestó desde su propio teléfono → la IA se calla.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * La regla #1 del paquete («un humano escribe en el hilo → la IA se calla, sin
+ * excepción») se cumplía sólo por la vía de la bandeja. El camino más común es
+ * el otro: el emprendedor ve la conversación en WhatsApp, en su teléfono, y
+ * contesta ahí. Ese mensaje vuelve por el webhook como un eco `fromMe` y hasta
+ * hoy no tocaba nada del hilo, así que al siguiente mensaje del cliente el
+ * agente contestaba encima de su dueño.
+ *
+ * ── Cómo se distingue un eco NUESTRO de uno del teléfono ───────────────────
+ *
+ * El eco no trae bandera. Lo que sí trae información es el resultado del
+ * INSERT: si el saliente salió de la plataforma, `enviarEnHilo` ya lo registró
+ * y el eco choca con el índice único `(tenant_id, external_id)` — ese camino
+ * devuelve `duplicado` mucho antes de llegar aquí. Llegar aquí con `fromMe`
+ * significa que este mensaje NO estaba en la base.
+ *
+ * Queda una ventana: el eco puede adelantarse a nuestro propio acuse. En ese
+ * instante el marcador de `enviarEnHilo` sigue en la base como saliente SIN
+ * `external_id` (`queued`, o `sent` si el driver no devuelve id). Eso es lo que
+ * se busca antes de pausar; si aparece, el eco es nuestro y no se toca el hilo.
+ *
+ * Los dos errores posibles no pesan igual, y por eso el criterio se inclina a
+ * callar: pausar de más deja al agente callado una hora en un hilo; pausar de
+ * menos deja al agente contradiciendo a su dueño delante del cliente.
+ *
+ * Best-effort a propósito: si esto falla, ya está el mensaje guardado y el
+ * webhook no se cae. Queda en el log.
+ */
+async function callarSiLoEscribioUnHumano(
+  ctx: TenantContext,
+  hilo: ThreadRow,
+  texto: string | null,
+  ahora?: Date,
+): Promise<void> {
+  try {
+    if (await esEcoDeUnEnvioNuestro(ctx, hilo.id, texto)) {
+      log.debug(`hilo ${hilo.id}: el eco se adelantó a nuestro acuse; no es un humano`);
+      return;
+    }
+
+    const hasta = new Date(
+      (ahora ?? new Date()).getTime() + MINUTOS_PAUSA_POR_ECO_HUMANO * 60_000,
+    ).toISOString();
+
+    await parchearHilo(ctx, hilo.id, { ai_paused_until: hasta });
+    log.info(
+      `hilo ${hilo.id}: alguien contestó desde el teléfono; la IA se pausa hasta ${hasta}`,
+    );
+  } catch (err) {
+    log.warn(`no se pudo pausar la IA del hilo ${hilo.id} tras un eco humano: ${String(err)}`);
+  }
+}
+
+/** ¿Hay un saliente nuestro en vuelo que explique este eco? */
+async function esEcoDeUnEnvioNuestro(
+  ctx: TenantContext,
+  threadId: string,
+  texto: string | null,
+): Promise<boolean> {
+  if (!texto) return false;
+
+  // `external_id` nulo = nunca se confirmó con el proveedor; es decir, o sigue
+  // en vuelo, o el driver no devuelve id y no hay forma de deduplicar. En un
+  // hilo sano son cero o una fila, así que el filtro va en la base y no en JS:
+  // traerse todos los salientes de una conversación de seis meses para mirar
+  // uno sería exactamente el `SELECT` que el resto del archivo evita.
+  const { data } = await tenantDb(ctx)
+    .from('messages')
+    .select('body')
+    .eq('thread_id', threadId)
+    .eq('direction', 'out')
+    .is('external_id', null)
+    .limit(MAX_SALIENTES_EN_VUELO);
+
+  const esperado = texto.trim();
+  return ((data as Array<Pick<MessageRow, 'body'>> | null) ?? []).some(
+    (f) => (f.body ?? '').trim() === esperado,
+  );
 }
 
 /**

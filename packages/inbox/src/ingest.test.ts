@@ -291,6 +291,172 @@ describe('cuando un humano toma el hilo', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// Criterio #3, por el camino MÁS COMÚN: el dueño con el teléfono en la mano.
+//
+// Las pruebas de arriba recorren la vía de la bandeja (`enviarEnHilo`, que
+// llena `assigned_to`). Pero el emprendedor casi nunca tiene la pantalla
+// abierta: ve el WhatsApp en su celular y contesta ahí. Ese mensaje vuelve por
+// el webhook como un eco `fromMe`, y hasta el 2026-07-31 no tocaba nada del
+// hilo — el agente seguía contestando encima de su dueño. La regla dice «sin
+// excepción», y ésta era la excepción.
+// ════════════════════════════════════════════════════════════════════════════
+describe('cuando el dueño contesta desde su propio teléfono', () => {
+  it('la IA se calla en el siguiente mensaje del cliente', async () => {
+    const c = canal();
+    const agents = createFakeAgents();
+
+    // 1. El cliente escribe y el agente contesta. Todo bien.
+    const r1 = await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: 'hola, ¿precio?', externalId: 'ext-1' }]),
+      { agents },
+    );
+    expect(r1.mensajes[0]?.ai?.outcome).toBe('answered');
+
+    // 2. Santiago ve la conversación en SU CELULAR y contesta desde WhatsApp.
+    //    Evolution echa ese mensaje por el webhook con `fromMe: true`.
+    await ingerirWebhook(
+      c,
+      sobreCon([
+        {
+          address: '+525512345678',
+          body: 'Hola Ana, yo te atiendo: el precio es 12,000',
+          externalId: 'ext-eco-1',
+          fromMe: true,
+        },
+      ]),
+      { agents },
+    );
+
+    // El hilo quedó con la IA en pausa. No se le atribuye a ningún correo:
+    // el eco no trae identidad.
+    expect(hilos()[0]?.ai_paused_until).toBeTruthy();
+    expect(hilos()[0]?.assigned_to).toBeNull();
+
+    // 3. Ana responde «¿y con IVA?». El agente NO se mete: contradecir el
+    //    precio que su dueño acaba de dar es el peor fallo posible del producto.
+    const r3 = await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: '¿y con IVA?', externalId: 'ext-2' }]),
+      { agents },
+    );
+
+    expect(r3.mensajes[0]?.ai?.outcome).toBe('skipped');
+    expect(agents.llamadas).toHaveLength(1); // sólo la primera vez
+    expect(driver.enviados).toHaveLength(1); // y sólo salió aquella respuesta
+  });
+
+  it('la pausa vence sola: al cabo de una hora el agente vuelve', async () => {
+    const c = canal();
+    const agents = createFakeAgents();
+    const ahora = new Date('2026-07-31T10:00:00Z');
+
+    await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: 'te contesto yo', externalId: 'eco', fromMe: true }]),
+      { agents, ahora },
+    );
+
+    // Dentro de la hora, callado…
+    const dentro = await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: '¿sigues ahí?', externalId: 'in-1' }]),
+      { agents, ahora: new Date('2026-07-31T10:30:00Z') },
+    );
+    expect(dentro.mensajes[0]?.ai?.outcome).toBe('skipped');
+
+    // …y pasada, vuelve solo. Una pausa que hay que acordarse de quitar no se
+    // usa, y un hilo callado para siempre se lee como "el producto no sirve".
+    const despues = await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: '¿hola?', externalId: 'in-2' }]),
+      { agents, ahora: new Date('2026-07-31T11:30:00Z') },
+    );
+    expect(despues.mensajes[0]?.ai?.outcome).toBe('answered');
+  });
+
+  /**
+   * La contraprueba, y la que evita el auto-silenciamiento intermitente.
+   *
+   * El eco de NUESTRA propia respuesta puede adelantarse a nuestro acuse: el
+   * webhook viaja por una conexión distinta de la respuesta HTTP del envío. En
+   * ese instante el marcador de `enviarEnHilo` sigue en la base como saliente
+   * sin `external_id`. Si eso contara como "un humano escribió", el agente se
+   * callaría a sí mismo de forma aleatoria y no reproducible a mano.
+   */
+  it('el eco de nuestra propia respuesta, adelantado al acuse, NO pausa nada', async () => {
+    const c = canal();
+    const agents = createFakeAgents();
+    const ctx = contextoDeCanal(c);
+
+    await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: 'hola', externalId: 'ext-1' }]),
+      { agents },
+    );
+
+    // Se simula el envío EN VUELO: el marcador existe, todavía sin external_id.
+    const salida = mensajes(ctx).find((m) => m.direction === 'out')!;
+    (salida as unknown as Record<string, unknown>).external_id = null;
+    (salida as unknown as Record<string, unknown>).status = 'queued';
+
+    // Y llega su eco por el webhook, con OTRO external_id (el del proveedor).
+    await ingerirWebhook(
+      c,
+      sobreCon([
+        {
+          address: '+525512345678',
+          body: salida.body ?? '',
+          externalId: 'eco-adelantado',
+          fromMe: true,
+        },
+      ]),
+      { agents },
+    );
+
+    expect(hilos()[0]?.ai_paused_until).toBeNull();
+
+    // Y el agente sigue trabajando.
+    const r2 = await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: 'otra pregunta', externalId: 'ext-2' }]),
+      { agents },
+    );
+    expect(r2.mensajes[0]?.ai?.outcome).toBe('answered');
+  });
+
+  it('el eco de un saliente YA confirmado es un duplicado y tampoco pausa', async () => {
+    const c = canal();
+    const agents = createFakeAgents();
+    const ctx = contextoDeCanal(c);
+
+    await ingerirWebhook(
+      c,
+      sobreCon([{ address: '+525512345678', body: 'hola', externalId: 'ext-1' }]),
+      { agents },
+    );
+    const salida = mensajes(ctx).find((m) => m.direction === 'out')!;
+
+    // Mismo `external_id` que ya guardamos: choca con el índice único.
+    const r = await ingerirWebhook(
+      c,
+      sobreCon([
+        {
+          address: '+525512345678',
+          body: salida.body ?? '',
+          externalId: salida.external_id!,
+          fromMe: true,
+        },
+      ]),
+      { agents },
+    );
+
+    expect(r.mensajes[0]?.duplicado).toBe(true);
+    expect(hilos()[0]?.ai_paused_until).toBeNull();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // Criterio #5 · si el agente falla, el mensaje queda marcado. Sin disculpas.
 // ════════════════════════════════════════════════════════════════════════════
 describe('cuando el agente falla', () => {

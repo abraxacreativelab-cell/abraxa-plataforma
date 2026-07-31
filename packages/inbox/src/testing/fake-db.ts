@@ -22,7 +22,7 @@ export type Fila = Record<string, unknown>;
 
 interface Filtro {
   col: string;
-  op: 'eq' | 'gte' | 'lte' | 'in';
+  op: 'eq' | 'gte' | 'lte' | 'in' | 'is';
   valor: unknown;
 }
 
@@ -36,6 +36,13 @@ function cumple(fila: Fila, f: Filtro): boolean {
   const v = fila[f.col];
   if (f.op === 'eq') return v === f.valor;
   if (f.op === 'in') return Array.isArray(f.valor) && f.valor.includes(v);
+  // `.is(col, null)` es "IS NULL" en SQL, y en un objeto de JavaScript una
+  // columna que nunca se escribió llega como `undefined`. Postgres no
+  // distingue las dos cosas: la fila no tiene valor ahí, y punto.
+  if (f.op === 'is') {
+    if (f.valor === null) return v === null || v === undefined;
+    return v === f.valor;
+  }
   if (v === undefined || v === null) return false;
   const a = String(v);
   const b = String(f.valor);
@@ -130,6 +137,11 @@ class Builder implements PromiseLike<Resultado> {
 
   in(col: string, valores: unknown[]): this {
     this.filtros.push({ col, op: 'in', valor: valores });
+    return this;
+  }
+
+  is(col: string, valor: unknown): this {
+    this.filtros.push({ col, op: 'is', valor });
     return this;
   }
 

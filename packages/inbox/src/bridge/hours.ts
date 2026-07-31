@@ -10,9 +10,42 @@
  * agente contesta a tus clientes mientras duermes". Un horario vacío tiene que
  * significar que sí contesta, no que no.
  */
+import { log } from '../logger';
 import type { BusinessHours, DiaSemana } from '../types';
 
 const DIAS: DiaSemana[] = ['dom', 'lun', 'mar', 'mie', 'jue', 'vie', 'sab'];
+
+/**
+ * ¿Conoce el runtime esta zona horaria?
+ *
+ * Se pregunta ANTES de guardar (`validarHorario`) para poder rechazar la
+ * captura, y también en el camino caliente para poder avisar. `Intl` no expone
+ * un "¿es válida?": la única forma es construir el formateador y ver si lanza.
+ */
+export function zonaValida(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zonas ya avisadas, para no repetir el aviso en cada mensaje.
+ *
+ * Sin esto, un solo cliente con la zona mal escrita llena el log con una línea
+ * por cada WhatsApp que entra — y un log que grita en cada mensaje se aprende a
+ * ignorar, que es la misma sordera que teníamos con el `catch` vacío. El
+ * conjunto se queda en memoria del proceso: como mucho crece con el número de
+ * zonas distintas mal escritas, que es un puñado.
+ */
+const yaAvisadas = new Set<string>();
+
+/** Sólo para las pruebas: vuelve a permitir el aviso de una zona. */
+export function __olvidarAvisosDeZona(): void {
+  yaAvisadas.clear();
+}
 
 /** Minutos desde medianoche de un `"HH:MM"`. `null` si no es una hora válida. */
 export function minutosDe(hhmm: string): number | null {
@@ -60,10 +93,27 @@ export function momentoLocal(ahora: Date, tz: string | undefined): { dia: DiaSem
     const hora = Number(buscar('hour')) % 24;
     const minuto = Number(buscar('minute'));
     return { dia, minutos: hora * 60 + minuto };
-  } catch {
-    // Zona inválida en la config del cliente. Se cae a UTC en vez de romper la
-    // ingesta de un mensaje: un horario mal configurado no puede tirar la
-    // bandeja.
+  } catch (err) {
+    // ── Se cae a UTC, pero ya NO en silencio (2026-07-31) ──────────────────
+    //
+    // Seguir en vez de romper es correcto: un horario mal capturado no puede
+    // tirar la ingesta de un mensaje. Callarse no lo era. La consecuencia de
+    // esta rama no es cosmética: un negocio en `America/Mexico_City` con la
+    // zona mal escrita —`America/MexicoCity`, `GMT-6`, la que pegó el cliente
+    // desde una hoja de cálculo— queda evaluado en UTC, seis horas corrido.
+    // Su agente contesta de madrugada y se calla a media tarde, con la
+    // configuración en pantalla diciendo exactamente lo contrario. Sin una
+    // línea de log, eso se diagnostica leyendo este archivo.
+    //
+    // Se avisa UNA vez por zona: ver `yaAvisadas`.
+    if (!yaAvisadas.has(tz)) {
+      yaAvisadas.add(tz);
+      log.warn(
+        `zona horaria desconocida "${tz}" en el horario de atención: el horario se está ` +
+          'evaluando en UTC y puede abrir y cerrar a horas equivocadas. ' +
+          `Usa un identificador de la IANA, p. ej. "America/Mexico_City". (${String(err)})`,
+      );
+    }
     return { dia: DIAS[ahora.getUTCDay()] as DiaSemana, minutos: ahora.getUTCHours() * 60 + ahora.getUTCMinutes() };
   }
 }

@@ -101,7 +101,25 @@ CREATE TABLE app.threads (
   -- canal (el `pushName` de WhatsApp, el nombre del remitente del correo).
   contact_name text,
 
-  channel_id   uuid NOT NULL REFERENCES app.channels(id) ON DELETE CASCADE,
+  -- SIN `ON DELETE CASCADE`, y es deliberado (2026-07-31).
+  --
+  -- La implementación lo traía; el handoff §6 no lo pedía. La diferencia no es
+  -- cosmética: convertía «reconectar mi WhatsApp» —borrar el canal y volverlo a
+  -- crear para escanear un QR nuevo, que es lo que cualquiera intenta cuando la
+  -- línea se cae— en «borrar seis meses de conversaciones con mis clientes»,
+  -- irreversible y con la API respondiendo `{ ok: true }`. El historial de
+  -- conversaciones ES el producto.
+  --
+  -- Sin la cascada, un DELETE sobre un canal con hilos falla con 23503 y nadie
+  -- pierde nada. `borrarCanal()` ya no lo intenta: da de baja la línea con el
+  -- proveedor y deja el canal `disconnected` conservando las filas; el borrado
+  -- destructivo existe, pero hay que pedirlo con `?purge=true`.
+  --
+  -- Se deja NO ACTION (el default) y NO `RESTRICT` a propósito: NO ACTION
+  -- difiere la comprobación al final de la sentencia, así que borrar un TENANT
+  -- —que cascadea a `channels` y a `threads` en la misma sentencia— sigue
+  -- funcionando. `RESTRICT` comprueba de inmediato y lo rompería.
+  channel_id   uuid NOT NULL REFERENCES app.channels(id),
   channel_type text NOT NULL,
 
   -- ← GENÉRICO. Teléfono E.164, correo, id de Instagram. No un JID.

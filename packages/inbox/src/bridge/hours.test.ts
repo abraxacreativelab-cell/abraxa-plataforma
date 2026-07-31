@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { dentroDeHorario, minutosDe, momentoLocal } from './hours';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  __olvidarAvisosDeZona,
+  dentroDeHorario,
+  minutosDe,
+  momentoLocal,
+  zonaValida,
+} from './hours';
 import type { BusinessHours } from '../types';
 
 const CDMX = 'America/Mexico_City';
@@ -101,5 +107,89 @@ describe('dentroDeHorario', () => {
       semana: { vie: [['no', 'sé'], ['09:00', '18:00']] as Array<[string, string]> },
     };
     expect(dentroDeHorario(h, ahora)).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Una zona horaria inválida ya no se traga en silencio.
+//
+// El `catch` de `momentoLocal` caía a UTC sin decir nada. Seguir en vez de
+// romper está bien —un horario mal capturado no puede tumbar la ingesta de un
+// mensaje— pero callarse no: un negocio de CDMX evaluado en UTC contesta seis
+// horas corrido, con la pantalla de configuración mostrando el horario que el
+// dueño puso. Sin una línea de log, eso sólo se diagnostica leyendo el código.
+// ════════════════════════════════════════════════════════════════════════════
+describe('una zona horaria que no existe', () => {
+  const ahora = new Date('2026-07-31T18:00:00Z'); // viernes 12:00 CDMX
+  const avisos: string[] = [];
+  let espia: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    avisos.length = 0;
+    __olvidarAvisosDeZona();
+    espia = vi.spyOn(console, 'warn').mockImplementation((m: unknown) => {
+      avisos.push(String(m));
+    });
+  });
+
+  afterEach(() => espia.mockRestore());
+
+  it('se registra en vez de desaparecer en un catch vacío', () => {
+    momentoLocal(ahora, 'America/MexicoCity');
+
+    expect(avisos).toHaveLength(1);
+    // El mensaje tiene que llevar la zona culpable y decir qué se hizo en su
+    // lugar: un aviso que no permite arreglarlo es tan inútil como el silencio.
+    expect(avisos[0]).toContain('America/MexicoCity');
+    expect(avisos[0]).toMatch(/UTC/);
+  });
+
+  it('sigue funcionando: cae a UTC y no rompe la ingesta', () => {
+    const enUtc = momentoLocal(ahora, undefined);
+    expect(momentoLocal(ahora, 'GMT-6')).toEqual(enUtc);
+  });
+
+  it('avisa UNA vez por zona, no una vez por mensaje', () => {
+    for (let i = 0; i < 50; i++) momentoLocal(ahora, 'Marte/Olympus');
+
+    // Un log que grita en cada WhatsApp se aprende a ignorar, y esa sordera es
+    // la misma que teníamos con el catch vacío.
+    expect(avisos).toHaveLength(1);
+  });
+
+  it('una zona VÁLIDA no dice nada', () => {
+    momentoLocal(ahora, CDMX);
+    expect(avisos).toEqual([]);
+  });
+});
+
+describe('zonaValida', () => {
+  it('acepta identificadores de la IANA', () => {
+    expect(zonaValida(CDMX)).toBe(true);
+    expect(zonaValida('UTC')).toBe(true);
+    expect(zonaValida('Europe/Madrid')).toBe(true);
+  });
+
+  it('rechaza lo que el runtime no conoce', () => {
+    // Los dos errores reales: el guion bajo olvidado y el offset escrito a mano.
+    expect(zonaValida('America/MexicoCity')).toBe(false);
+    expect(zonaValida('GMT-6')).toBe(false);
+    expect(zonaValida('Marte/Olympus')).toBe(false);
+    expect(zonaValida('')).toBe(false);
+  });
+
+  /**
+   * `"CST"` SÍ pasa, y no es un descuido de la comprobación.
+   *
+   * El ICU de Node lo acepta como alias heredado y lo resuelve a la hora del
+   * centro de EE. UU. Es una zona real: `momentoLocal()` la formatea sin lanzar
+   * y el horario se evalúa en una zona coherente, no en UTC. Que sea ambigua
+   * para un humano —hay varios "CST" en el mundo— no la vuelve inválida para el
+   * runtime, y esta función responde exactamente una pregunta: «¿puede `Intl`
+   * trabajar con esto?». Inventarse una lista negra propia sería empezar a
+   * mantener una base de datos de zonas horarias a mano.
+   */
+  it('un alias heredado que el ICU sí resuelve no se rechaza', () => {
+    expect(zonaValida('CST')).toBe(true);
   });
 });

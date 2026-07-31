@@ -80,6 +80,8 @@ export {
   type AjustesCanal,
   type CanalPublico,
   type EntradaCanal,
+  type OpcionesBaja,
+  type ResultadoBaja,
 } from './channels/service';
 export { cargarCanalPorId, resolverCanalDeWebhook } from './channels/lookup';
 
