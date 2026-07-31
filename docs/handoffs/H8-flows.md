@@ -78,7 +78,7 @@ El criterio §8 #3 cambia en consecuencia (ver la §8, ya reescrita).
   escribe lo tuyo"). Lo reemplazas.
 - **No hay `.env`** (sólo `.env.example`) y GitHub **no tiene secretos**. Sin `DATABASE_URL` el
   worker no arranca: `apps/worker/src/index.ts` lanza *"DATABASE_URL es obligatorio"*. Tus pruebas
-  de motor corren **sin cola**, contra el ejecutor directo. Ver §10.
+  de motor corren **sin cola**, contra el ejecutor directo. Ver §9.
 - No hay protección de rama (repo privado sin GitHub Pro): **el gate de CI es la única ley**.
 
 ---
@@ -128,8 +128,15 @@ Es la función que convierte el producto de "un CRM bonito" a "mi negocio trabaj
 | **Rama** | `h8-flows` · worktree `PLATAFORMA-h8-flows` |
 
 **Implementas:** `FlowPort`.
-**Consumes:** `InboxPort` (H6) · `AgentPort` (H3) · `VaultPort` (H4) — **contra las interfaces.**
-No esperes a H6: si su implementación no existe, tus tests usan un doble.
+**Consumes:** `InboxPort` (H6) · `AgentPort` (H3) · `VaultPort` (H4) · el port del CRM (**H15**)
+— **contra las interfaces.**
+
+> **Matiz que cambió el 2026-07-31.** Antes decía *"no esperes a H6"*. Ahora **sí esperas**: este
+> carril bajó a la Ola 3 y el freno de la §10 exige que H6 y H15 hayan mergeado, porque sin
+> contactos ni embudo la mitad de tu catálogo de nodos no tiene sobre qué operar. Lo que **no**
+> cambia es cómo pruebas: **siempre contra la interfaz, con dobles**. Tus tests corren en CI, y
+> CI no tiene base ni secretos. Esperar el merge y programar contra la interfaz no son
+> alternativas: son las dos cosas.
 
 ---
 
