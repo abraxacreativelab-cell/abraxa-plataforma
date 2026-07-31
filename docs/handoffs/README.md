@@ -77,6 +77,32 @@ sea H6.
 
 ---
 
+## Antes de escribir una ruta: `contextoDePeticion()`
+
+> **Ningún router de dominio escribe su propio `contextoDe`. Se importa el canónico.**
+
+```ts
+import { contextoDePeticion, responderError } from '@abraxa/db';
+const ctx = await contextoDePeticion(req);
+```
+
+Entre el 2026-07-30 y el 07-31, **cuatro carriles** escribieron cada uno su propio resolvedor de
+contexto a partir de las cabeceras, y **tres salieron mal igual**: leían `x-user-email` sin
+comprobar antes el secreto compartido del BFF. Uno llegó a `main` y estuvo sirviendo la bóveda a
+cualquiera con `curl`. Un carril que se equivoca es un error; cuatro es un defecto de diseño —el
+patrón correcto no existía como pieza importable—, y por eso ahora existe.
+
+`contextoDePeticion` exige `proxyVerified()` **antes** de mirar una sola cabecera de identidad,
+falla cerrado en producción sin `PROXY_SECRET`, y resuelve la membresía por
+`usePort('tenancy')`. Para identidad **sin** empresa (alta, invitación, ritual):
+`correoVerificadoDe(req)`.
+
+**ESLint marca la lectura directa** de esas cabeceras fuera de la pieza canónica: falla tu PR.
+El detalle está en [CONTRIBUTING.md](../../CONTRIBUTING.md#quién-pide-contextodepeticion) y en
+[H0 §8.3](H0-orquestador.md).
+
+---
+
 ## Índice
 
 | # | Documento | Ola | Ruta crítica |
