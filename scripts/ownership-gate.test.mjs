@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { globToRegExp, perteneceA, duenosDe, revisarMigracion } from './ownership-gate.mjs';
+import {
+  globToRegExp,
+  perteneceA,
+  duenosDe,
+  revisarMigracion,
+  pathsEfectivos,
+  CARRIL_ORQUESTADOR,
+} from './ownership-gate.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ownership = JSON.parse(readFileSync(join(RAIZ, '.ownership.json'), 'utf8'));
@@ -51,8 +58,26 @@ describe('perteneceA — exclusiones', () => {
 });
 
 describe('el mapa de propiedad', () => {
-  it('tiene las 14 entradas', () => {
-    expect(Object.keys(ownership)).toHaveLength(14);
+  it('tiene las 14 entradas de construcción más la de H0', () => {
+    expect(Object.keys(ownership)).toHaveLength(15);
+    expect(ownership[CARRIL_ORQUESTADOR]).toBeDefined();
+  });
+
+  it('H0 no tiene bloque de migraciones: no las escribe, las ordena', () => {
+    expect(ownership[CARRIL_ORQUESTADOR].migrations).toBeNull();
+  });
+
+  it('H0 no se solapa con ningún carril de construcción', () => {
+    // Con h1-fundacion sí, a propósito: ya mergeó y está dormido.
+    const construccion = Object.keys(ownership).filter(
+      (n) => n !== CARRIL_ORQUESTADOR && n !== 'h1-fundacion',
+    );
+    for (const glob of ownership[CARRIL_ORQUESTADOR].paths) {
+      const muestra = glob.replace(/\*\*/g, 'x/y').replace(/\*/g, 'x');
+      for (const carril of construccion) {
+        expect(perteneceA(muestra, ownership[carril].paths), `${glob} vs ${carril}`).toBe(false);
+      }
+    }
   });
 
   it('cada entrada trae label y paths', () => {
@@ -84,6 +109,57 @@ describe('el mapa de propiedad', () => {
   it('un archivo ajeno se atribuye a su dueño real', () => {
     expect(duenosDe('packages/vault/src/resolver.ts', ownership)).toContain('h4-vault');
     expect(duenosDe('apps/web/app/(admin)/admin/page.tsx', ownership)).toContain('h14-admin');
+  });
+});
+
+describe('excepcionTransversal — la única escotilla, y con candado', () => {
+  const h0 = ownership[CARRIL_ORQUESTADOR];
+
+  it('sólo H0 declara una', () => {
+    const conExcepcion = Object.entries(ownership)
+      .filter(([, c]) => c.excepcionTransversal)
+      .map(([n]) => n);
+    expect(conExcepcion).toEqual([CARRIL_ORQUESTADOR]);
+  });
+
+  it('viene con fecha, PR y razón escrita, no sólo con rutas', () => {
+    const e = h0.excepcionTransversal;
+    expect(e.fecha).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(e.pr).toBeTypeOf('string');
+    expect(e.razon.length).toBeGreaterThan(40);
+    expect(e.paths.length).toBeGreaterThan(0);
+  });
+
+  it('es acotada: rutas explícitas, nunca el paquete entero de otro', () => {
+    for (const p of h0.excepcionTransversal.paths) {
+      expect(p, p).not.toMatch(/^packages\/[^/]+\/\*\*$/);
+      expect(p, p).not.toMatch(/^apps\/[^/]+\/\*\*$/);
+    }
+  });
+
+  it('H0 alcanza los archivos de la excepción, y sólo ésos', () => {
+    const globs = pathsEfectivos(CARRIL_ORQUESTADOR, h0);
+    expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(true);
+    expect(perteneceA('packages/agents/src/http/proxy-verified.ts', globs)).toBe(true);
+    // El resto del árbol de H3 sigue cerrado para H0.
+    expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
+    expect(perteneceA('packages/vault/src/resolver.ts', globs)).toBe(false);
+  });
+
+  it('un carril de construcción NO puede concederse una', () => {
+    const usurpador = {
+      paths: ['packages/inbox/**'],
+      excepcionTransversal: { paths: ['packages/vault/**'] },
+    };
+    expect(pathsEfectivos('h6-inbox', usurpador)).toEqual(['packages/inbox/**']);
+    expect(perteneceA('packages/vault/src/resolver.ts', pathsEfectivos('h6-inbox', usurpador))).toBe(
+      false,
+    );
+  });
+
+  it('la excepción NO transfiere propiedad: el dueño real no cambia', () => {
+    // Es lo que hace que `--check-overlap` siga siendo verdad.
+    expect(duenosDe('packages/agents/src/routes.ts', ownership)).toEqual(['h3-agents']);
   });
 });
 

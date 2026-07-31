@@ -21,6 +21,12 @@
  *  Y aparte, `--check-overlap`, que revisa el mapa entero: que ningún archivo
  *  tenga dos dueños concurrentes y que ninguno se quede sin dueño.
  *
+ *  Una sola escotilla, y con nombre propio: `excepcionTransversal`, que sólo
+ *  vale para `h0-integracion` y sólo sobre las rutas que ella misma enumera.
+ *  Es para que el orquestador pueda cerrar un agujero de seguridad en el árbol
+ *  de otro handoff sin esperar a que despierte. Se anuncia en la salida, no
+ *  transfiere propiedad y no toca `--check-overlap`. Ver .ownership.json.
+ *
  *  Sin dependencias a propósito: corre antes de `npm ci`.
  *
  *  Uso:
@@ -83,6 +89,28 @@ export function perteneceA(archivo, paths) {
 }
 
 const cargarOwnership = () => JSON.parse(readFileSync(RUTA_OWNERSHIP, 'utf8'));
+
+/** El único carril que puede declarar una excepción transversal. */
+export const CARRIL_ORQUESTADOR = 'h0-integracion';
+
+/**
+ * Los globs con los que se juzga UN PR: los del carril, más la excepción
+ * transversal si el carril es H0 y la declaró.
+ *
+ * Existe porque el orquestador a veces tiene que cerrar un agujero de seguridad
+ * que vive en el árbol de otro handoff y no puede esperar a que despierte. La
+ * excepción se declara en `.ownership.json` con fecha, PR y razón, es acotada a
+ * rutas explícitas, y NO entra en `duenosDe()` — el archivo sigue siendo de su
+ * dueño real, así que `--check-overlap` no cambia y la propiedad no se
+ * transfiere en silencio.
+ *
+ * Si cualquier otro carril se declarara una, se ignora: un carril de
+ * construcción no puede concederse permiso para salirse de su carril.
+ */
+export function pathsEfectivos(rama, cfg) {
+  if (rama !== CARRIL_ORQUESTADOR) return cfg.paths;
+  return [...cfg.paths, ...(cfg.excepcionTransversal?.paths ?? [])];
+}
 
 /** Quién es dueño de un archivo. Devuelve la lista de handoffs que lo reclaman. */
 export function duenosDe(archivo, ownership) {
@@ -195,8 +223,22 @@ function verificarPR(argv) {
     .split('\n')
     .filter(Boolean);
 
+  const globs = pathsEfectivos(rama, cfg);
+
   console.log(`${R.bold}ownership-gate${R.off} ${R.gris}·${R.off} ${cfg.label}`);
-  console.log(`${R.gris}  rama ${rama} · base ${base.slice(0, 10)} · ${cambiados.length} archivo(s)${R.off}\n`);
+  console.log(`${R.gris}  rama ${rama} · base ${base.slice(0, 10)} · ${cambiados.length} archivo(s)${R.off}`);
+
+  // La excepción transversal se ANUNCIA. Un permiso que se aplica en silencio
+  // es un permiso que nadie audita.
+  const exc = rama === CARRIL_ORQUESTADOR ? cfg.excepcionTransversal : null;
+  if (exc) {
+    console.log(
+      `${R.ambar}  ⚠ excepción transversal de H0 (${exc.fecha}) sobre ${exc.paths.length} ruta(s):${R.off}`,
+    );
+    for (const p of exc.paths) console.log(`${R.gris}      · ${p}${R.off}`);
+    console.log(`${R.gris}      razón: ${exc.razon}${R.off}`);
+  }
+  console.log('');
 
   if (cambiados.length === 0) {
     console.log(`${R.ambar}Sin cambios contra la base. Nada que verificar.${R.off}`);
@@ -215,7 +257,7 @@ function verificarPR(argv) {
       const m = /^migrations\/(\d{3})_/.exec(archivo);
       if (!m) {
         // migrations/README.md y compañía siguen la regla de propiedad normal.
-        if (!perteneceA(archivo, cfg.paths)) {
+        if (!perteneceA(archivo, globs)) {
           fallas.push(`${archivo}\n      no es de ${rama}. ${atribuir(archivo, ownership, rama)}`);
         }
         continue;
@@ -238,7 +280,7 @@ function verificarPR(argv) {
       continue;
     }
 
-    if (!perteneceA(archivo, cfg.paths)) {
+    if (!perteneceA(archivo, globs)) {
       fallas.push(`${archivo}\n      no es de ${rama}. ${atribuir(archivo, ownership, rama)}`);
     }
   }
