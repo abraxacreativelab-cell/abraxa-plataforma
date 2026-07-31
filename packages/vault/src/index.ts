@@ -1,18 +1,147 @@
 /**
- * @abraxa/vault — Boveda: valores canonicos, documentos, biblioteca e inyeccion a prompts
+ * ════════════════════════════════════════════════════════════════════════════
+ *  @abraxa/vault — LA BÓVEDA
+ * ════════════════════════════════════════════════════════════════════════════
  *
- * Carril de H4. H1 dejó el paquete creado, cableado a apps/api y con sus
- * dependencias instaladas: no hay que editar nada fuera de esta carpeta.
+ *  El emprendedor define UNA vez los números de su negocio y se propagan solos
+ *  a sus contratos, a sus mensajes y a los prompts de sus agentes. Cuando
+ *  cambia un precio, cambia en todos lados. Nadie inventa cifras.
  *
- * Al construir:
- *   1. Cuelga tus rutas de este `router`. apps/api ya lo monta en /vault.
- *   2. Si implementas un port, regístralo aquí abajo con `registerPort()`.
- *   3. Pon `ready: true` en src/meta.ts cuando el paquete haga algo real.
- *   4. Todo dato de dominio pasa por `tenantDb(ctx)`. El cliente crudo está
- *      prohibido por ESLint y no es negociable.
+ *  Tres reglas de diseño, heredadas de GARDEN y conservadas enteras:
+ *
+ *    1. El DOCUMENTO es la fuente de verdad. Los valores son una PROYECCIÓN.
+ *    2. NADA SE ACTIVA SOLO. Todo valor extraído nace en borrador y lo aprueba
+ *       una persona.
+ *    3. La inyección al prompt es BEST EFFORT. Un agente sin bóveda contesta
+ *       peor; un agente caído no contesta.
+ *
+ *  Handoff H4. Migraciones 030–033.
  */
-import { Router } from 'express';
+import { registerPort } from '@abraxa/db';
+import { router } from './http/routes';
+import { registrarTools } from './tools';
+import { vaultService } from './vault-port';
 
-export const router: Router = Router();
+// El port, disponible para quien lo pida con `usePort('vault')`.
+registerPort('vault', vaultService);
 
+// Las tools, si H3 ya aterrizó. Si no, no pasa nada: `registrarTools` no lanza
+// y el motor de agentes las tomará cuando ambos estén arriba.
+registrarTools();
+
+export { router };
 export { meta } from './meta';
+
+// ── El port ─────────────────────────────────────────────────────────────────
+export { vaultService };
+
+// ── Resolución y propagación ────────────────────────────────────────────────
+export { resolveVault, getVaultValue, scopeToContext } from './resolver';
+export { injectIntoPrompt } from './agent-inject';
+export { interpolate, interpolateVerbose, renderTemplate, tokensUsados } from './render';
+export { formatVault, formatMoney, formatMoney2, KIND_LABEL } from './format';
+export {
+  bumpVaultCache,
+  notifyVaultChanged,
+  setVaultCacheBroadcaster,
+  VAULT_CACHE_TTL_MS,
+  type VaultCacheBroadcaster,
+} from './cache';
+
+// ── Valores ─────────────────────────────────────────────────────────────────
+export {
+  listarValores,
+  obtenerValor,
+  crearValor,
+  editarValor,
+  aprobarValor,
+  desactivarValor,
+  borrarValor,
+  contarBorradores,
+  contarConflictos,
+  resolverConflicto,
+  tieneConflicto,
+} from './values/service';
+export { crearValorSchema, editarValorSchema, claveSchema, CLAVE_RE } from './values/schema';
+
+// ── Documentos y biblioteca ─────────────────────────────────────────────────
+export {
+  crearDocumento,
+  editarDocumento,
+  obtenerDocumento,
+  listarDocumentos,
+  listarVersiones,
+  obtenerVersion,
+  archivarDocumento,
+  indexarDocumento,
+  contarTrozosSinVector,
+  excerptDe,
+} from './documents/service';
+export { buscar, type ResultadoBusqueda } from './documents/search';
+export { chunkText } from './documents/chunker';
+export {
+  generateEmbedding,
+  embeddingsStatus,
+  isEmbeddingsAvailable,
+  resetEmbeddingsCooldown,
+  EMBEDDING_MODEL,
+  EMBEDDING_DIMS,
+} from './documents/embeddings';
+
+// ── Ingesta ─────────────────────────────────────────────────────────────────
+export {
+  ingestDocument,
+  type IngestResult,
+  type ValorPropuesto,
+  type ConflictoValor,
+} from './ingest/pipeline';
+export {
+  parsePricingDoc,
+  normalizarClave,
+  etiquetaDesdeClave,
+  detectarMoneda,
+  monedaDeclarada,
+  MONEDA_POR_DEFECTO,
+} from './ingest/money';
+export {
+  anthropicClassifier,
+  desdeAgentPort,
+  noopClassifier,
+  clasificadorPorDefecto,
+  type DocClassifier,
+} from './ingest/classifier';
+
+// ── Giro y huecos ───────────────────────────────────────────────────────────
+export {
+  taxonomiaDe,
+  listarGiros,
+  GIRO_POR_DEFECTO,
+  type IndustryTemplate,
+  type AreaTemplate,
+  type ExpectedDoc,
+  type ExpectedValue,
+} from './industry/catalog';
+export { detectGaps, detectGapsDetallado, contarHuecos, type AreaGap } from './industry/gaps';
+
+// ── Tools para agentes ──────────────────────────────────────────────────────
+export { VAULT_TOOLS, vaultValueTool, vaultSearchTool, registrarTools } from './tools';
+
+// ── RBAC ────────────────────────────────────────────────────────────────────
+export { canEditVault, requireVaultEdit, requireVaultRead, hasArea, AREA_BOVEDA } from './rbac';
+
+// ── Tipos ───────────────────────────────────────────────────────────────────
+export type {
+  VaultKind,
+  ScopeType,
+  DocType,
+  DocStatus,
+  DecisionConflicto,
+  VaultRow,
+  VaultContext,
+  ResolvedVault,
+  TenantMeta,
+  DocumentRow,
+  DocumentSummary,
+  SearchHit,
+} from './types';
+export { VAULT_KINDS, DOC_TYPES } from './types';
