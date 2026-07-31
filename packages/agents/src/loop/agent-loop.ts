@@ -57,6 +57,32 @@ export interface OpcionesLoop {
   executor: ToolExecutor;
   signal?: AbortSignal | undefined;
   onToolCall?: ((name: string, input: Record<string, unknown>) => void) | undefined;
+  /**
+   * Se invoca al cerrar CADA iteración con lo que midió esa vuelta, el
+   * acumulado hasta ahí, y cuántas vueltas van.
+   *
+   * Existe por una razón sola, y no es telemetría: el acumulado vive en una
+   * variable local de esta función, así que si la iteración 5 lanza, las cuatro
+   * anteriores se van con la excepción. `service.ts` no tenía forma de saber
+   * que ya se habían quemado 120,000 tokens y escribía la fila del ledger en
+   * ceros — con lo que ese gasto REAL jamás contaba contra el tope, y un 529
+   * reintentado podía quemar decenas de dólares con el presupuesto en 0.
+   *
+   * Se resuelve empujando hacia afuera en vez de devolviendo al final, porque
+   * un `return` sólo ocurre en el camino feliz.
+   *
+   * `iteracion` viaja junto al consumo y no aparte porque los dos se pierden
+   * por el mismo motivo. Una fila del ledger con 120,000 tokens e
+   * `iterations = 0` es internamente incoherente, y encima apaga justo la
+   * columna que la migración 023 declara como el mecanismo para ver a un
+   * agente dándose de topes: uno que revienta en la vuelta 9 se vería idéntico
+   * a uno que revienta en la 1.
+   *
+   * NO DEBE LANZAR. Si lanza, mata el loop desde adentro y deja a quien llama
+   * con el acumulado de la vuelta anterior — el mismo agujero que este callback
+   * viene a tapar. `agentLoop` lo protege con try/catch por si acaso.
+   */
+  onUsage?: ((delta: RawUsage, acumulado: RawUsage, iteracion: number) => void) | undefined;
 }
 
 export interface ResultadoLoop {
@@ -76,6 +102,10 @@ export interface ResultadoLoop {
  * límite: esos tokens ya se gastaron y se van a facturar. Un loop que sólo
  * cuenta la última vuelta subestima el gasto justo en las conversaciones más
  * caras, que son las que más tools usan.
+ *
+ * Y se acumula también cuando la corrida REVIENTA: cada vuelta se reporta por
+ * `onUsage` en cuanto se cierra, así que el consumo de las iteraciones que sí
+ * llegaron sobrevive a la excepción de la que no. Ver `OpcionesLoop.onUsage`.
  */
 export async function agentLoop(opciones: OpcionesLoop): Promise<ResultadoLoop> {
   const {
@@ -90,6 +120,7 @@ export async function agentLoop(opciones: OpcionesLoop): Promise<ResultadoLoop> 
     executor,
     signal,
     onToolCall,
+    onUsage,
   } = opciones;
 
   const messages: ProviderMessage[] = [...opciones.messages];
@@ -113,6 +144,18 @@ export async function agentLoop(opciones: OpcionesLoop): Promise<ResultadoLoop> 
     usage = sumarUsage(usage, respuesta.usage);
     ultimoModelo = respuesta.model;
     iteraciones++;
+
+    // Se empuja hacia afuera AQUÍ, no al terminar: si la vuelta siguiente lanza,
+    // esto ya se contabilizó. Es la única forma de que un 529 en la iteración 5
+    // no borre los tokens de las cuatro que sí se facturaron.
+    // Protegido: un callback que lance mataría el loop desde adentro y dejaría
+    // a quien llama con el acumulado de la vuelta ANTERIOR — exactamente el
+    // agujero que esto viene a tapar, sólo que una vuelta más corto.
+    try {
+      onUsage?.(respuesta.usage, usage, iteraciones);
+    } catch (err) {
+      log.warn(`onUsage lanzó y se ignoró (el loop sigue): ${String(err)}`);
+    }
 
     // Sin tools pedidas: el agente terminó.
     if (respuesta.toolCalls.length === 0) {

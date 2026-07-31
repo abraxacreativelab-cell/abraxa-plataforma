@@ -20,7 +20,7 @@ import { adminDb, budgetExceeded, PlatformError, tenantDb } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { LIMITES_POR_DEFECTO, TTL_CACHE_PRESUPUESTO_MS } from '../config';
 import type { LimitesTenant } from '../types';
-import { corridasDesde, gastoDesde } from './usage-ledger';
+import { corridasDesde, gastoDelMes, gastoDesde } from './usage-ledger';
 import { log } from '../logger';
 
 /** Primer instante del mes en curso, en UTC. La ventana del presupuesto. */
@@ -135,18 +135,46 @@ function aNumero(v: string | number | null | undefined): number | null {
 
 export interface EstadoPresupuesto {
   limites: LimitesTenant;
+  /** Lo que de verdad costó el mes. Es el número conciliable con la factura. */
   gastadoUsd: number;
+  /**
+   * Lo que se cuenta contra el tope: el costo real más el PISO de las corridas
+   * sin precio. Igual a `gastadoUsd` mientras todo tenga precio, que es el caso
+   * normal.
+   */
+  computadoUsd: number;
+  /** Lo que queda antes del corte. Se calcula sobre `computadoUsd`. */
   restanteUsd: number;
 }
 
-/** Foto del presupuesto del mes. Lo sirve `GET /agents/budget`. */
+/**
+ * Foto del presupuesto del mes. Lo sirve `GET /agents/budget`.
+ *
+ * Devuelve DOS números por la misma razón por la que el ledger guarda dos
+ * columnas. Si esta pantalla reportara sólo el aplicado, un cliente con un
+ * modelo sin precio vería un "gastado" calculado al precio de Fable 5 que no
+ * corresponde a ninguna factura y que no puede conciliar con nada; si
+ * reportara sólo el real, vería $0 gastados y un corte que no se explica.
+ *
+ * Los dos coinciden salvo que haya consumo `unpriced` — y que difieran es
+ * exactamente la señal de que falta capturar un precio.
+ */
 export async function estadoPresupuesto(ctx: TenantContext): Promise<EstadoPresupuesto> {
   const limites = await resolverLimites(ctx);
-  const gastado = await gastoDesde(ctx, inicioDeMes());
+  // Una sola lectura para los dos números: pedirlos por separado paginaba el
+  // ledger dos veces por cada `GET /agents/budget`, y los dos totales podían
+  // venir de instantes distintos y no cuadrar entre sí.
+  const { computadoUsd: computado, realUsd: real } = await gastoDelMes(ctx, inicioDeMes());
+
+  const redondear = (n: number): number => Math.round(n * 1e6) / 1e6;
+
   return {
     limites,
-    gastadoUsd: Math.round(gastado * 1e6) / 1e6,
-    restanteUsd: Math.max(0, Math.round((limites.monthlyBudgetUsd - gastado) * 1e6) / 1e6),
+    gastadoUsd: redondear(real),
+    computadoUsd: redondear(computado),
+    // Sobre el computado: es el que de verdad corta el servicio, y prometer un
+    // restante mayor del que se va a respetar es peor que un número feo.
+    restanteUsd: Math.max(0, redondear(limites.monthlyBudgetUsd - computado)),
   };
 }
 

@@ -140,6 +140,87 @@ describe('agent loop', () => {
     expect(r.text).toContain('No pude terminar');
   });
 
+  it('reporta el consumo por vuelta ANTES de que la siguiente pueda reventar', async () => {
+    // El acumulado vive en una variable local de `agentLoop`. Si la vuelta 2
+    // lanza, la 1 se va con la excepción y quien llama escribe ceros en el
+    // ledger. `onUsage` empuja hacia afuera en cuanto la vuelta cierra, que es
+    // lo único que sobrevive a un `throw`.
+    const registry = new ToolRegistry();
+    registry.register({
+      name: 'buscar',
+      description: 'busca',
+      inputSchema: { type: 'object', properties: {} },
+      handler: () => Promise.resolve({ ok: true }),
+    });
+
+    const a = createFakeAdapter('anthropic', [
+      {
+        text: '',
+        toolCalls: [{ id: '1', name: 'buscar', input: {} }],
+        stopReason: 'tool_use',
+        usage: usage({ inputTokens: 120_000, outputTokens: 8_000 }),
+      },
+    ]);
+    const original = a.complete.bind(a);
+    let n = 0;
+    a.complete = (req) => {
+      n += 1;
+      if (n >= 2) return Promise.reject(new Error('529 overloaded'));
+      return original(req);
+    };
+
+    let rescatado = { inputTokens: 0, outputTokens: 0 };
+    let vueltas = 0;
+
+    await expect(
+      agentLoop({
+        ...opciones(a, registry),
+        onUsage: (delta, acumulado) => {
+          vueltas += 1;
+          expect(delta.inputTokens).toBe(120_000);
+          rescatado = acumulado;
+        },
+      }),
+    ).rejects.toThrow(/529/);
+
+    // La vuelta 1 se contabilizó; la 2 nunca reportó porque nunca respondió.
+    expect(vueltas).toBe(1);
+    expect(rescatado.inputTokens).toBe(120_000);
+    expect(rescatado.outputTokens).toBe(8_000);
+  });
+
+  it('en el camino feliz, el acumulado del callback coincide con el que devuelve', async () => {
+    // Si divergieran, quien llama tendría dos verdades sobre el mismo consumo.
+    const registry = new ToolRegistry();
+    registry.register({
+      name: 'buscar',
+      description: 'busca',
+      inputSchema: { type: 'object', properties: {} },
+      handler: () => Promise.resolve({ ok: true }),
+    });
+
+    const a = createFakeAdapter('anthropic', [
+      {
+        text: '',
+        toolCalls: [{ id: '1', name: 'buscar', input: {} }],
+        stopReason: 'tool_use',
+        usage: usage({ inputTokens: 1000, outputTokens: 50 }),
+      },
+      { text: 'ya', usage: usage({ inputTokens: 1200, outputTokens: 80 }) },
+    ]);
+
+    let ultimo = usage();
+    const r = await agentLoop({
+      ...opciones(a, registry),
+      onUsage: (_d, acumulado) => {
+        ultimo = acumulado;
+      },
+    });
+
+    expect(ultimo).toEqual(r.usage);
+    expect(r.usage.inputTokens).toBe(2200);
+  });
+
   it('una tool que no existe no tumba la corrida', async () => {
     const a = createFakeAdapter('anthropic', [
       {

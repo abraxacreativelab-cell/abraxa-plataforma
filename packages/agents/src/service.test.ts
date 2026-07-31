@@ -22,7 +22,8 @@ import { createProviderRouter } from './providers/router';
 import { createStaticPricingCatalog, type PricingRow } from './pricing/catalog';
 import { createFakeDb, type FakeDb } from './testing/fake-db';
 import { createFakeAdapter, usage } from './testing/fakes';
-import { invalidarCachePresupuesto } from './ledger/budget';
+import { estadoPresupuesto, invalidarCachePresupuesto } from './ledger/budget';
+import { calcularCosto } from './pricing/compute';
 import { toolRegistry } from './tools/registry';
 
 // ── Escenario ───────────────────────────────────────────────────────────────
@@ -41,6 +42,17 @@ const ctxDe = (tenantId: string, slug: string): TenantContext => ({
 const lupita = ctxDe(T_LUPITA, 'panaderia-lupita');
 const carlos = ctxDe(T_CARLOS, 'taller-carlos');
 
+/**
+ * El catálogo de precios de las pruebas.
+ *
+ * Trae los modelos que estos casos usan de verdad, y a propósito NO trae
+ * `claude-fable-5`: es el hueco con el que se prueba que un modelo conocido sin
+ * precio ya no se corre a ciegas (ver «el precio, antes de gastar»).
+ *
+ * Antes sólo tenía Haiku. Eso pasaba porque nada revisaba que hubiera precio
+ * para el modelo que la corrida iba a usar — el mismo agujero del hallazgo, en
+ * miniatura y dentro de la propia suite.
+ */
 const PRECIOS: PricingRow[] = [
   {
     id: 'p-haiku',
@@ -51,6 +63,30 @@ const PRECIOS: PricingRow[] = [
     cacheWrite5mPerMtok: 1.25,
     cacheWrite1hPerMtok: 2.0,
     cacheReadPerMtok: 0.1,
+    currency: 'USD',
+    effectiveFrom: '2026-01-01',
+  },
+  {
+    id: 'p-sonnet-5',
+    provider: 'anthropic',
+    model: 'claude-sonnet-5',
+    inputPerMtok: 2.0,
+    outputPerMtok: 10.0,
+    cacheWrite5mPerMtok: 2.5,
+    cacheWrite1hPerMtok: 4.0,
+    cacheReadPerMtok: 0.2,
+    currency: 'USD',
+    effectiveFrom: '2026-01-01',
+  },
+  {
+    id: 'p-opus-5',
+    provider: 'anthropic',
+    model: 'claude-opus-5',
+    inputPerMtok: 5.0,
+    outputPerMtok: 25.0,
+    cacheWrite5mPerMtok: 6.25,
+    cacheWrite1hPerMtok: 10.0,
+    cacheReadPerMtok: 0.5,
     currency: 'USD',
     effectiveFrom: '2026-01-01',
   },
@@ -318,6 +354,248 @@ describe('criterio #3 — cada llamada deja una fila con costo real', () => {
     await svc.run(lupita, { role: 'sales', input: 'hola' });
 
     expect(db.tabla('usage_ledger')[0]?.iterations).toBe(1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Hallazgo 2026-07-31 · el tope era CIEGO al consumo sin precio
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('un modelo sin precio ya no apaga el tope', () => {
+  it('el consumo sin precio SÍ cuenta contra el presupuesto, con piso conservador', async () => {
+    // El escenario del hallazgo, en corto: modelo sin precio → cost_usd 0 →
+    // gastoDesde() sumaba 0 → el tope de $5 nunca se disparaba, y un tenant de
+    // plan free podía quemar cientos de dólares reales mientras
+    // GET /agents/budget reportaba gastadoUsd = 0.
+    //
+    // Un millón de tokens de entrada y 200 mil de salida al piso de Fable 5
+    // ($10/$50 por Mtok) son $20 — cuatro veces el tope del plan free.
+    const { svc } = servicio({
+      usage: usage({ inputTokens: 1_000_000, outputTokens: 200_000 }),
+    });
+    db.sembrar('agent_definitions', [
+      definicion(T_LUPITA, { model: 'claude-modelo-que-nadie-tabuló' }),
+    ]);
+
+    await svc.run(lupita, { role: 'sales', input: 'hola' });
+
+    const fila = db.tabla('usage_ledger')[0];
+    // El costo sigue siendo honesto: 0 y marcado. No se inventa un precio.
+    expect(fila?.cost_source).toBe('unpriced');
+    expect(fila?.cost_usd).toBe(0);
+    // Pero contra el tope cuenta el piso. Antes aquí no había nada.
+    expect(fila?.budgeted_usd).toBeCloseTo(20, 6);
+
+    // Y la consecuencia que importa: la SIGUIENTE corrida se corta.
+    invalidarCachePresupuesto();
+    await expect(svc.run(lupita, { role: 'sales', input: 'otra' })).rejects.toMatchObject({
+      code: 'BUDGET_EXCEEDED',
+    });
+  });
+
+  it('GET /agents/budget deja de reportar 0 mientras se quema dinero', async () => {
+    const { svc } = servicio({ usage: usage({ inputTokens: 100_000, outputTokens: 20_000 }) });
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { model: 'modelo-sin-tabular' })]);
+
+    await svc.run(lupita, { role: 'sales', input: 'hola' });
+    invalidarCachePresupuesto();
+
+    const estado = await estadoPresupuesto(lupita);
+
+    // 100k × $10/Mtok + 20k × $50/Mtok = 1.00 + 1.00. Es el piso, y es lo que
+    // de verdad va a cortar el servicio, así que el restante se calcula sobre él.
+    expect(estado.computadoUsd).toBeCloseTo(2, 6);
+    expect(estado.restanteUsd).toBeCloseTo(3, 6);
+
+    // Y el número CONCILIABLE sigue siendo honesto: no hay factura por esos $2.
+    // Que los dos difieran es justo la señal de que falta capturar un precio.
+    expect(estado.gastadoUsd).toBe(0);
+  });
+
+  it('con todo priced los dos números coinciden: el piso no aparece', async () => {
+    // El caso normal. Si divergieran aquí, el cliente vería un cobro inventado.
+    const { svc } = servicio({ usage: usage({ inputTokens: 1_000_000, outputTokens: 100_000 }) });
+    db.sembrar('agent_definitions', [definicion(T_CARLOS)]);
+
+    await svc.run(carlos, { role: 'sales', input: 'hola' });
+    invalidarCachePresupuesto();
+
+    // Haiku: 1M × $1/Mtok + 100k × $5/Mtok = 1.00 + 0.50
+    const estado = await estadoPresupuesto(carlos);
+    expect(estado.gastadoUsd).toBeCloseTo(1.5, 6);
+    expect(estado.computadoUsd).toBe(estado.gastadoUsd);
+  });
+
+  it("un modelo 'local' no factura tokens: su piso es 0 de verdad", async () => {
+    // El piso protege del gasto que no vemos. Un runtime propio no genera
+    // gasto, así que cobrarle un piso sería cortarle el servicio a un cliente
+    // por dinero que nadie está pagando.
+    expect(calcularCosto(usage({ inputTokens: 1_000_000 }), null, 'local').budgetedUsd).toBe(0);
+    expect(calcularCosto(usage({ inputTokens: 1_000_000 }), null, 'anthropic').budgetedUsd).toBe(10);
+  });
+});
+
+describe('el precio, antes de gastar', () => {
+  it('un modelo del catálogo SIN precio se rechaza sin llamar al proveedor', async () => {
+    // `claude-fable-5` está en capabilities.ts y no está en PRECIOS. Ése es el
+    // estado exacto en que vivía `claude-sonnet-4-6` contra la base de
+    // producción: un modelo que decimos conocer, factura de verdad, y sin fila
+    // de precio. Antes la corrida pasaba y el gasto desaparecía; ahora se dice
+    // a la primera y no se quema un token.
+    const { svc, anthropic } = servicio();
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { model: 'claude-fable-5' })]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'hola' })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+    expect(anthropic.llamadas).toHaveLength(0);
+  });
+
+  it('el error nombra la fila que falta, no dice "algo salió mal"', async () => {
+    const { svc } = servicio();
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { model: 'claude-fable-5' })]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'hola' })).rejects.toThrow(
+      /claude-fable-5.*model_pricing|model_pricing.*claude-fable-5/s,
+    );
+  });
+
+  it('un modelo DESCONOCIDO sí corre: estrenar modelo sin deploy es la promesa de H3', async () => {
+    // La puerta es para lo que decimos conocer. Bloquear también lo desconocido
+    // devolvería a H3 al YAML de disco de GARDEN. El dinero de ese caso lo
+    // cubre el piso, no esta puerta.
+    const { svc, anthropic } = servicio();
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { model: 'claude-opus-6' })]);
+
+    const r = await svc.run(lupita, { role: 'sales', input: 'hola' });
+    expect(r.text).toBeTruthy();
+    expect(anthropic.llamadas).toHaveLength(1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Hallazgo 2026-07-31 · un error a media corrida borraba TODO el consumo
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('un fallo del proveedor a media corrida no borra lo ya gastado', () => {
+  function adaptadorQueRevientaEnLaSegunda() {
+    const a = createFakeAdapter('anthropic', [
+      {
+        text: '',
+        toolCalls: [{ id: 'tc-1', name: 'buscar', input: {} }],
+        stopReason: 'tool_use',
+        usage: usage({ inputTokens: 120_000, outputTokens: 8_000, requestId: 'msg_vuelta_1' }),
+      },
+    ]);
+    const original = a.complete.bind(a);
+    let n = 0;
+    a.complete = (req) => {
+      n += 1;
+      if (n >= 2) {
+        // Lo que Anthropic devuelve en un 529 overloaded: reintentable, y por
+        // eso mismo peligroso — si H6 reintenta con el ledger en ceros, el
+        // tenant quema decenas de dólares con el presupuesto sin enterarse.
+        return Promise.reject(
+          new PlatformError('PROVIDER_ERROR', 'Anthropic respondió 529: overloaded', {
+            retryable: true,
+          }),
+        );
+      }
+      return original(req);
+    };
+    return a;
+  }
+
+  function servicioQueRevienta() {
+    const a = adaptadorQueRevientaEnLaSegunda();
+    const svc = createAgentService({
+      router: createProviderRouter({ overrides: { anthropic: a } }),
+      pricing: createStaticPricingCatalog(PRECIOS),
+      resolverLlaveImpl: () => Promise.resolve('k'),
+    });
+    svc.registerTool({
+      name: 'buscar',
+      description: 'busca algo',
+      inputSchema: { type: 'object', properties: {} },
+      handler: () => Promise.resolve({ ok: true }),
+    });
+    return { svc, a };
+  }
+
+  it('los tokens de la iteración que SÍ ocurrió llegan al ledger', async () => {
+    const { svc } = servicioQueRevienta();
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { tools: ['buscar'] })]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'usa la tool' })).rejects.toMatchObject({
+      code: 'PROVIDER_ERROR',
+    });
+
+    const fila = db.tabla('usage_ledger')[0];
+    expect(fila).toBeDefined();
+    expect(fila?.status).toBe('error');
+    // Ésta es la línea del hallazgo: antes eran ceros, y ~$0.32 de tokens ya
+    // facturables desaparecían del tope.
+    expect(fila?.input_tokens).toBe(120_000);
+    expect(fila?.output_tokens).toBe(8_000);
+    // 120k × $1/Mtok + 8k × $5/Mtok = 0.12 + 0.04
+    expect(Number(fila?.cost_usd)).toBeCloseTo(0.16, 6);
+    expect(fila?.cost_source).toBe('priced');
+
+    // Y las iteraciones también se rescatan. Una fila con 120,000 tokens e
+    // iterations=0 es internamente incoherente, y apaga justo la columna que la
+    // migración 023 declara como el mecanismo para ver a un agente dándose de
+    // topes: uno que revienta en la vuelta 9 se vería idéntico a uno que
+    // revienta en la 1.
+    expect(fila?.iterations).toBe(1);
+  });
+
+  it('y ese gasto cuenta contra el tope, que es de lo que se trataba', async () => {
+    const { svc } = servicioQueRevienta();
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { tools: ['buscar'] })]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'usa la tool' })).rejects.toThrow();
+    invalidarCachePresupuesto();
+
+    expect((await estadoPresupuesto(lupita)).gastadoUsd).toBeCloseTo(0.16, 6);
+  });
+
+  it('el PlatformError sube INTACTO: H6 sigue pudiendo decidir si reintenta', async () => {
+    // El rescate del consumo no puede costar la clasificación del error. Si
+    // aquí llegara un error envuelto, H6 dejaría de distinguir un 529
+    // reintentable de un 400 que no se arregla solo.
+    const { svc } = servicioQueRevienta();
+    db.sembrar('agent_definitions', [definicion(T_LUPITA, { tools: ['buscar'] })]);
+
+    try {
+      await svc.run(lupita, { role: 'sales', input: 'usa la tool' });
+      expect.unreachable('debió lanzar');
+    } catch (e) {
+      const err = e as PlatformError;
+      expect(err).toBeInstanceOf(PlatformError);
+      expect(err.code).toBe('PROVIDER_ERROR');
+      expect(err.retryable).toBe(true);
+      expect(err.message).toContain('529');
+    }
+  });
+
+  it('cuando falla la PRIMERA llamada el consumo sí es cero, y se registra igual', async () => {
+    // El caso que la suite ya cubría. Se conserva porque delimita el anterior:
+    // el rescate no puede inventar tokens que nunca se midieron.
+    const roto = createFakeAdapter('anthropic');
+    roto.complete = () => Promise.reject(new PlatformError('PROVIDER_ERROR', 'se cayó'));
+
+    const svc = createAgentService({
+      router: createProviderRouter({ overrides: { anthropic: roto } }),
+      pricing: createStaticPricingCatalog(PRECIOS),
+      resolverLlaveImpl: () => Promise.resolve('k'),
+    });
+    db.sembrar('agent_definitions', [definicion(T_LUPITA)]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'hola' })).rejects.toThrow();
+
+    const fila = db.tabla('usage_ledger')[0];
+    expect(fila?.input_tokens).toBe(0);
+    expect(fila?.status).toBe('error');
   });
 });
 

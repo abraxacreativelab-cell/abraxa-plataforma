@@ -1,4 +1,3 @@
-#!/usr/bin/env tsx
 /**
  * ¿Hay algún modelo en uso sin precio capturado?
  *
@@ -7,15 +6,25 @@
  * un modelo nuevo simplemente se cobraba mal — sin error, sin alarma, sin
  * ninguna forma de enterarse hasta que alguien sumara a mano.
  *
- * Aquí un modelo sin precio se registra con `cost_source='unpriced'` y costo 0,
- * y esto lo saca a la luz. Corre contra la base real, así que ve tanto los
- * modelos que el catálogo conoce como los que los clientes hayan puesto en sus
- * filas de `app.agent_definitions`.
+ * ── Los dos guardianes, y por qué hacen falta los dos ──────────────────────
  *
- * Uso:
- *   npx tsx packages/agents/src/bin/check-pricing.ts
+ * Este guion existía desde el primer día y NO ESTABA CABLEADO a nada: ni a un
+ * script de package.json ni a CI. Un guardián que nadie invoca es documentación.
+ * Eso, más un comentario en la migración 021 que prometía una prueba que no
+ * existía, es lo que dejó a `claude-sonnet-4-6` meses en el catálogo sin precio.
  *
- * Devuelve 1 si falta algún precio. Pensado para correr en el despliegue.
+ *   · `pricing/seeds.test.ts` corre en `npm test` —o sea, en CI, en cada PR— y
+ *     cruza el catálogo del CÓDIGO contra las semillas de `migrations/`. No
+ *     necesita base. Es el freno que impide que el hueco se abra.
+ *   · Este guion corre contra la BASE REAL y ve algo que la prueba no puede
+ *     ver: los modelos que los CLIENTES pusieron en sus filas de
+ *     `app.agent_definitions`, que ningún archivo del repo conoce. Es el freno
+ *     del despliegue.
+ *
+ * Uso (desde packages/agents, con el entorno de la base cargado):
+ *   npm run check:pricing
+ *
+ * Devuelve 1 si falta algún precio.
  */
 /* eslint-disable no-console -- guion de línea de comandos: su salida ES el reporte. */
 // adminDb() y no tenantDb(): revisa un catálogo global (app.model_pricing)

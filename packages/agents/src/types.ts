@@ -68,7 +68,17 @@ export function sumarUsage(a: RawUsage, b: RawUsage): RawUsage {
 export type CostSource = 'provider' | 'priced' | 'unpriced';
 
 export interface CostoCalculado {
+  /** Lo que COSTÓ. En `unpriced` es 0 y va marcado: nunca un número inventado. */
   costUsd: number;
+  /**
+   * Lo que CUENTA CONTRA EL TOPE.
+   *
+   * Igual a `costUsd` salvo en `unpriced`, donde es el piso conservador de
+   * `PRECIO_DE_PISO`. Son dos preguntas distintas y confundirlas fue el
+   * hallazgo del 2026-07-31: con un solo número, un modelo sin precio dejaba
+   * el presupuesto en 0 y el tope nunca se disparaba.
+   */
+  budgetedUsd: number;
   source: CostSource;
   /** Fila de `app.model_pricing` que se usó, si fue `priced`. */
   pricingId: string | null;

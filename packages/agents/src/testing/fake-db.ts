@@ -16,6 +16,14 @@ import type { AnyClient } from '@abraxa/db';
 
 export type Fila = Record<string, unknown>;
 
+/**
+ * El `max-rows` por omisión de PostgREST/Supabase.
+ *
+ * Se reproduce porque su peligro está en que es SILENCIOSO: un SELECT sin
+ * ventana devuelve mil filas y un 200, y quien suma cree que sumó todo.
+ */
+const FILAS_MAXIMAS_POSTGREST = 1000;
+
 interface Filtro {
   col: string;
   op: 'eq' | 'gte' | 'lte';
@@ -125,6 +133,21 @@ class Builder implements PromiseLike<Resultado> {
     return this;
   }
 
+  /**
+   * Ventana inclusiva `[desde, hasta]`, como PostgREST.
+   *
+   * El doble la reproduce porque el corte de 1,000 filas de PostgREST es
+   * silencioso —devuelve las mil primeras con un 200— y `gastoDesde` pagina
+   * justo para no subestimar el gasto de un tenant con mucho volumen. Sin esto
+   * la prueba de paginación no probaría nada: una sola página traería todo.
+   */
+  range(desde: number, hasta: number): this {
+    this.ventana = { desde, hasta };
+    return this;
+  }
+
+  private ventana: { desde: number; hasta: number } | null = null;
+
   maybeSingle(): this {
     this.unaSola = true;
     this.tope = 1;
@@ -200,6 +223,16 @@ class Builder implements PromiseLike<Resultado> {
     }
 
     const total = filas.length;
+    // `range` antes que `limit`: es el recorte del servidor, y `limit` se
+    // aplica sobre lo que la ventana devolvió.
+    //
+    // Sin ventana se aplica el CORTE IMPLÍCITO de PostgREST. Es la parte que
+    // más importa reproducir: el servidor devuelve 1,000 filas y un 200, sin
+    // avisar de nada. Si el doble devolviera todas, una prueba de paginación
+    // pasaría igual contra un código que no pagina —verde y falso— y el tope
+    // volvería a subestimar el gasto en producción sin que nadie se enterara.
+    if (this.ventana) filas = filas.slice(this.ventana.desde, this.ventana.hasta + 1);
+    else filas = filas.slice(0, FILAS_MAXIMAS_POSTGREST);
     if (this.tope !== null) filas = filas.slice(0, this.tope);
 
     if (this.soloConteo) return { data: null, error: null, count: total };
