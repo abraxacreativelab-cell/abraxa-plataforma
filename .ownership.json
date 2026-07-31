@@ -139,5 +139,18 @@
     "label": "H14 · Panel de agencia",
     "migrations": [110, 119],
     "paths": ["apps/web/app/(admin)/**"]
+  },
+
+  "h15-crm": {
+    "label": "H15 · CRM: contactos, identidades por canal, embudo y línea de tiempo",
+    "migrations": [120, 129],
+    "lockfile": true,
+    "paths": [
+      "packages/crm/**",
+      "apps/web/app/(app)/contactos/**",
+      "docs/handoffs/H15-crm.md",
+      ".ownership.json",
+      "scripts/ownership-gate.test.mjs"
+    ]
   }
 }

@@ -51,8 +51,18 @@ describe('perteneceA — exclusiones', () => {
 });
 
 describe('el mapa de propiedad', () => {
-  it('tiene las 14 entradas', () => {
-    expect(Object.keys(ownership)).toHaveLength(14);
+  /**
+   * 14 carriles del plan original + H15 (CRM), que se abrió después: el CRM se
+   * había dado por incluido dentro de H6 y H8, y ninguno de los dos lo
+   * construye — H6 declara `contact_id` SIN `REFERENCES` (H6-inbox.md:110) y
+   * H8 dice textualmente "no construyas el CRM" (H8-flows.md:38).
+   *
+   * Esta cuenta se actualiza al ALTA de un carril, y sólo entonces. Que sea un
+   * número escrito a mano es a propósito: abrir un carril nuevo tiene que ser
+   * una decisión visible en un diff, no algo que pase solo.
+   */
+  it('tiene las 15 entradas', () => {
+    expect(Object.keys(ownership)).toHaveLength(15);
   });
 
   it('cada entrada trae label y paths', () => {
@@ -76,9 +86,25 @@ describe('el mapa de propiedad', () => {
     }
   });
 
-  it('sólo H1 puede mover el lockfile', () => {
-    const conLockfile = Object.entries(ownership).filter(([, c]) => c.lockfile === true);
-    expect(conLockfile.map(([n]) => n)).toEqual(['h1-fundacion']);
+  /**
+   * La regla sigue siendo "el lockfile no se toca". La lista es enumerada y no
+   * un permiso general justamente para que agregarse a ella sea un cambio
+   * visible que alguien tiene que aprobar.
+   *
+   * H15 está aquí por una razón mecánica, no por conveniencia: es el único
+   * carril que crea un WORKSPACE nuevo (`packages/crm`), y `npm ci` se niega a
+   * instalar si el lockfile no lo conoce —"Missing: @abraxa/crm@0.1.0 from lock
+   * file"—. Sin esa entrada, CI no llega ni a compilar. El diff es aditivo: dos
+   * nodos del workspace, cero versiones de terceros movidas.
+   *
+   * QUITAR `"lockfile": true` de h15-crm en cuanto el carril mergee. Ya no lo
+   * necesita: sólo hacía falta para el commit del alta.
+   */
+  it('el lockfile sólo lo mueven H1 y quien crea un workspace nuevo', () => {
+    const conLockfile = Object.entries(ownership)
+      .filter(([, c]) => c.lockfile === true)
+      .map(([n]) => n);
+    expect(conLockfile.sort()).toEqual(['h1-fundacion', 'h15-crm']);
   });
 
   it('un archivo ajeno se atribuye a su dueño real', () => {
