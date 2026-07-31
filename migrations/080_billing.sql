@@ -66,8 +66,23 @@ ON CONFLICT (id) DO UPDATE
 --    seguro — el upsert choca contra esta restricción en vez de crear una
 --    segunda fila de cobro para el mismo cliente.
 --
---    `amount_usd` es lo que el emprendedor decidió dar. Se guarda porque con
+--    `amount` es lo que el emprendedor decidió dar. Se guarda porque con
 --    monto libre el precio no se puede derivar del plan.
+--
+--    `currency` NO es decoración, y la columna se llamaba `amount_usd` hasta
+--    que una auditoría preguntó qué pasa si la sesión no viene en dólares.
+--    Pasaba esto: el webhook leía `currency` de la sesión de Stripe y la
+--    tiraba, así que una sesión de $500 MXN quedaba escrita como `amount_usd
+--    = 500` — veinte veces el ingreso real, en la columna de la que sale
+--    cualquier reporte de facturación, y sin un solo error en el camino.
+--
+--    Hoy el checkout crea los precios sólo en USD, así que no ha pasado. Pero
+--    el webhook procesa la sesión que Stripe le manda, no la que creímos
+--    crear, y cobrar en pesos está anotado como decisión de producto
+--    pendiente: el día que se tome, el bug se activaba solo y en silencio.
+--
+--    El CHECK de abajo es la regla completa: una cifra sin su moneda es una
+--    suposición, no un dato. O van las dos, o no va ninguna.
 -- ───────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE app.subscriptions (
@@ -77,11 +92,16 @@ CREATE TABLE app.subscriptions (
   stripe_subscription_id text,
   plan_id                text NOT NULL REFERENCES app.plans(id),
   status                 text NOT NULL,
-  amount_usd             numeric(10,2),
+  amount                 numeric(10,2),
+  -- ISO-4217 en minúsculas, que es como la manda Stripe.
+  currency               text
+    CONSTRAINT subscriptions_currency_iso CHECK (currency ~ '^[a-z]{3}$'),
   current_period_end     timestamptz,
   created_at             timestamptz NOT NULL DEFAULT now(),
   updated_at             timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (tenant_id)
+  UNIQUE (tenant_id),
+  CONSTRAINT subscriptions_monto_con_moneda
+    CHECK ((amount IS NULL) = (currency IS NULL))
 );
 
 ALTER TABLE app.subscriptions ENABLE ROW LEVEL SECURITY;
@@ -149,5 +169,10 @@ COMMENT ON TABLE app.billing_events IS
   'los eventos llegan antes de que el tenant exista. Ver 080_billing.sql §3.';
 
 COMMENT ON TABLE app.subscriptions IS
-  'Una suscripción por tenant (UNIQUE tenant_id). amount_usd guarda el monto '
-  'libre que eligió el emprendedor, que no se puede derivar del plan.';
+  'Una suscripción por tenant (UNIQUE tenant_id). amount guarda el monto libre '
+  'que eligió el emprendedor, que no se puede derivar del plan, y currency dice '
+  'en qué moneda es: van juntas o ninguna. Ver 080_billing.sql §2.';
+
+COMMENT ON COLUMN app.subscriptions.currency IS
+  'ISO-4217 en minúsculas, la moneda REAL de la sesión de Stripe — no la del '
+  'catálogo. Sin ella, amount es una suposición.';

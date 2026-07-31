@@ -25,7 +25,9 @@ POST /billing/webhook                 firma → idempotencia → alta
    ↓
 TenancyPort.provision()               H2 · transaccional, idempotente por slug
    ↓
-app.subscriptions                     el cobro queda registrado
+app.tenants.plan = lo que pagó        el port no lo deja pasar en el alta (deuda)
+   ↓
+app.subscriptions                     el cobro queda registrado, con su moneda
    ↓ (después del 200)
 correo de bienvenida                  → /bienvenida?empresa=<slug>
    ↓
@@ -108,6 +110,70 @@ del doble y falsa de Postgres. El doble vive ahora en
 
 ---
 
+## La regla 7: una cifra sin su moneda no es un dato
+
+**`app.subscriptions` guarda `amount` Y `currency`. Van juntas o no va
+ninguna** — hay un CHECK en la migración que lo impone.
+
+La columna se llamaba `amount_usd` y el webhook leía `currency` de la sesión
+para tirarla acto seguido. Una sesión de **$500 MXN** quedaba escrita como
+`amount_usd = 500`: veinte veces el ingreso real, en la columna de la que sale
+cualquier reporte de facturación, sin un solo error en el camino.
+
+Hoy el checkout crea los precios **sólo** en `MONEDA`, así que no ha pasado.
+Pero el webhook procesa la sesión que Stripe le manda, no la que creímos crear
+—el mismo motivo por el que `validarSesion()` desconfía del `businessName`— y
+cobrar en pesos está anotado como decisión de producto pendiente: el día que se
+tome, el defecto se activaba solo.
+
+Una sesión en otra moneda **no se rechaza**: el dinero ya entró y negarle la
+cuenta a quien pagó es lo que prohíbe la regla 4. Se guarda tal cual y se avisa
+en los logs.
+
+Y de paso, `montoDecimal(unidadesMinimas, moneda)` sustituyó a
+`centavosADecimal(centavos)`. Stripe manda todo importe como un entero en la
+**unidad mínima** de su moneda, y «centavos» es una traducción cómoda y falsa:
+
+| moneda | Stripe manda | dividir entre 100 da | lo correcto |
+|---|---|---|---|
+| `usd`, `mxn` (2 decimales) | `2500` | 25.00 ✅ | 25.00 |
+| `jpy`, `krw`, `clp` (0 decimales) | `3000` | 30 ❌ | 3000 |
+| `kwd`, `bhd` (3 decimales) | `25000` | 250 ❌ | 25.00 |
+
+---
+
+## El plan del que paga, y la deuda que lo sostiene
+
+`app.provision_tenant` da de alta con `p_plan DEFAULT 'free'` y **el
+`TenancyPort` no expone `plan` en `ProvisionInput`**. El alta lo llamaba sin
+plan, así que quien pagaba terminaba con tres verdades distintas:
+
+| dónde | qué decía |
+|---|---|
+| `app.tenants.plan` | `free` ← **la que consulta `assertQuota()` de H2** |
+| `app.subscriptions.plan_id` | `pro` |
+| el recibo de Stripe | «ABRAXA Pro» |
+
+Manda la primera: el que pagó por 10 asientos choca contra el límite de 2 del
+plan gratis y escribe a soporte con su recibo en la mano.
+
+Lo cierra `asegurarPlanDelTenant()` (`store.ts`), que sube la columna justo
+después de provisionar, es idempotente y **lanza** si falla — cobrar `pro` y
+dejar a alguien en `free` no puede terminar en un 200.
+
+> **Deuda, y no es de este carril.** El arreglo de verdad es que el plan viaje
+> dentro de la transacción del alta: `provision({ …, plan })`. El servicio de
+> H2 **ya** acepta `plan?: string` (`packages/tenancy/src/services/provision.ts`)
+> y `app.provision_tenant` **ya** recibe `p_plan`. Faltan dos líneas en dos
+> archivos ajenos — `ProvisionInput` en `packages/db/ports.ts` (**H1**) y el
+> reenvío en `packages/tenancy/src/port.ts` (**H2**). El día que aterricen,
+> `asegurarPlanDelTenant()` se borra.
+
+`alta-gratis` **no** lo llama: un `free` que amaneciera en `pro` sería el mismo
+error al revés y regalado.
+
+---
+
 ## Sin llaves de Stripe
 
 Si no hay `STRIPE_SECRET_KEY`, el gateway arranca en **modo doble** y lo avisa
@@ -182,10 +248,10 @@ desarrollo, con el web en `:3000` y la API en `:3100`, hay que ponerla en
 
 | Archivo | Qué es |
 |---|---|
-| `catalog.ts` | qué planes existen y qué incluyen — **la decisión** |
+| `catalog.ts` | qué planes existen y qué incluyen — **la decisión** · `montoDecimal()` |
 | `slug.ts` | candidatos de slug, cumpliendo los CHECK de H2 — **no decide nada** |
 | `gateway.ts` | la única frontera con Stripe · doble sin llaves |
-| `store.ts` | el único lugar con acceso a datos, y por qué ahí sí va `adminDb()` |
+| `store.ts` | el único lugar con acceso a datos, y por qué ahí sí va `adminDb()` · `asegurarPlanDelTenant()` |
 | `service.ts` | el `BillingPort`: sesión pagada → tenant · `provisionarEmpresa()` |
 | `correo.ts` | la bienvenida, que nunca puede tumbar el webhook |
 | `http.ts` | las rutas |

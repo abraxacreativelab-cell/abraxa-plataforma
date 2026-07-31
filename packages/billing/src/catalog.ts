@@ -111,16 +111,19 @@ export function isSellablePlan(id: string): id is PlanId {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * La moneda del cobro.
+ * La moneda en la que se CREAN los checkouts.
  *
- * Es `usd` porque la columna del modelo es `app.subscriptions.amount_usd` y
- * guardar pesos en una columna que se llama `usd` es la clase de mentira que
- * nadie descubre hasta que alguien suma una columna de ingresos.
+ * Ojo con la palabra «crean». Esto decide en qué moneda se le cobra a quien
+ * entra por nuestra landing; NO decide en qué moneda está la sesión que el
+ * webhook procesa. El webhook atiende lo que Stripe le manda, y por eso
+ * `app.subscriptions` guarda la moneda REAL de cada cobro junto a la cifra —
+ * ver `montoDecimal()` aquí abajo y el hallazgo B del PR #11.
  *
  * El público de la landing es mexicano, así que cobrar en MXN probablemente
- * convierta mejor. Eso NO se arregla cambiando esta constante: hace falta
- * decidir de dónde sale el tipo de cambio y migrar la columna. Es una decisión
- * de producto pendiente, anotada en el PR.
+ * convierta mejor. Con la moneda persistida, cambiar esta constante ya no
+ * corrompe el histórico: las filas viejas siguen diciendo en qué moneda
+ * fueron. Lo que sigue pendiente como decisión de producto es de dónde sale
+ * el tipo de cambio para poder sumar unas con otras.
  */
 export const MONEDA = 'usd' as const;
 
@@ -140,7 +143,60 @@ export const MONTO = Object.freeze({
   MAXIMO_CENTAVOS: 500_000,
 });
 
-/** Centavos → el `numeric(10,2)` de `amount_usd`. */
-export function centavosADecimal(centavos: number): number {
-  return Math.round(centavos) / 100;
+/**
+ * Las monedas cuya unidad mínima ES la moneda. Fuente:
+ * docs.stripe.com/currencies#zero-decimal.
+ */
+const SIN_DECIMALES = new Set([
+  'bif',
+  'clp',
+  'djf',
+  'gnf',
+  'jpy',
+  'kmf',
+  'krw',
+  'mga',
+  'pyg',
+  'rwf',
+  'ugx',
+  'vnd',
+  'vuv',
+  'xaf',
+  'xof',
+  'xpf',
+]);
+
+/**
+ * Las que vienen en milésimas. Stripe exige que el último dígito sea 0, así
+ * que el resultado siempre cabe en el `numeric(10,2)` de la columna.
+ */
+const TRES_DECIMALES = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  El entero de Stripe → la cifra que se guarda en `app.subscriptions.amount`.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  Stripe manda TODO importe como un entero en la unidad mínima de su moneda.
+ *  «Centavos» es una traducción cómoda y falsa: la unidad mínima del yen es el
+ *  yen, y la del dinar kuwaití es la milésima. La versión anterior de esto se
+ *  llamaba `centavosADecimal(centavos)`, no recibía la moneda y dividía
+ *  siempre entre 100 — con lo que ¥3000 se guardaban como 30 y KWD 25.000 como
+ *  250. Dos ceros de ingreso que desaparecen sin que nada falle.
+ *
+ *  Hoy sólo cobramos en `MONEDA`, que es de dos decimales, así que esto no ha
+ *  perdido dinero de nadie todavía. Se arregla ahora porque la única forma de
+ *  enterarse después sería cuadrando la cuenta de Stripe a mano.
+ *
+ *  Una moneda desconocida se trata como de dos decimales —lo más común— y NO
+ *  lanza: el pago ya entró, y la moneda queda escrita en la misma fila, así
+ *  que la cifra siempre se puede reinterpretar. Una excepción aquí, no.
+ */
+export function montoDecimal(unidadesMinimas: number, moneda: string): number {
+  const m = moneda.trim().toLowerCase();
+  const entero = Math.round(unidadesMinimas);
+
+  if (SIN_DECIMALES.has(m)) return entero;
+  if (TRES_DECIMALES.has(m)) return entero / 1000;
+  return entero / 100;
 }

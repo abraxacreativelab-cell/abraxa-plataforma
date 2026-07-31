@@ -230,6 +230,19 @@ describe('POST /billing/alta-gratis', () => {
     expect(db.tabla('subscriptions')).toHaveLength(0);
   });
 
+  it('y tampoco sube el plan: aquí nadie pagó', async () => {
+    // La otra mitad del hallazgo C. El alta de pago SÍ sube el plan del tenant
+    // después de provisionarlo; ésta no puede hacerlo, porque un free que
+    // amaneciera en `pro` sería el mismo error al revés y regalado.
+    await postJson(
+      '/billing/alta-gratis',
+      { businessName: 'Panadería Lupita' },
+      cabeceras('lupita@ejemplo.mx'),
+    );
+
+    expect(db.tabla('tenants')[0]!.plan).toBe('free');
+  });
+
   it('SIN el secreto de proxy no crea nada', async () => {
     const r = await postJson(
       '/billing/alta-gratis',

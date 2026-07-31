@@ -48,7 +48,15 @@ export interface SesionDePago {
   id: string;
   /** `paid` es el único valor con el que se da de alta. */
   paymentStatus: string;
+  /**
+   * El `amount_total` de Stripe, tal cual: un entero en la UNIDAD MÍNIMA de
+   * `currency`, no necesariamente centavos. En yenes la unidad mínima es el
+   * yen y en dinares kuwaitíes la milésima — por eso el nombre miente un poco
+   * y por eso `montoDecimal()` (catalog.ts) exige la moneda para convertirlo.
+   * Nunca lo dividas entre 100 aquí.
+   */
   amountTotalCentavos: number | null;
+  /** ISO-4217 en minúsculas. Se PERSISTE junto a la cifra: ver el hallazgo B. */
   currency: string | null;
   customerEmail: string | null;
   customerId: string | null;

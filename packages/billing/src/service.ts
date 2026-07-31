@@ -17,10 +17,10 @@
  *  Por eso aquí no hay un solo `catch` que devuelva un valor por defecto.
  */
 import { usePort, PlatformError } from '@abraxa/db';
-import { centavosADecimal, isSellablePlan, PLAN_DE_PAGO } from './catalog';
+import { isSellablePlan, MONEDA, montoDecimal, PLAN_DE_PAGO } from './catalog';
 import { gateway, type SesionDePago } from './gateway';
 import { candidatosDeSlug } from './slug';
-import { guardarSuscripcion } from './store';
+import { asegurarPlanDelTenant, guardarSuscripcion } from './store';
 
 /** Lo que el webhook necesita saber para mandar el correo, después del 200. */
 export interface ResultadoDeAlta {
@@ -52,21 +52,93 @@ export async function altaDesdeSesionPagada(sesion: SesionDePago): Promise<Resul
 
   const { tenantId, slug, created } = await provisionarEmpresa({ businessName, ownerEmail });
 
+  // El plan, ANTES que el cobro. `provision()` acaba de dar de alta en `free`
+  // —su default, y el port no tiene por dónde pedirle otro— así que sin esto
+  // el que pagó `pro` se queda con los límites del plan gratis mientras su
+  // recibo dice lo contrario. Si truena, no hay 200 y Stripe reintenta; es
+  // idempotente, así que repetirlo no cuesta nada.
+  //
+  // El orden con la suscripción importa poco (los dos pasos están dentro de la
+  // zona reintentable), pero si sólo uno alcanza a correr, más vale que sea el
+  // que le da a la persona lo que pagó: el registro de cobro se completa en el
+  // reintento, un cliente topándose con el límite de 2 asientos escribe a
+  // soporte. Ver `asegurarPlanDelTenant()` y el hallazgo C del PR #11.
+  await asegurarPlanDelTenant(tenantId, planId);
+
   // Después del alta. Si esto truena, el webhook no devuelve 200 y Stripe
   // reintenta: `provision()` devolverá el mismo tenant y el upsert cerrará el
   // hueco. El orden importa — la empresa primero, el cobro después.
+  const { monto, moneda } = montoDeLaSesion(sesion);
   await guardarSuscripcion({
     tenantId,
     planId,
     status: 'active',
-    amountUsd:
-      sesion.amountTotalCentavos !== null ? centavosADecimal(sesion.amountTotalCentavos) : null,
+    monto,
+    moneda,
     stripeCustomerId: sesion.customerId,
     stripeSubscriptionId: sesion.subscriptionId,
     currentPeriodEnd: null,
   });
 
   return { tenantId, slug, creado: created, ownerEmail, businessName };
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Lo que de verdad se cobró: cifra Y moneda, o ninguna de las dos.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  Antes esto era una línea que metía `amount_total` en una columna llamada
+ *  `amount_usd` y tiraba el `currency` que la sesión ya traía. Una sesión de
+ *  $500 MXN quedaba escrita como 500 dólares: veinte veces el ingreso real, en
+ *  la columna de la que sale cualquier reporte de facturación.
+ *
+ *  Nuestro checkout crea los precios en `MONEDA` y sólo en `MONEDA`. Pero el
+ *  webhook procesa la sesión que Stripe le manda, no la que creímos crear —el
+ *  mismo motivo por el que `validarSesion()` desconfía del `businessName`— y
+ *  el día que la landing cobre en pesos, el bug se activaba solo.
+ *
+ *  No se rechaza el pago por venir en otra moneda: el dinero ya entró y negarle
+ *  la cuenta a quien pagó es el estado que este archivo existe para evitar. Se
+ *  registra lo que pasó y se avisa, fuerte, en los logs.
+ */
+function montoDeLaSesion(s: SesionDePago): { monto: number | null; moneda: string | null } {
+  const moneda = (s.currency ?? '').trim().toLowerCase();
+
+  // Sin una de las dos no hay dato que guardar: una cifra sin moneda es una
+  // suposición y una moneda sin cifra no dice nada.
+  if (s.amountTotalCentavos === null || !moneda) {
+    if (s.amountTotalCentavos !== null || moneda) {
+      console.warn(
+        `[billing] la sesión ${s.id} trae ${moneda ? 'moneda sin importe' : 'importe sin moneda'}. ` +
+          'La suscripción queda sin monto: revísala contra el panel de Stripe.',
+      );
+    }
+    return { monto: null, moneda: null };
+  }
+
+  // `app.subscriptions.currency` tiene un CHECK de ISO-4217. Un código con otra
+  // forma reventaría el INSERT con el pago ya cobrado y el alta entraría en un
+  // bucle de reintentos de Stripe que nunca puede salir bien. Se prefiere una
+  // fila sin monto —el evento crudo queda entero en `billing_events.payload`,
+  // que es la evidencia— y un grito en los logs.
+  if (!/^[a-z]{3}$/.test(moneda)) {
+    console.warn(
+      `[billing] la sesión ${s.id} trae la moneda '${moneda}', que no es un código ISO-4217. ` +
+        'La suscripción queda sin monto: el importe está en el payload del evento.',
+    );
+    return { monto: null, moneda: null };
+  }
+
+  if (moneda !== MONEDA) {
+    console.warn(
+      `[billing] la sesión ${s.id} se cobró en moneda '${moneda}' y el catálogo vende en ` +
+        `'${MONEDA}'. Se guarda tal cual —la fila dice en qué moneda es— pero no se puede ` +
+        'sumar con las demás sin un tipo de cambio.',
+    );
+  }
+
+  return { monto: montoDecimal(s.amountTotalCentavos, moneda), moneda };
 }
 
 /**

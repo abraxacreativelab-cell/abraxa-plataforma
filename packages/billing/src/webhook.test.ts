@@ -184,9 +184,14 @@ describe('el camino feliz', () => {
       tenant_id: 'tenant-de-panaderia-lupita',
       plan_id: 'pro',
       status: 'active',
-      amount_usd: 25,
+      // Cifra y moneda, juntas. Ver «la moneda viaja con la cifra».
+      amount: 25,
+      currency: 'usd',
       stripe_customer_id: 'cus_test_lupita',
     });
+
+    // Y la empresa quedó en el plan que pagó, no en el de cortesía.
+    expect(db.tabla('tenants')[0]!.plan).toBe('pro');
 
     const eventos = db.tabla('billing_events');
     expect(eventos).toHaveLength(1);
@@ -450,6 +455,150 @@ describe('el reproceso NO puede crear una segunda empresa', () => {
     // UNA sola llamada: no se recorrieron los 100 candidatos.
     expect(provisionLlamadas).toHaveLength(1);
     expect(db.tabla('billing_events')[0]!.error).toContain('la base no contestó');
+  });
+});
+
+describe('la moneda viaja con la cifra', () => {
+  /*
+   * ── El defecto (hallazgo B del PR #11) ────────────────────────────────────
+   *
+   * `normalizarSesion()` leía `currency` de la sesión, la ponía en el objeto
+   * … y ahí se moría. El monto se escribía en una columna que se llamaba
+   * `amount_usd` pasara lo que pasara. Una sesión de $500 MXN quedaba escrita
+   * como `amount_usd = 500`: veinte veces el ingreso real, en la columna de la
+   * que sale cualquier reporte de facturación.
+   *
+   * Nuestro checkout crea los precios en `MONEDA` y sólo en `MONEDA`. Pero el
+   * webhook procesa la sesión que Stripe le manda, no la que nosotros creímos
+   * crear — es el mismo motivo por el que `validarSesion()` desconfía del
+   * `businessName`. Y el día que la landing cobre en pesos (está anotado como
+   * decisión de producto pendiente), el bug se activa solo y en silencio.
+   *
+   * Rechazar la sesión no era opción: el dinero ya entró, y negarle la cuenta
+   * a quien pagó es el estado que la regla 1 del handoff prohíbe. Así que se
+   * registra lo que de verdad pasó — cifra Y moneda, juntas o ninguna.
+   */
+
+  it('la moneda del camino feliz queda ESCRITA, no supuesta', async () => {
+    doble.sembrarSesion(SESION_PAGADA);
+
+    await mandarWebhook(eventoCheckout());
+
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: 25, currency: 'usd' });
+  });
+
+  it('una sesión en pesos NO se guarda como si fueran dólares', async () => {
+    doble.sembrarSesion({ ...SESION_PAGADA, currency: 'mxn', amountTotalCentavos: 50_000 });
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).toBe(200);
+    const fila = db.tabla('subscriptions')[0]!;
+    expect(fila).toMatchObject({ amount: 500, currency: 'mxn' });
+    // Y no queda ningún rastro de la columna que mentía.
+    expect(fila.amount_usd).toBeUndefined();
+  });
+
+  it('deja constancia en los logs de que se cobró fuera de la moneda del catálogo', async () => {
+    doble.sembrarSesion({ ...SESION_PAGADA, currency: 'mxn', amountTotalCentavos: 50_000 });
+
+    await mandarWebhook(eventoCheckout());
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("moneda 'mxn'"));
+  });
+
+  it('una moneda sin centavos no se divide entre 100', async () => {
+    // ¥3000 son 3000 yenes, no ¥30. Stripe manda el entero en la unidad mínima
+    // de cada moneda, y en las de cero decimales esa unidad ES la moneda.
+    doble.sembrarSesion({ ...SESION_PAGADA, currency: 'jpy', amountTotalCentavos: 3000 });
+
+    await mandarWebhook(eventoCheckout());
+
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: 3000, currency: 'jpy' });
+  });
+
+  it('sin cifra tampoco hay moneda: las dos columnas van juntas o ninguna', async () => {
+    doble.sembrarSesion({ ...SESION_PAGADA, amountTotalCentavos: null, currency: null });
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).toBe(200);
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: null, currency: null });
+  });
+
+  it('una moneda con forma rara no revienta el INSERT con el pago ya cobrado', async () => {
+    // El CHECK de ISO-4217 de la migración es el que reventaría, y el alta
+    // entraría en un bucle de reintentos de Stripe del que no se puede salir.
+    // Mejor una fila sin monto: el importe sigue entero en el payload.
+    doble.sembrarSesion({ ...SESION_PAGADA, currency: 'dólares' });
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).toBe(200);
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: null, currency: null });
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('ISO-4217'));
+  });
+
+  it('una cifra sin moneda tampoco se guarda a medias', async () => {
+    // El CHECK de la migración lo impediría; esto es que no lleguemos a él.
+    doble.sembrarSesion({ ...SESION_PAGADA, currency: null });
+
+    await mandarWebhook(eventoCheckout());
+
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: null, currency: null });
+  });
+});
+
+describe('quien paga NO se queda en el plan de cortesía', () => {
+  /*
+   * ── El defecto (hallazgo C del PR #11) ────────────────────────────────────
+   *
+   * `provision()` da de alta con `p_plan DEFAULT 'free'` y el `TenancyPort` no
+   * tiene por dónde pedirle otro. El alta la llamaba sin plan, así que quien
+   * pagaba quedaba con TRES verdades distintas a la vez:
+   *
+   *   app.tenants.plan       = 'free'   ← la que consulta `assertQuota()`
+   *   app.subscriptions.plan_id = 'pro' ← la que dice el cobro
+   *   el recibo de Stripe     = "ABRAXA Pro"
+   *
+   * La que manda en el producto es la primera: el que pagó por 10 asientos se
+   * topa con el límite de 2 del plan gratis y escribe a soporte con el recibo
+   * en la mano.
+   */
+
+  it('el tenant queda en el plan que PAGÓ', async () => {
+    doble.sembrarSesion(SESION_PAGADA);
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).toBe(200);
+    expect(db.tabla('tenants')[0]!.plan).toBe('pro');
+    expect(db.tabla('subscriptions')[0]!.plan_id).toBe('pro');
+  });
+
+  it('si el plan no se puede escribir, NO hay 200 — Stripe reintenta', async () => {
+    // Un 200 aquí dejaría a un cliente pagando `pro` y usando `free` sin que
+    // nadie se entere hasta que reclame.
+    doble.sembrarSesion(SESION_PAGADA);
+    db.fallarEn = { tabla: 'tenants', mensaje: 'no hay conexión' };
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).not.toBe(200);
+    expect(db.tabla('billing_events')[0]!.error).toContain('no hay conexión');
+    expect(db.tabla('billing_events')[0]!.processed_at).toBeFalsy();
+  });
+
+  it('el reproceso de un alta a medias también deja el plan correcto', async () => {
+    doble.sembrarSesion(SESION_PAGADA);
+
+    db.fallarEn = { tabla: 'subscriptions', mensaje: 'se cayó a la mitad' };
+    await mandarWebhook(eventoCheckout());
+    const segunda = await mandarWebhook(eventoCheckout());
+
+    expect(segunda.status).toBe(200);
+    expect(db.tabla('tenants')).toHaveLength(1);
+    expect(db.tabla('tenants')[0]!.plan).toBe('pro');
   });
 });
 

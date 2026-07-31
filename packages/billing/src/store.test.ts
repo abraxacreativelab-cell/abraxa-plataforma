@@ -17,6 +17,7 @@ import { resetEnvCache } from '@abraxa/config';
 import { FakeDb } from './pruebas/fake-db';
 import { PLAN_CATALOG } from './catalog';
 import {
+  asegurarPlanDelTenant,
   guardarSuscripcion,
   marcarError,
   marcarProcesado,
@@ -87,38 +88,107 @@ describe('registrarEvento', () => {
 });
 
 describe('guardarSuscripcion', () => {
-  it('reintentar actualiza la misma fila en vez de duplicar el cobro', async () => {
-    const base = {
-      tenantId: 'T1',
-      planId: 'pro',
-      status: 'active',
-      amountUsd: 25,
-      stripeCustomerId: 'cus_1',
-      stripeSubscriptionId: null,
-      currentPeriodEnd: null,
-    };
+  const BASE = {
+    tenantId: 'T1',
+    planId: 'pro',
+    status: 'active',
+    monto: 25,
+    moneda: 'usd',
+    stripeCustomerId: 'cus_1',
+    stripeSubscriptionId: null,
+    currentPeriodEnd: null,
+  };
 
-    await guardarSuscripcion(base);
-    await guardarSuscripcion({ ...base, amountUsd: 40 });
+  it('reintentar actualiza la misma fila en vez de duplicar el cobro', async () => {
+    await guardarSuscripcion(BASE);
+    await guardarSuscripcion({ ...BASE, monto: 40 });
 
     const filas = db.tabla('subscriptions');
     expect(filas).toHaveLength(1);
-    expect(filas[0]!.amount_usd).toBe(40);
+    expect(filas[0]!.amount).toBe(40);
+  });
+
+  it('la moneda se escribe junto a la cifra', async () => {
+    await guardarSuscripcion({ ...BASE, monto: 500, moneda: 'mxn' });
+
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: 500, currency: 'mxn' });
+  });
+
+  it('una cifra sin moneda es un dato que miente: se rechaza antes de escribirla', async () => {
+    // El CHECK de la migración dice lo mismo. Esto es no llegar hasta él con
+    // el pago ya cobrado y un mensaje de Postgres por toda explicación.
+    await expect(guardarSuscripcion({ ...BASE, monto: 25, moneda: null })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+    expect(db.tabla('subscriptions')).toHaveLength(0);
+  });
+
+  it('sin cifra y sin moneda sí se puede: es una suscripción sin monto conocido', async () => {
+    await guardarSuscripcion({ ...BASE, monto: null, moneda: null });
+
+    expect(db.tabla('subscriptions')[0]!).toMatchObject({ amount: null, currency: null });
   });
 
   it('un fallo LANZA para que el webhook no devuelva 200', async () => {
     db.fallarEn = { tabla: 'subscriptions', mensaje: 'no hay conexión' };
-    await expect(
-      guardarSuscripcion({
-        tenantId: 'T1',
-        planId: 'pro',
-        status: 'active',
-        amountUsd: 1,
-        stripeCustomerId: null,
-        stripeSubscriptionId: null,
-        currentPeriodEnd: null,
-      }),
-    ).rejects.toThrow(PlatformError);
+    await expect(guardarSuscripcion({ ...BASE, monto: 1 })).rejects.toThrow(PlatformError);
+  });
+});
+
+describe('asegurarPlanDelTenant', () => {
+  /*
+   * El hallazgo C del PR #11: `provision()` da de alta en `free` y el port no
+   * tiene por dónde pedirle otro plan, así que el que paga se quedaba ahí.
+   * Esto lo sube después de que el pago está confirmado.
+   */
+
+  it('sube el plan de la empresa que acaba de pagar', async () => {
+    db.sembrar('tenants', [{ id: 'T1', slug: 'panaderia-lupita', plan: 'free' }]);
+
+    await asegurarPlanDelTenant('T1', 'pro');
+
+    expect(db.tabla('tenants')[0]!.plan).toBe('pro');
+  });
+
+  it('correrlo dos veces deja lo mismo — el reproceso de un webhook lo repite', async () => {
+    db.sembrar('tenants', [{ id: 'T1', slug: 'panaderia-lupita', plan: 'free' }]);
+
+    await asegurarPlanDelTenant('T1', 'pro');
+    await asegurarPlanDelTenant('T1', 'pro');
+
+    expect(db.tabla('tenants')[0]!.plan).toBe('pro');
+  });
+
+  it('no toca a las demás empresas', async () => {
+    db.sembrar('tenants', [
+      { id: 'T1', slug: 'panaderia-lupita', plan: 'free' },
+      { id: 'T2', slug: 'otra', plan: 'free' },
+    ]);
+
+    await asegurarPlanDelTenant('T1', 'pro');
+
+    expect(db.tabla('tenants').find((t) => t.id === 'T2')!.plan).toBe('free');
+  });
+
+  it('un fallo LANZA y es reintentable: pagar y quedarse en free no es un 200', async () => {
+    db.sembrar('tenants', [{ id: 'T1', slug: 'panaderia-lupita', plan: 'free' }]);
+    db.fallarEn = { tabla: 'tenants', mensaje: 'no hay conexión' };
+
+    await expect(asegurarPlanDelTenant('T1', 'pro')).rejects.toMatchObject({
+      code: 'INTERNAL',
+      retryable: true,
+    });
+  });
+
+  it('un plan que no está en el catálogo NO se escribe', async () => {
+    // `app.tenants.plan` tiene FOREIGN KEY contra `app.plans`: un plan
+    // inventado revienta el UPDATE con el pago ya cobrado. Se corta antes.
+    db.sembrar('tenants', [{ id: 'T1', slug: 'panaderia-lupita', plan: 'free' }]);
+
+    await expect(asegurarPlanDelTenant('T1', 'enterprise')).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+    expect(db.tabla('tenants')[0]!.plan).toBe('free');
   });
 });
 

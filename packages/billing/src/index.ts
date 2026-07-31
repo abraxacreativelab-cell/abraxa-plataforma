@@ -51,7 +51,7 @@ export {
   MONTO,
   getPlan,
   isSellablePlan,
-  centavosADecimal,
+  montoDecimal,
   type Plan,
   type PlanId,
   type PlanLimits,

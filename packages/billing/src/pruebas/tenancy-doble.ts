@@ -28,6 +28,13 @@
  *    · slug del MISMO dueño    → el MISMO tenantId, `created: false`
  *    · slug de OTRO dueño      → PlatformError CONFLICT (el ABX01 de la base)
  *
+ *  Y una cuarta cosa, que también estaba de más en el doble anterior: la fila
+ *  nace con `plan = 'free'`. Es literal en `app.provision_tenant` —`p_plan
+ *  DEFAULT 'free'`— y el `TenancyPort` de hoy NO tiene por dónde pedirle otro:
+ *  `ProvisionInput` no lleva `plan`. Sin esa columna en el doble, la pregunta
+ *  «¿en qué plan queda el que acaba de pagar?» no se podía ni formular, y la
+ *  respuesta de producción era `free`. Ver el hallazgo C del PR #11.
+ *
  *  Regla para quien toque esto: un doble que no puede fallar no prueba nada.
  */
 import { PlatformError } from '@abraxa/db';
@@ -47,8 +54,22 @@ export interface ProvisionDoble {
   /** Sustituye el comportamiento (para probar los caminos de error). */
   cuando(impl: ((i: LlamadaAProvision) => Promise<{ tenantId: string; created: boolean }>) | null): void;
   /** Siembra una empresa que ya existe, con su dueño. */
-  sembrarEmpresa(i: { slug: string; ownerEmail: string; tenantId?: string }): void;
+  sembrarEmpresa(i: {
+    slug: string;
+    ownerEmail: string;
+    tenantId?: string;
+    plan?: string;
+  }): void;
 }
+
+/**
+ * El plan con el que nace TODA empresa que pasa por `provision()`.
+ *
+ * No es una decisión del doble: es el `p_plan DEFAULT 'free'` de la migración
+ * 011, y el port no expone por dónde cambiarlo. Quien cobra tiene que
+ * subirlo después — ver `asegurarPlanDelTenant()` en `store.ts`.
+ */
+export const PLAN_AL_NACER = 'free';
 
 /**
  * Un `provision()` respaldado por la tabla `tenants` del doble de base.
@@ -72,12 +93,13 @@ export function crearProvisionDoble(db: FakeDb): ProvisionDoble {
       sustituto = impl;
     },
 
-    sembrarEmpresa({ slug, ownerEmail, tenantId }) {
+    sembrarEmpresa({ slug, ownerEmail, tenantId, plan }) {
       db.tabla('tenants').push({
         id: tenantId ?? `tenant-de-${slug}`,
         slug,
         name: slug,
         owner_email: ownerEmail,
+        plan: plan ?? PLAN_AL_NACER,
       });
     },
 
@@ -106,6 +128,8 @@ export function crearProvisionDoble(db: FakeDb): ProvisionDoble {
         slug: i.slug,
         name: i.name,
         owner_email: i.ownerEmail,
+        // `p_plan DEFAULT 'free'`, y el port no tiene por dónde pedir otro.
+        plan: PLAN_AL_NACER,
       });
       return { tenantId, created: true };
     },
