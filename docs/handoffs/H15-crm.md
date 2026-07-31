@@ -110,17 +110,49 @@ las rutas HTTP.
 **Le consumen:** H6 (resuelve el contacto de cada webhook) · H8 (tres nodos, cuatro
 disparadores) · H7 (siembra el embudo al terminar el Ritual) · H10 (`form_submitted`).
 
-### `.ownership.json` incluye `.ownership.json`
+### El alta del carril es un acto de H0, no de H15 — y por eso el gate del PR sale en rojo
 
 Este carril nació después del mapa, así que tuvo que darse de alta solo — y el archivo del mapa
-es de H1. La entrada de `h15-crm` se lista a sí misma en sus `paths` para que el gate acepte ese
-primer commit. No afloja nada: `--check-overlap` excluye a `h1-fundacion` del conteo de dueños
-concurrentes (es el andamiador, mergea antes que nadie), así que el archivo sigue teniendo
-exactamente un dueño concurrente. **Verificado con `node scripts/ownership-gate.mjs
---check-overlap` — §10.**
+no es suyo. Durante la construcción, la entrada de `h15-crm` se listaba a sí misma en sus `paths`
+(`.ownership.json` y `scripts/ownership-gate.test.mjs`) para que el gate aceptara ese primer
+commit. Contra la base de la rama eso era inocuo: el único otro dueño era `h1-fundacion`, que
+`--check-overlap` excluye a propósito.
 
-Si el orquestador prefiere que ese permiso desaparezca, basta con quitar `".ownership.json"` de
-la lista una vez mergeado el carril: nada más lo necesita.
+**El 2026-07-31 dejó de serlo.** El PR #15 (H0) le dio a `h0-integracion` los paths `scripts/**` y
+`.ownership.json`. Con eso, el mapa FUSIONADO dejaba dos archivos con dos dueños concurrentes:
+
+```
+$ node scripts/ownership-gate.mjs --check-overlap     # árbol ya fusionado
+✖ Archivos con dos dueños concurrentes:
+  · .ownership.json                  →  h0-integracion, h15-crm
+  · scripts/ownership-gate.test.mjs  →  h0-integracion, h15-crm
+```
+
+…y el test `H0 no se solapa con ningún carril de construcción` fallaba. Ese gate corre en el PR
+de **los otros catorce carriles**: el daño no era de H15, era de todos. La verificación del §10
+decía «✔» porque se había corrido contra la base vieja de la rama — verde ≠ correcto.
+
+Los dos paths se quitaron. `--check-overlap` y el test de H0 salen en 0 contra el árbol
+fusionado.
+
+**La consecuencia, asumida a propósito:** el `ownership-gate` de este PR marca esos dos archivos
+como ajenos («Es de `h0-integracion`»). Es la atribución correcta —dar de alta un carril es un
+acto del orquestador, no del carril— y es preferible a la alternativa, que era dejar `main` en
+rojo para los quince después del merge. Son **dos hunks** para que H0 los apruebe al mergear:
+
+1. `.ownership.json`: la entrada `h15-crm` (sin los dos paths de H0).
+2. `scripts/ownership-gate.test.mjs`: la cuenta `15 → 16` y la línea del lockfile.
+
+**Deuda para H0 (carril `h0-integracion`, no se toca desde aquí):** mientras el gate exija que
+cada carril posea todo lo que su diff toca, ningún carril nuevo podrá darse de alta con el gate
+en verde. El arreglo permanente vive en `scripts/ownership-gate.mjs` y es de H0: que
+`verificarSolapamiento` y `verificarPR` traten `.ownership.json` como el registro compartido que
+es —la misma excepción que ya se le concede a `h1-fundacion`— en vez de como un archivo de
+producto.
+
+**Y al mergear:** quitar `"lockfile": true` de `h15-crm` (sólo hacía falta para dar de alta el
+workspace `packages/crm`) y dejar la prueba del lockfile en `['h1-fundacion']` en la misma
+edición, no en dos pasadas.
 
 ---
 
@@ -399,7 +431,19 @@ Con evidencia, no con "lo probé":
 | 11 | H6 y H8 pueden meter un doble y construir sin esperar a H15 | `port-registration.test.ts` |
 | 12 | En producción sin `PROXY_SECRET`, la vía de headers queda **cerrada** | `http/proxy-verified.test.ts` |
 | 13 | `findDuplicates` **nunca** fusiona nada solo | `contacts/merge.test.ts` |
-| 14 | El gate de propiedad pasa y el mapa sigue consistente | `node scripts/ownership-gate.mjs` y `--check-overlap` |
+| 14 | El mapa de propiedad sigue consistente **contra el árbol fusionado** | `node scripts/ownership-gate.mjs --check-overlap` — ver la nota de abajo |
+| 15 | Una identidad marcada principal que choca **no** se descarta ni miente | `contacts/service.test.ts` · «dos teléfonos marcados AMBOS como principal» |
+| 16 | Una operación sobre un `contactId` inexistente o ajeno es **404**, no `{ok:true}` | `contacts/service.test.ts`, `pipeline/service.test.ts` |
+| 17 | Fusionar **no evapora** el monto de la posición descartada | `contacts/merge.test.ts` |
+| 18 | Un grupo de WhatsApp no entra por **ninguna** de las tres puertas | `contacts/service.test.ts`, `identity.test.ts` |
+| 19 | Un trato en dólares se guarda y se pinta en dólares; el tablero **no** suma monedas | `pipeline/service.test.ts` |
+| 20 | Un filtro por etiqueta muy grande se acota y **avisa** que la lista es parcial | `contacts/service.test.ts` |
+
+> **El criterio 14 estuvo mal verificado y por eso se anota aquí.** La primera vez se corrió
+> contra la BASE de la rama, donde el único otro dueño de `.ownership.json` era `h1-fundacion`.
+> Contra el `main` del 2026-07-31 —que por el PR #15 le dio `scripts/**` y `.ownership.json` a
+> `h0-integracion`— salía en rojo, y con él el gate de los otros catorce carriles. Ver §3.
+> **Un `--check-overlap` sólo vale corrido DESPUÉS del merge.**
 
 Lo que **no** se pudo verificar sin base viva y queda para el orquestador al aplicar migraciones:
 
@@ -408,6 +452,10 @@ Lo que **no** se pudo verificar sin base viva y queda para el orquestador al apl
 - Que RLS esté activo en las ocho tablas — se afirma en el SQL y lo verifica el gate
   (`revisarMigracion`), pero la comprobación real es
   `select relname, relrowsecurity from pg_class where relnamespace = 'app'::regnamespace`.
+- Que `123` deje las FK compuestas `(tenant_id, contact_id)` en las cinco tablas hijas. El doble
+  en memoria no reproduce claves foráneas, así que la defensa que sí se prueba es la del servicio
+  (`exigirContacto`). La comprobación real es
+  `select conname, confrelid::regclass from pg_constraint where conrelid = 'app.contact_identities'::regclass`.
 
 ---
 
