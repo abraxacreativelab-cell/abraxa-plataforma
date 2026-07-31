@@ -1,0 +1,20 @@
+{
+  "name": "@abraxa/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cliente, aislamiento por tenant y contratos cruzados. Handoff H1.",
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
+    "./ports": { "types": "./ports.ts", "default": "./ports.ts" },
+    "./tables": { "types": "./src/tables.ts", "default": "./src/tables.ts" },
+    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@abraxa/config": "*",
+    "@supabase/supabase-js": "^2.47.12"
+  }
+}

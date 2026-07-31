@@ -1,0 +1,31 @@
+{
+  "name": "@abraxa/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gateway HTTP de ABRAXA Plataforma. Handoff H1 (el cableado); cada handoff cuelga sus rutas de su propio paquete.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.mjs",
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@abraxa/agents": "*",
+    "@abraxa/areas": "*",
+    "@abraxa/billing": "*",
+    "@abraxa/config": "*",
+    "@abraxa/db": "*",
+    "@abraxa/flows": "*",
+    "@abraxa/inbox": "*",
+    "@abraxa/onboarding": "*",
+    "@abraxa/tenancy": "*",
+    "@abraxa/ui": "*",
+    "@abraxa/vault": "*",
+    "@abraxa/work": "*",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "zod": "^3.24.1"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@abraxa/areas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Areas del negocio, desbloqueo y gamificacion. Handoff H11.",
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
+    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@abraxa/config": "*",
+    "@abraxa/db": "*",
+    "express": "^4.21.2",
+    "zod": "^3.24.1"
+  }
+}

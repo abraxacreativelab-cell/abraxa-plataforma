@@ -1,0 +1,143 @@
+{
+  "h1-fundacion": {
+    "label": "H1 · Fundación del monorepo",
+    "migrations": [1, 9],
+    "lockfile": true,
+    "paths": [
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+      "tsconfig.base.json",
+      "eslint.config.mjs",
+      ".prettierrc.json",
+      ".prettierignore",
+      ".gitignore",
+      ".nvmrc",
+      ".env.example",
+      ".ownership.json",
+      "vitest.config.ts",
+      "CONTRIBUTING.md",
+      "README.md",
+      "migrations/README.md",
+      ".github/**",
+      "scripts/**",
+      "packages/config/**",
+      "packages/db/**",
+      "packages/*/package.json",
+      "packages/*/tsconfig.json",
+      "packages/*/README.md",
+      "packages/*/src/index.ts",
+      "packages/*/src/meta.ts",
+      "apps/api/**",
+      "apps/worker/**",
+      "apps/web/package.json",
+      "apps/web/tsconfig.json",
+      "apps/web/next.config.mjs",
+      "apps/web/next-env.d.ts",
+      "apps/web/postcss.config.mjs",
+      "apps/web/tailwind.config.ts",
+      "apps/web/app/layout.tsx",
+      "apps/web/app/globals.css",
+      "apps/web/app/**/layout.tsx",
+      "apps/web/app/**/page.tsx"
+    ]
+  },
+
+  "h2-tenancy": {
+    "label": "H2 · Tenancy",
+    "migrations": [10, 19],
+    "paths": ["packages/tenancy/**"]
+  },
+
+  "h3-agents": {
+    "label": "H3 · Agents",
+    "migrations": [20, 29],
+    "paths": ["packages/agents/**"]
+  },
+
+  "h4-vault": {
+    "label": "H4 · Bóveda",
+    "migrations": [30, 39],
+    "paths": ["packages/vault/**", "apps/web/app/(app)/direccion/**"]
+  },
+
+  "h5-design-system": {
+    "label": "H5 · Design system y shell",
+    "migrations": null,
+    "paths": [
+      "packages/ui/**",
+      "apps/web/app/layout.tsx",
+      "apps/web/app/globals.css",
+      "apps/web/tailwind.config.ts",
+      "apps/web/app/(app)/layout.tsx"
+    ]
+  },
+
+  "h6-inbox": {
+    "label": "H6 · Bandeja, WhatsApp y el puente agente↔inbox",
+    "migrations": [40, 49],
+    "paths": [
+      "packages/inbox/**",
+      "!packages/inbox/src/drivers/meta/**",
+      "!packages/inbox/src/drivers/email/**",
+      "!packages/inbox/src/drivers/sms/**",
+      "!packages/inbox/drivers/meta/**",
+      "!packages/inbox/drivers/email/**",
+      "!packages/inbox/drivers/sms/**",
+      "apps/web/app/(app)/bandeja/**"
+    ]
+  },
+
+  "h7-ritual": {
+    "label": "H7 · El Ritual de Fundación",
+    "migrations": [50, 59],
+    "paths": ["packages/onboarding/**", "apps/web/app/(onboarding)/**"]
+  },
+
+  "h8-flows": {
+    "label": "H8 · Automatizaciones",
+    "migrations": [60, 69],
+    "paths": ["packages/flows/**", "apps/web/app/(app)/automatizaciones/**"]
+  },
+
+  "h9-work": {
+    "label": "H9 · Tareas y proyectos",
+    "migrations": [70, 79],
+    "paths": ["packages/work/**", "apps/web/app/(app)/tareas/**"]
+  },
+
+  "h10-billing": {
+    "label": "H10 · Landing, cobro y alta self-service",
+    "migrations": [80, 89],
+    "paths": ["packages/billing/**", "apps/web/app/(public)/**"]
+  },
+
+  "h11-areas": {
+    "label": "H11 · Áreas y gamificación",
+    "migrations": [90, 99],
+    "paths": ["packages/areas/**", "apps/web/app/(app)/mapa/**"]
+  },
+
+  "h12-meta": {
+    "label": "H12 · Driver Meta (Instagram + Messenger)",
+    "migrations": [100, 104],
+    "paths": ["packages/inbox/src/drivers/meta/**", "packages/inbox/drivers/meta/**"]
+  },
+
+  "h13-email-sms": {
+    "label": "H13 · Drivers email + SMS",
+    "migrations": [105, 109],
+    "paths": [
+      "packages/inbox/src/drivers/email/**",
+      "packages/inbox/src/drivers/sms/**",
+      "packages/inbox/drivers/email/**",
+      "packages/inbox/drivers/sms/**"
+    ]
+  },
+
+  "h14-admin": {
+    "label": "H14 · Panel de agencia",
+    "migrations": [110, 119],
+    "paths": ["apps/web/app/(admin)/**"]
+  }
+}

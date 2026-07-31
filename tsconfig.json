@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "ABRAXA Plataforma — proyecto de Node (paquetes de backend + api + worker)",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/db/ports.ts",
+    "apps/api/src/**/*.ts",
+    "apps/worker/src/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["**/node_modules", "**/dist", "**/.next", "packages/ui/**"]
+}

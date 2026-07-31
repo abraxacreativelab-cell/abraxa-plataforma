@@ -1,0 +1,56 @@
+{
+  "name": "abraxa-plataforma",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ABRAXA Plataforma — sistema operativo empresarial para emprendedores",
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck:node && npm run typecheck:ui && npm run typecheck:web",
+    "typecheck:node": "tsc -p tsconfig.json",
+    "typecheck:ui": "tsc -p packages/ui/tsconfig.json",
+    "typecheck:web": "tsc -p apps/web/tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "npm run build --workspace apps/api && npm run build --workspace apps/worker && npm run build --workspace apps/web",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:worker": "npm run dev --workspace apps/worker",
+    "migrate": "node scripts/migrate.mjs",
+    "migrate:status": "node scripts/migrate.mjs --status",
+    "gate": "node scripts/ownership-gate.mjs",
+    "gate:overlap": "node scripts/ownership-gate.mjs --check-overlap"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@playwright/test": "^1.49.1",
+    "@types/express": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "dotenv": "^16.4.7",
+    "esbuild": "^0.24.2",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "pg": "^8.13.1",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.8"
+  }
+}
