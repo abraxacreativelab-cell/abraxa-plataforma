@@ -18,8 +18,17 @@
       "handoff, y por eso se vacía en cuanto el PR mergea.",
       "",
       "Si la corrección no es de seguridad, o puede esperar, la regla es la de siempre: se",
-      "emite un handoff nuevo, no se escribe en el árbol ajeno."
+      "emite un handoff nuevo, no se escribe en el árbol ajeno.",
+      "",
+      "`ramas` existe porque H0 no abre UN PR: mergea, aplica migraciones, corrige handoffs y",
+      "despliega, muchas veces y a veces con dos PRs vivos al mismo tiempo. El gate exigía que",
+      "la rama se llamara igual que la entrada, así que el segundo PR de H0 moría antes de",
+      "compilar. Un alias dice sólo 'esta rama es este carril' — NO reparte propiedad. Darle a",
+      "H0 una segunda ENTRADA con los mismos paths sí lo haría, y pondría dos dueños sobre cada",
+      "archivo de docs/: `--check-overlap` corre en el PR de TODOS los carriles y se pondría",
+      "rojo para todos. Por eso es un alias y no una entrada."
     ],
+    "ramas": ["h0-integracion", "h0-docs-ola2"],
     "paths": ["docs/**", "deploy/**", "scripts/**", ".ownership.json", "eslint.config.mjs"],
     "excepcionTransversal": {
       "fecha": "2026-07-31",
