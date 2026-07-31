@@ -182,7 +182,7 @@ describe('el camino feliz', () => {
 
     const suscripciones = db.tabla('subscriptions');
     expect(suscripciones).toHaveLength(1);
-    expect(suscripciones[0]).toMatchObject({
+    expect(suscripciones[0]!).toMatchObject({
       tenant_id: 'tenant-de-panaderia-lupita',
       plan_id: 'pro',
       status: 'active',
@@ -192,8 +192,8 @@ describe('el camino feliz', () => {
 
     const eventos = db.tabla('billing_events');
     expect(eventos).toHaveLength(1);
-    expect(eventos[0].processed_at).toBeTruthy();
-    expect(eventos[0].error).toBeNull();
+    expect(eventos[0]!.processed_at).toBeTruthy();
+    expect(eventos[0]!.error).toBeNull();
   });
 
   it('registra el evento crudo aunque sea de un tipo que ignora — regla 5', async () => {
@@ -212,8 +212,8 @@ describe('el camino feliz', () => {
 
     const eventos = db.tabla('billing_events');
     expect(eventos).toHaveLength(1);
-    expect(eventos[0].type).toBe('payment_intent.created');
-    expect(eventos[0].processed_at).toBeTruthy();
+    expect(eventos[0]!.type).toBe('payment_intent.created');
+    expect(eventos[0]!.processed_at).toBeTruthy();
   });
 });
 
@@ -335,10 +335,34 @@ describe('criterio 4 — si el alta falla, NO 200', () => {
 
     await mandarWebhook(eventoCheckout());
 
-    const evento = db.tabla('billing_events')[0];
+    const evento = db.tabla('billing_events')[0]!;
     expect(evento.error).toContain('el slug ya es de otro dueño');
     expect(evento.processed_at).toBeFalsy();
     expect(evento.attempts).toBe(1);
+  });
+
+  it('un alta que quedó a MEDIAS se completa en el reintento, no se da por buena', async () => {
+    // El agujero por el que se cuela la regla 4 disfrazada de regla 2:
+    // el evento se registra ANTES de procesarlo, así que un primer intento
+    // que muere a la mitad deja la fila escrita y sin terminar. Si el
+    // reintento sólo mirara "¿duplicado?", contestaría 200 y la empresa se
+    // quedaría para siempre sin su registro de cobro.
+    doble.sembrarSesion(SESION_PAGADA);
+    db.fallarEn = { tabla: 'subscriptions', mensaje: 'se cayó a la mitad' };
+
+    const primera = await mandarWebhook(eventoCheckout());
+    expect(primera.status).not.toBe(200);
+    expect(db.tabla('subscriptions')).toHaveLength(0);
+
+    // Stripe reintenta el MISMO evento.
+    const segunda = await mandarWebhook(eventoCheckout());
+
+    expect(segunda.status).toBe(200);
+    // Y esta vez sí terminó.
+    expect(db.tabla('subscriptions')).toHaveLength(1);
+    expect(db.tabla('billing_events')[0]!.processed_at).toBeTruthy();
+    // Sigue habiendo UNA sola empresa: provision() es idempotente por slug.
+    expect(new Set(provisionLlamadas.map((p) => p.slug)).size).toBe(1);
   });
 
   it('guardar la suscripción que falla tampoco devuelve 200', async () => {
@@ -350,7 +374,7 @@ describe('criterio 4 — si el alta falla, NO 200', () => {
     const r = await mandarWebhook(eventoCheckout());
 
     expect(r.status).not.toBe(200);
-    expect(db.tabla('billing_events')[0].error).toContain('se cayó la conexión');
+    expect(db.tabla('billing_events')[0]!.error).toContain('se cayó la conexión');
   });
 
   it('una sesión sin pagar no da de alta a nadie', async () => {
@@ -369,7 +393,7 @@ describe('criterio 4 — si el alta falla, NO 200', () => {
 
     expect(r.status).not.toBe(200);
     expect(provisionLlamadas).toHaveLength(0);
-    expect(db.tabla('billing_events')[0].error).toContain('no trae correo');
+    expect(db.tabla('billing_events')[0]!.error).toContain('no trae correo');
   });
 });
 

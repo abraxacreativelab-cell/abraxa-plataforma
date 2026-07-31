@@ -34,6 +34,14 @@ export class FakeDb {
   /** Falla la próxima operación sobre esta tabla, para probar los caminos de error. */
   fallarEn: { tabla: string; mensaje: string } | null = null;
 
+  /**
+   * Falla la próxima LECTURA sobre esta tabla, sin tocar las escrituras.
+   *
+   * Hace falta para probar el caso en que el INSERT choca contra el UNIQUE y
+   * además no se puede leer si el evento ya se había terminado.
+   */
+  fallarEnLectura: { tabla: string; mensaje: string } | null = null;
+
   constructor() {
     this.definir('billing_events', [['stripe_event_id']]);
     this.definir('subscriptions', [['tenant_id']]);
@@ -87,7 +95,7 @@ class Consulta implements PromiseLike<{ data: unknown; error: RespuestaError | n
   ) {}
 
   select(_cols?: string): this {
-    if (this.op === 'select') this.op = 'select';
+    this.op = 'select';
     return this;
   }
 
@@ -138,6 +146,12 @@ class Consulta implements PromiseLike<{ data: unknown; error: RespuestaError | n
       return { data: null, error: { message: fallo.mensaje } };
     }
 
+    const falloLectura = this.db.fallarEnLectura;
+    if (this.op === 'select' && falloLectura && falloLectura.tabla === this.nombre) {
+      this.db.fallarEnLectura = null;
+      return { data: null, error: { message: falloLectura.mensaje } };
+    }
+
     switch (this.op) {
       case 'select': {
         const encontradas = this.t.filas.filter((f) => this.coincide(f));
@@ -170,8 +184,9 @@ class Consulta implements PromiseLike<{ data: unknown; error: RespuestaError | n
       }
 
       case 'update': {
+        const patch = this.payload[0] ?? {};
         for (const f of this.t.filas) {
-          if (this.coincide(f)) Object.assign(f, this.payload[0]);
+          if (this.coincide(f)) Object.assign(f, patch);
         }
         return { data: null, error: null };
       }

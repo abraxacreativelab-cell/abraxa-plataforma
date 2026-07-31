@@ -111,8 +111,16 @@ CREATE UNIQUE INDEX subscriptions_stripe_subscription_idx
 -- Los eventos llegan ANTES de que el tenant exista: el pago es lo que lo crea.
 -- Exigirles tenant_id haría imposible registrar justo el evento que da de alta
 -- al cliente — y también el de firma inválida, que no pertenece a nadie.
--- A qué empresa correspondió cada uno se lee del propio `payload`
--- (`data.object.metadata.slug`), que es la evidencia cruda de Stripe.
+-- A qué negocio correspondió cada uno se lee del propio `payload`, que es la
+-- evidencia cruda de Stripe:
+--
+--   SELECT payload->'data'->'object'->'metadata'->>'businessName', created_at
+--     FROM app.billing_events
+--    WHERE processed_at IS NULL;
+--
+-- Es `businessName` y no el slug a propósito: el slug se deriva al procesar el
+-- webhook —resolver colisiones necesita la base—, así que en el momento de
+-- crear la sesión de pago todavía no existe.
 --
 -- tenantless: bitácora de un proveedor externo, previa a la existencia del tenant.
 CREATE TABLE app.billing_events (

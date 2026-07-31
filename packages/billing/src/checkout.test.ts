@@ -213,7 +213,7 @@ describe('POST /billing/alta-gratis', () => {
       cabeceras('lupita@ejemplo.mx'),
     );
 
-    expect(provisionLlamadas[0].ownerEmail).toBe('lupita@ejemplo.mx');
+    expect(provisionLlamadas[0]!.ownerEmail).toBe('lupita@ejemplo.mx');
   });
 
   it('en producción sin PROXY_SECRET se rechaza todo — fail-closed', async () => {

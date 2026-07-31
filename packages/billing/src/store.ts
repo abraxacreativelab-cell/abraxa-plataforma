@@ -32,10 +32,16 @@ const UNIQUE_VIOLATION = '23505';
 export interface EventoRegistrado {
   /** `true` si Stripe ya nos había mandado este evento. */
   duplicado: boolean;
+  /**
+   * `true` sólo si una pasada anterior lo terminó (`processed_at` puesto).
+   *
+   * La distinción es la que evita el peor error de este archivo. Ver abajo.
+   */
+  yaProcesado: boolean;
 }
 
 /**
- * Registra el evento y dice si ya lo habíamos visto.
+ * Registra el evento y dice si ya lo habíamos visto Y si ya lo terminamos.
  *
  * ── La idempotencia vive aquí, en la base ──────────────────────────────────
  *
@@ -46,18 +52,54 @@ export interface EventoRegistrado {
  * correcta.
  *
  * Por eso esto inserta primero y pregunta después, en vez de al revés.
+ *
+ * ── Por qué "duplicado" NO basta, y esto casi sale mal ─────────────────────
+ *
+ * La versión obvia devuelve sólo `duplicado` y el webhook contesta 200 en
+ * cuanto lo ve. Pero el evento se registra ANTES de procesarlo, así que un
+ * primer intento que falla a la mitad —`provision()` bien y el `INSERT` de la
+ * suscripción mal— deja la fila escrita y sin terminar. El reintento de
+ * Stripe entra, ve "duplicado", contesta 200 y **el alta nunca se completa**:
+ * queda una empresa sin su registro de cobro y Stripe convencido de que todo
+ * salió bien. Es exactamente el estado que la regla 4 del handoff quiere
+ * evitar, colándose por la puerta de la regla 2.
+ *
+ * Por eso se distingue: sólo se corta el paso si la pasada anterior TERMINÓ.
+ * Si no terminó, el reintento vuelve a procesar — y puede hacerlo sin miedo
+ * porque `provision()` es idempotente por slug (H2) y la suscripción entra
+ * por `upsert` contra `UNIQUE (tenant_id)`.
  */
 export async function registrarEvento(i: {
   stripeEventId: string;
   type: string;
   payload: unknown;
 }): Promise<EventoRegistrado> {
-  const { error } = await adminDb()
+  const db = adminDb();
+  const { error } = await db
     .from('billing_events')
     .insert({ stripe_event_id: i.stripeEventId, type: i.type, payload: i.payload });
 
-  if (!error) return { duplicado: false };
-  if (error.code === UNIQUE_VIOLATION) return { duplicado: true };
+  if (!error) return { duplicado: false, yaProcesado: false };
+
+  if (error.code === UNIQUE_VIOLATION) {
+    const { data, error: errorLectura } = await db
+      .from('billing_events')
+      .select('processed_at')
+      .eq('stripe_event_id', i.stripeEventId)
+      .maybeSingle();
+
+    if (errorLectura) {
+      // No se sabe si se terminó. Reintentar es seguro (todo aguas abajo es
+      // idempotente); dar por bueno un alta que quizá no ocurrió, no.
+      throw new PlatformError(
+        'INTERNAL',
+        `No se pudo leer el estado del evento ${i.stripeEventId}: ${errorLectura.message}`,
+        { retryable: true },
+      );
+    }
+
+    return { duplicado: true, yaProcesado: Boolean(data?.processed_at) };
+  }
 
   throw new PlatformError('INTERNAL', `No se pudo registrar el evento de Stripe: ${error.message}`, {
     details: { stripeEventId: i.stripeEventId },

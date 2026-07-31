@@ -12,7 +12,14 @@ import { PlatformError, __setClientForTests } from '@abraxa/db';
 import { resetEnvCache } from '@abraxa/config';
 import { FakeDb } from './pruebas/fake-db';
 import { PLAN_CATALOG } from './catalog';
-import { guardarSuscripcion, marcarError, registrarEvento, slugOcupado, syncPlanCatalog } from './store';
+import {
+  guardarSuscripcion,
+  marcarError,
+  marcarProcesado,
+  registrarEvento,
+  slugOcupado,
+  syncPlanCatalog,
+} from './store';
 
 let db: FakeDb;
 let quitar: () => void;
@@ -37,11 +44,35 @@ describe('registrarEvento', () => {
   it('el primero entra, el segundo se marca duplicado', async () => {
     expect(await registrarEvento({ stripeEventId: 'evt_1', type: 't', payload: {} })).toEqual({
       duplicado: false,
+      yaProcesado: false,
     });
     expect(await registrarEvento({ stripeEventId: 'evt_1', type: 't', payload: {} })).toEqual({
       duplicado: true,
+      yaProcesado: false,
     });
     expect(db.tabla('billing_events')).toHaveLength(1);
+  });
+
+  it('un duplicado de algo YA TERMINADO se distingue de uno a medias', async () => {
+    // La diferencia entre "no lo vuelvas a mandar" y "hay que reintentarlo".
+    await registrarEvento({ stripeEventId: 'evt_hecho', type: 't', payload: {} });
+    await marcarProcesado('evt_hecho');
+
+    expect(await registrarEvento({ stripeEventId: 'evt_hecho', type: 't', payload: {} })).toEqual({
+      duplicado: true,
+      yaProcesado: true,
+    });
+  });
+
+  it('si no se puede leer el estado del duplicado, LANZA en vez de suponer', async () => {
+    await registrarEvento({ stripeEventId: 'evt_5', type: 't', payload: {} });
+
+    // El INSERT choca (23505) y la lectura del estado falla.
+    db.fallarEnLectura = { tabla: 'billing_events', mensaje: 'timeout' };
+
+    await expect(
+      registrarEvento({ stripeEventId: 'evt_5', type: 't', payload: {} }),
+    ).rejects.toMatchObject({ retryable: true });
   });
 
   it('un fallo real de la base LANZA y es reintentable', async () => {
@@ -83,7 +114,7 @@ describe('guardarSuscripcion', () => {
 
     const filas = db.tabla('subscriptions');
     expect(filas).toHaveLength(1);
-    expect(filas[0].amount_usd).toBe(40);
+    expect(filas[0]!.amount_usd).toBe(40);
   });
 
   it('un fallo LANZA para que el webhook no devuelva 200', async () => {
@@ -109,7 +140,7 @@ describe('marcarError', () => {
     await marcarError('evt_3', 'primera falla');
     await marcarError('evt_3', 'segunda falla');
 
-    const e = db.tabla('billing_events')[0];
+    const e = db.tabla('billing_events')[0]!;
     expect(e.error).toBe('segunda falla');
     expect(e.attempts).toBe(2);
   });
@@ -117,7 +148,7 @@ describe('marcarError', () => {
   it('recorta un motivo gigante en vez de reventar la columna', async () => {
     await registrarEvento({ stripeEventId: 'evt_4', type: 't', payload: {} });
     await marcarError('evt_4', 'x'.repeat(5000));
-    expect(String(db.tabla('billing_events')[0].error)).toHaveLength(2000);
+    expect(String(db.tabla('billing_events')[0]!.error)).toHaveLength(2000);
   });
 });
 

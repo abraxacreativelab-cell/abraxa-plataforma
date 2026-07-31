@@ -138,17 +138,28 @@ router.post(
     }
 
     // ── Regla 2 · idempotencia, y regla 5 · registrar TODO ──────────────────
-    const { duplicado } = await registrarEvento({
+    const { duplicado, yaProcesado } = await registrarEvento({
       stripeEventId: evento.id,
       type: evento.type,
       payload: evento.raw,
     });
 
-    if (duplicado) {
+    // Sólo se corta el paso si la pasada anterior TERMINÓ. Un evento que
+    // quedó a medias se vuelve a procesar: ver la explicación larga en
+    // `registrarEvento`. Cortar aquí por "duplicado" a secas dejaría altas
+    // incompletas dadas por buenas.
+    if (duplicado && yaProcesado) {
       // Stripe reintentó algo que ya procesamos. 200 y nada más: es la
       // respuesta que le dice "ya, deja de mandarlo".
       res.json({ ok: true, duplicado: true });
       return;
+    }
+
+    if (duplicado) {
+      console.warn(
+        `[billing] el evento ${evento.id} ya estaba registrado pero sin terminar. ` +
+          'Se reintenta: provision() es idempotente por slug y la suscripción va por upsert.',
+      );
     }
 
     // Los tipos que no nos tocan quedan registrados y cerrados. Se responde
