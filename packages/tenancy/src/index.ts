@@ -1,18 +1,144 @@
 /**
- * @abraxa/tenancy — Identidad, tenants, membresias y RBAC por area
+ * ════════════════════════════════════════════════════════════════════════════
+ *  @abraxa/tenancy — H2
  *
- * Carril de H2. H1 dejó el paquete creado, cableado a apps/api y con sus
- * dependencias instaladas: no hay que editar nada fuera de esta carpeta.
+ *  Quién es cada quien, a qué empresa pertenece, y qué puede tocar.
+ * ════════════════════════════════════════════════════════════════════════════
  *
- * Al construir:
- *   1. Cuelga tus rutas de este `router`. apps/api ya lo monta en /tenancy.
- *   2. Si implementas un port, regístralo aquí abajo con `registerPort()`.
- *   3. Pon `ready: true` en src/meta.ts cuando el paquete haga algo real.
- *   4. Todo dato de dominio pasa por `tenantDb(ctx)`. El cliente crudo está
- *      prohibido por ESLint y no es negociable.
+ * Todo lo demás del producto depende de esto. En concreto, de una sola cosa:
+ * el 403 de `contextFor()` cuando no hay membresía. `tenantDb(ctx)` filtra por
+ * el `tenantId` que sale de ahí, así que si esa comprobación se equivoca, todo
+ * lo de abajo filtra impecablemente hacia la empresa equivocada.
+ *
+ * Lo que expone este paquete:
+ *
+ *   · `router`              — las rutas, que apps/api monta en /tenants
+ *   · `tenancyPort`         — la implementación de TenancyPort (ports.ts)
+ *   · `tenantMiddleware`    — resuelve la empresa activa de una petición
+ *   · `requireArea` y cía.  — el RBAC por área, para los demás paquetes
+ *   · `onTenantProvisioned` — el enganche que espera H11
  */
-import { Router } from 'express';
+import { registerPort } from '@abraxa/db';
+import { tenancyPort } from './port';
 
-export const router: Router = Router();
-
+export { router } from './routes/index';
 export { meta } from './meta';
+export { tenancyPort };
+
+// ─── Contexto e identidad ─────────────────────────────────────────────────
+export {
+  canSignIn,
+  contextFor,
+  esStaffDePlataforma,
+  primaryTenantSlugFor,
+  staffContextFor,
+  tenantsFor,
+  type CanSignInDeps,
+  type ContextForInput,
+} from './services/context';
+
+// ─── Alta ─────────────────────────────────────────────────────────────────
+export { provision, type ProvisionInput, type ProvisionResult } from './services/provision';
+
+// ─── Miembros e invitaciones ──────────────────────────────────────────────
+export { listMembers, removeMember, setAreas, setRole, upsertMember } from './services/memberships';
+
+export {
+  acceptInvitation,
+  createInvitation,
+  hashToken,
+  listInvitations,
+  revokeInvitation,
+  urlDeInvitacion,
+  type AcceptInput,
+  type InviteInput,
+  type PendingInvitation,
+} from './services/invitations';
+
+// ─── Planes y cuotas ──────────────────────────────────────────────────────
+export {
+  assertQuota,
+  assertSeatAvailable,
+  availablePlans,
+  limitsFor,
+  planFor,
+  quotaFor,
+  seatsFor,
+} from './services/plans';
+
+// ─── Eventos ──────────────────────────────────────────────────────────────
+export {
+  drainTenantEvents,
+  emitTenantEvent,
+  onTenantEvent,
+  onTenantProvisioned,
+  MEMBER_JOINED,
+  MEMBER_REMOVED,
+  TENANT_PROVISIONED,
+  __clearTenantEventHandlers,
+  type DrainResult,
+  type TenantEventHandler,
+} from './services/events';
+
+// ─── RBAC y middleware, para los otros paquetes ───────────────────────────
+export {
+  ACCESS_RANK,
+  esAdminDelTenant,
+  hasArea,
+  loadAreaGrants,
+  requireAnyArea,
+  requireArea,
+  requireAreaOperation,
+  requireRole,
+  requireTenantAdmin,
+} from './middleware/rbac';
+
+export {
+  asyncHandler,
+  contextoDe,
+  requireProxySecret,
+  sessionMiddleware,
+  tenantMiddleware,
+} from './middleware/tenant';
+
+export { proxyVerified } from './middleware/proxy';
+
+// ─── Tipos y validación ───────────────────────────────────────────────────
+export type {
+  AreaAccess,
+  AreaGrantRow,
+  FullTenantContext,
+  InvitationRow,
+  IssuedInvitation,
+  MemberSummary,
+  MembershipRole,
+  MembershipRow,
+  PlanLimits,
+  PlanRow,
+  QuotaKey,
+  QuotaState,
+  TenantContext,
+  TenantEventRow,
+  TenantRow,
+  TenantStatus,
+  TenantSummary,
+  UserRow,
+} from './types';
+
+export {
+  AREA_SLUG_RE,
+  EMAIL_RE,
+  RESERVED_SLUGS,
+  SLUG_RE,
+  normalizeEmail,
+  normalizeSlug,
+} from './schemas';
+
+export { TENANCY_SQLSTATE, mapPgError, validar } from './errors';
+
+/**
+ * El registro. Importar este paquete es lo que hace que `usePort('tenancy')`
+ * funcione — y `apps/api` ya lo importa, así que nadie tiene que acordarse
+ * de nada.
+ */
+registerPort('tenancy', tenancyPort);
