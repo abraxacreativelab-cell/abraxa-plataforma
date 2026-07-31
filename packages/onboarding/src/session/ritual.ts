@@ -69,6 +69,26 @@ const ENTRADA_ARRANQUE = '(acaba de entrar por primera vez; salúdalo y arranca)
 const ENTRADA_REGRESO = '(acaba de volver a una entrevista que dejó a medias; retómala)';
 const ENTRADA_CIERRE = '(ya tienes todo; entrégale su Mapa de Negocio)';
 
+/**
+ * Cuánto vale el arrendamiento de `status='cerrando'`.
+ *
+ * `cerrando` cierra la puerta de la fase 6, y una puerta que nadie puede volver
+ * a abrir convierte cualquier caída —un deploy, un OOM, la red— en un Ritual
+ * muerto para siempre: la fila se queda a un paso del Mapa de Negocio y nadie
+ * puede darle ese paso. Por eso es un arrendamiento y no una lápida.
+ *
+ * Cinco minutos: el cierre corre UNA llamada al modelo, y el BFF ya se rinde a
+ * los 90 s. Un cierre vivo jamás llega aquí. Y si llegara —un proveedor
+ * lentísimo— retomarlo tampoco rompe nada: la fase 6 es idempotente desde la
+ * 052, y de los dos cierres sólo uno puede ganar el `guardarTurno` final.
+ */
+const ARRENDAMIENTO_DEL_CIERRE_MS = 5 * 60 * 1000;
+
+/** Lo que se le dice a quien tocó la puerta mientras se cerraba el Ritual. */
+export const CIERRE_EN_CURSO =
+  'Tu agente está armando tu Mapa de Negocio en este momento. ' +
+  'Nada se perdió: espera unos segundos y aparece solo.';
+
 // ════════════════════════════════════════════════════════════════════════════
 // Historial
 // ════════════════════════════════════════════════════════════════════════════
@@ -114,6 +134,29 @@ export function historialParaElModelo(
 // ════════════════════════════════════════════════════════════════════════════
 // La vista
 // ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * ¿Este Ritual está en la fase 6 sin haberla terminado?
+ *
+ * Es la pregunta que faltaba. Antes la única que se hacía era «¿ya está
+ * completada?», y entre "entró a la fase 6" y "la terminó" hay entre 5 y 30
+ * segundos con una ingesta a la bóveda y una corrida del modelo adentro. En ese
+ * hueco la fila decía 'activa' y cualquiera podía volver a entrar.
+ *
+ * Se mira la FASE y no sólo el status: una fila que quedó en 'sintesis' con
+ * 'activa' —las que escribió la versión con el defecto— también entra por aquí
+ * y se cura sola en vez de re-sembrar la bóveda en cada mensaje.
+ */
+function cierrePendiente(s: SesionRitual): boolean {
+  return s.fase === 'sintesis' && s.status !== 'completada';
+}
+
+/** `true` si el cierre en curso ya se pasó de su arrendamiento y se puede retomar. */
+function arrendamientoVencido(s: SesionRitual, ahora: Date): boolean {
+  const desde = Date.parse(s.updatedAt);
+  if (Number.isNaN(desde)) return true;
+  return ahora.getTime() - desde >= ARRENDAMIENTO_DEL_CIERRE_MS;
+}
 
 export function vistaDe(s: SesionRitual): VistaDelRitual {
   const completada = s.status === 'completada';
@@ -260,6 +303,16 @@ export async function iniciar(ctx: TenantContext, ahora = new Date()): Promise<R
     return { mensaje: '', vista: vistaDe(sesion), avanzo: false, mapa: await mapaDe(ctx) };
   }
 
+  // Entrar a la página mientras se cierra el Ritual no puede disparar un turno
+  // —sería la fase 6 otra vez— y tampoco puede reventar: abrir una pantalla
+  // nunca es un error. Se devuelve lo que hay. Si el cierre se murió a medias,
+  // esto es además lo que lo levanta con una recarga.
+  if (cierrePendiente(sesion)) {
+    if (!arrendamientoVencido(sesion, ahora)) return fotoComoRespuesta(ctx, sesion);
+    log.warn(`el cierre del ritual ${sesion.id} venció su arrendamiento; se retoma desde iniciar()`);
+    return cerrar(ctx, sesion, '', ahora);
+  }
+
   const regresa = sesion.turnos > 0;
   const ausencia = regresa ? ausenciaEnPalabras(sesion.updatedAt, ahora) : null;
 
@@ -276,12 +329,27 @@ export async function iniciar(ctx: TenantContext, ahora = new Date()): Promise<R
 // Responder
 // ════════════════════════════════════════════════════════════════════════════
 
+export interface OpcionesDeRespuesta {
+  ahora?: Date;
+  /**
+   * Identificador del ENVÍO, no del turno guardado.
+   *
+   * Lo genera el navegador una vez por mensaje y lo conserva mientras ese
+   * mensaje no haya aterrizado: un reenvío del MISMO texto trae el MISMO id.
+   * Es lo que distingue "lo volvió a mandar porque el BFF le dijo que se había
+   * tardado" de "escribió lo mismo otra vez", que son la misma cadena de texto
+   * y significan cosas opuestas.
+   */
+  turnoId?: string;
+}
+
 /** Un turno del emprendedor. */
 export async function responder(
   ctx: TenantContext,
   texto: string,
-  ahora = new Date(),
+  o: OpcionesDeRespuesta = {},
 ): Promise<RespuestaDelRitual> {
+  const ahora = o.ahora ?? new Date();
   const limpio = texto.trim();
   if (!limpio) throw new PlatformError('VALIDATION', 'El mensaje viene vacío.');
 
@@ -289,6 +357,36 @@ export async function responder(
 
   if (sesion.status === 'completada') {
     return { mensaje: '', vista: vistaDe(sesion), avanzo: false, mapa: await mapaDe(ctx) };
+  }
+
+  // ── ¿Es el mismo envío otra vez? ──────────────────────────────────────────
+  //
+  // Va ANTES que cualquier otro guardia porque es el caso más amable de los
+  // tres: el mensaje sí entró, sólo que quien lo mandó no se enteró. Contestar
+  // con lo que ya hay es mejor que un CONFLICT que la pantalla tendría que
+  // traducir.
+  //
+  // El lock por `turns` no puede cubrir esto: protege escrituras concurrentes, y
+  // un reenvío llega DESPUÉS, lee la versión nueva y pasa limpio.
+  if (o.turnoId && sesion.ultimoEnvio === o.turnoId) {
+    log.info(
+      `envío ${o.turnoId} repetido en el ritual ${sesion.id}: ya está aplicado, ` +
+        'se devuelve la foto vigente sin correr el modelo.',
+    );
+    return fotoComoRespuesta(ctx, sesion);
+  }
+
+  // ── La fase 6 no admite visitas ───────────────────────────────────────────
+  if (cierrePendiente(sesion)) {
+    if (!arrendamientoVencido(sesion, ahora)) {
+      throw new PlatformError('CONFLICT', CIERRE_EN_CURSO);
+    }
+    // Vencido: el cierre se murió a medias. Se retoma en vez de correr un turno
+    // normal —que volvería a entrar a la fase 6 por la puerta de atrás— y no se
+    // re-siembra nada, porque desde la 052 el blueprint y el documento madre son
+    // uno por Ritual.
+    log.warn(`el cierre del ritual ${sesion.id} venció su arrendamiento; se retoma`);
+    return cerrar(ctx, sesion, '', ahora, o.turnoId);
   }
 
   // Volver a escribir ES retomar. Nadie debería tener que apretar "continuar"
@@ -302,7 +400,31 @@ export async function responder(
     regresa: regresa || ausencia !== null,
     ausencia,
     ahora,
+    // Sin id se manda `undefined`, no `null`: un turno que no trae envío no
+    // debe BORRAR el acuse del anterior. Si lo borrara, un reenvío tardío del
+    // mensaje de antes volvería a ser irreconocible.
+    envioId: o.turnoId,
   });
+}
+
+/**
+ * Lo que hay, sin gastar un token.
+ *
+ * Es la respuesta a un reenvío: el último mensaje del agente es literalmente lo
+ * que la persona ya debería tener en pantalla, así que devolverlo deja las dos
+ * vistas iguales sin volver a preguntarle nada al modelo.
+ */
+async function fotoComoRespuesta(
+  ctx: TenantContext,
+  sesion: SesionRitual,
+): Promise<RespuestaDelRitual> {
+  const ultimo = [...sesion.transcript].reverse().find((t) => t.role === 'assistant');
+  return {
+    mensaje: ultimo?.content ?? '',
+    vista: vistaDe(sesion),
+    avanzo: false,
+    mapa: sesion.status === 'completada' ? await mapaDe(ctx) : null,
+  };
 }
 
 interface OpcionesDeTurno {
@@ -312,6 +434,8 @@ interface OpcionesDeTurno {
   regresa: boolean;
   ausencia: string | null;
   ahora: Date;
+  /** El envío del que salió este turno. Ausente si no lo disparó el navegador. */
+  envioId?: string;
 }
 
 async function correrTurno(
@@ -350,15 +474,32 @@ async function correrTurno(
     senales: { cierreDenegado: r.cierreDenegado },
   };
 
+  // ── La bandera del cierre se escribe AQUÍ, no al final (auditoría PR #8) ──
+  //
+  // Éste es el arreglo de la causa raíz, y cabe en una línea porque el defecto
+  // también cabía en una: la única bandera que impedía volver a entrar a la
+  // fase 6 se escribía DESPUÉS de todos sus efectos. O sea que durante los 5 a
+  // 30 segundos que tardan el blueprint, la bóveda y la corrida del modelo que
+  // narra el mapa, la fila decía 'activa' y cualquiera podía entrar otra vez.
+  //
+  // Ahora el MISMO UPDATE que lleva la fase a 'sintesis' deja escrito que el
+  // cierre empezó. No hay hueco entre las dos cosas porque son la misma
+  // escritura — que es exactamente la propiedad que este archivo ya perseguía
+  // para fase, estado y transcript, aplicada a la única que faltaba.
+  const entraALaSintesis = r.fase === 'sintesis';
+
   const actualizada: SesionRitual = {
     ...sesion,
     fase: r.fase,
     estado,
     transcript,
     turnos: sesion.turnos + 1,
-    status: r.pausa ? 'pausada' : 'activa',
+    // Entrar a la síntesis gana sobre pausar: no se puede dejar a medias un
+    // cierre que ya empezó, y el modelo no tiene por qué decidir eso.
+    status: entraALaSintesis ? 'cerrando' : r.pausa ? 'pausada' : 'activa',
     checkpointAt: r.avanzo ? o.ahora.toISOString() : sesion.checkpointAt,
     updatedAt: o.ahora.toISOString(),
+    ultimoEnvio: o.envioId ?? sesion.ultimoEnvio,
   };
 
   await guardarTurno(
@@ -375,6 +516,7 @@ async function correrTurno(
       // Entre esa lectura y esta escritura corrió el modelo: si otra pestaña
       // escribió en ese hueco, esto lanza CONFLICT en vez de pisarla.
       turnoPrevio: sesion.turnos,
+      envioId: o.envioId,
     },
     o.ahora,
   );
@@ -393,8 +535,8 @@ async function correrTurno(
   }
 
   // ── ¿Tocó la síntesis? ────────────────────────────────────────────────────
-  if (actualizada.fase === 'sintesis') {
-    return cerrar(ctx, actualizada, r.visible, o.ahora);
+  if (entraALaSintesis) {
+    return cerrar(ctx, actualizada, r.visible, o.ahora, o.envioId);
   }
 
   return {
@@ -420,25 +562,58 @@ async function correrTurno(
  * Y el orden de las escrituras no es casual: PRIMERO el blueprint. Es la única
  * salida obligatoria, y todo lo demás (giro, bóveda, proyección a H11) puede
  * fallar sin que se pierda el trabajo del cliente.
+ *
+ * ── Se puede llamar dos veces. Es el punto (auditoría PR #8) ──────────────
+ *
+ * Antes no: cada entrada insertaba un blueprint nuevo y mandaba otro documento
+ * madre a la bóveda. Como `status='completada'` se escribía hasta el final,
+ * entrar dos veces era fácil —el propio BFF lo pedía al cortar a los 90 s— y
+ * nada se quejaba.
+ *
+ * Ahora las cinco salidas son idempotentes y las cinco lo son en la BASE, no
+ * por orden de llamadas:
+ *
+ *   blueprint   UNIQUE (tenant_id, session_id) · devuelve el que ya había
+ *   giro        UPDATE por id, con los mismos valores
+ *   agente      upsert de la definición, con el mismo nombre
+ *   bóveda      acuse en `vault_document_id`: si está lleno, no se manda
+ *   proyección  se salta si el blueprint ya trae `appliedAt`
+ *
+ * Eso es lo que permite que el arrendamiento de `cerrando` pueda vencer sin
+ * miedo, y por lo tanto que una caída a media fase 6 no deje el Ritual muerto.
  */
 async function cerrar(
   ctx: TenantContext,
   sesion: SesionRitual,
   mensajePrevio: string,
   ahora: Date,
+  envioId?: string,
 ): Promise<RespuestaDelRitual> {
   // El catálogo de giros de H4, para que `industry_type` apunte a una plantilla
   // que existe y no a un slug inventado. Si la tabla no responde viene vacío y
   // el mapa sale con `industryType: null` — nunca con algo que parezca válido.
-  const mapa = construirMapa(sesion.estado, await plantillasDeGiro());
+  const calculado = construirMapa(sesion.estado, await plantillasDeGiro());
 
-  const guardado = await guardarBlueprint(ctx, sesion.id, mapa);
+  const guardado = await guardarBlueprint(ctx, sesion.id, calculado);
+
+  // El mapa que se entrega es EL GUARDADO, no el recién calculado. En un cierre
+  // normal son el mismo; en uno que se retoma, el guardado es el que ya se le
+  // prometió al cliente —y quizá el que H11 ya proyectó—, así que recalcularlo
+  // y entregar algo distinto sería cambiarle el mapa por debajo.
+  const mapa: MapaDeNegocio = {
+    industryType: guardado.industryType,
+    areas: guardado.areas,
+    hitos: guardado.hitos,
+    resumen: guardado.resumen,
+  };
 
   // Lo que sigue es best-effort, en orden de importancia para el emprendedor.
   await sembrarGiro(ctx, mapa, sesion.estado);
   await bautizarAgente(ctx, sesion.estado, mapa);
-  await sembrarBoveda(ctx, mapa, sesion.estado);
-  await aplicarBlueprint(ctx, guardado);
+  await sembrarBoveda(ctx, guardado, sesion.estado);
+  // Un blueprint ya proyectado no se vuelve a proyectar: el sink de H11 crea
+  // áreas e hitos, y correrlo dos veces le duplicaría el roadmap al negocio.
+  if (!guardado.appliedAt) await aplicarBlueprint(ctx, guardado);
 
   // El turno de entrega: el agente narra el mapa con su voz.
   let entrega = '';
@@ -474,6 +649,7 @@ async function cerrar(
       // su `turnos` ES la versión vigente. El cierre también corre una llamada
       // al modelo antes de escribir: la carrera es la misma.
       turnoPrevio: sesion.turnos,
+      envioId,
     },
     ahora,
   );
@@ -486,6 +662,7 @@ async function cerrar(
     status: 'completada',
     completedAt: ahora.toISOString(),
     checkpointAt: ahora.toISOString(),
+    ultimoEnvio: envioId ?? sesion.ultimoEnvio,
   };
 
   log.info(`ritual completado: ${mapa.areas.length} áreas, ${mapa.hitos.length} hitos`);

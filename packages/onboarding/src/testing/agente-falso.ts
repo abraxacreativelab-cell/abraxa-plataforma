@@ -18,6 +18,22 @@ export interface CorridaRegistrada {
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
+/**
+ * Una corrida detenida a media llamada al modelo.
+ *
+ * Es la única forma honesta de pararse DENTRO de la ventana que abre un turno:
+ * entre que la petición escribió su fila y que termina de correr el modelo pasan
+ * segundos reales, y ahí es donde caben las peticiones que este archivo tiene
+ * que poder reproducir. Dormir no sirve —depende del planificador— y dos
+ * procesos no caben en una prueba unitaria.
+ */
+export interface Barrera {
+  /** Se resuelve cuando una corrida quedó detenida aquí. */
+  readonly alcanzada: Promise<void>;
+  /** Deja pasar a la corrida detenida. */
+  liberar(): void;
+}
+
 export interface AgenteFalso extends AgentPort {
   /** Todo lo que se le mandó al modelo, en orden. */
   readonly corridas: CorridaRegistrada[];
@@ -27,6 +43,13 @@ export interface AgenteFalso extends AgentPort {
   guion(...respuestas: string[]): void;
   /** Definiciones creadas o actualizadas, para verificar el bautizo. */
   readonly definiciones: Array<{ role: string; name: string; systemPrompt: string }>;
+  /**
+   * Detiene la PRIMERA corrida cuya entrada cumpla el predicado.
+   *
+   * Sólo la primera: la barrera se desarma sola al dispararse, para que la
+   * prueba pueda dejar correr las siguientes sin desmontarla.
+   */
+  detener(predicado: (input: string) => boolean): Barrera;
 }
 
 const USO_CERO = {
@@ -43,6 +66,9 @@ export function crearAgenteFalso(...respuestas: string[]): AgenteFalso {
   const definiciones: Array<{ role: string; name: string; systemPrompt: string }> = [];
   let nombre = 'tu asistente';
 
+  let barrera: { predicado: (input: string) => boolean; alcanzo: () => void; pase: Promise<void> } | null =
+    null;
+
   const port: AgenteFalso = {
     corridas,
     definiciones,
@@ -57,12 +83,30 @@ export function crearAgenteFalso(...respuestas: string[]): AgenteFalso {
       return u;
     },
 
-    run(_ctx: TenantContext, i: AgentRunInput): Promise<AgentRunResult> {
+    detener(predicado: (input: string) => boolean): Barrera {
+      let alcanzo!: () => void;
+      let liberar!: () => void;
+      const alcanzada = new Promise<void>((r) => (alcanzo = r));
+      const pase = new Promise<void>((r) => (liberar = r));
+      barrera = { predicado, alcanzo, pase };
+      return { alcanzada, liberar };
+    },
+
+    async run(_ctx: TenantContext, i: AgentRunInput): Promise<AgentRunResult> {
       corridas.push({
         input: i.input,
         systemSuffix: i.systemSuffix ?? '',
         history: [...(i.history ?? [])],
       });
+
+      // La barrera se lee y se desarma ANTES de esperar: si no, la corrida que
+      // la prueba libera volvería a quedarse detenida en su propia barrera.
+      if (barrera && barrera.predicado(i.input)) {
+        const detenida = barrera;
+        barrera = null;
+        detenida.alcanzo();
+        await detenida.pase;
+      }
 
       const texto = cola.shift();
       if (texto === undefined) {
@@ -72,12 +116,12 @@ export function crearAgenteFalso(...respuestas: string[]): AgenteFalso {
         );
       }
 
-      return Promise.resolve({
+      return {
         text: texto,
         usage: USO_CERO,
         stopReason: 'end_turn',
         agentName: nombre,
-      });
+      };
     },
 
     registerTool(): void {

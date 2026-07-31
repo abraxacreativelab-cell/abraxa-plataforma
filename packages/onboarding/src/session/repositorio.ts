@@ -47,7 +47,7 @@ import type {
 } from '../types';
 
 const COLUMNAS =
-  'id, tenant_id, phase, state, transcript, status, checkpoint_at, completed_at, turns, created_at, updated_at';
+  'id, tenant_id, phase, state, transcript, status, checkpoint_at, completed_at, turns, last_turn_id, created_at, updated_at';
 
 interface FilaSesion {
   id: string;
@@ -59,6 +59,7 @@ interface FilaSesion {
   checkpoint_at: string | null;
   completed_at: string | null;
   turns: number | null;
+  last_turn_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -74,6 +75,11 @@ function mapear(f: FilaSesion): SesionRitual {
     checkpointAt: f.checkpoint_at ?? null,
     completedAt: f.completed_at ?? null,
     turnos: f.turns ?? 0,
+    // `?? null` y no el valor crudo por la misma razón que en blueprint.ts: una
+    // columna que nunca se escribió llega como `undefined` desde algunos
+    // clientes, y la comparación que decide si un envío es un reenvío tiene que
+    // poder confiar en que `null` significa "ninguno".
+    ultimoEnvio: f.last_turn_id ?? null,
     createdAt: f.created_at,
     updatedAt: f.updated_at,
   };
@@ -160,6 +166,15 @@ export interface CambiosDelTurno {
    * escritura pisaría su trabajo: se rechaza en vez de aplicarse.
    */
   turnoPrevio: number;
+  /**
+   * El id del ENVÍO que produjo este turno, si el navegador mandó uno.
+   *
+   * Va en la MISMA escritura que el turno, y no en una aparte, por la misma
+   * razón que todo lo demás de esta interfaz: si se pudiera guardar el turno sin
+   * guardar de qué envío vino, un reintento que cayera justo en ese hueco no
+   * tendría con qué reconocerse y volvería a aplicarse.
+   */
+  envioId?: string | null;
 }
 
 /**
@@ -208,6 +223,11 @@ export async function guardarTurno(
 
   if (cambios.cerroFase) patch.checkpoint_at = iso;
   if (cambios.completada) patch.completed_at = iso;
+  // `undefined` = este turno no vino de un envío del navegador (lo disparó
+  // `iniciar`, o un cliente viejo que todavía no manda id). No se toca la
+  // columna: dejarla en NULL borraría el acuse del envío anterior y volvería
+  // reprocesable un reenvío que ya estaba cubierto.
+  if (cambios.envioId !== undefined) patch.last_turn_id = cambios.envioId;
 
   const { data, error } = await tenantDb(ctx)
     .from('onboarding_sessions')

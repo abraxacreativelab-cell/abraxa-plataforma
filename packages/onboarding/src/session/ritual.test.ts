@@ -19,52 +19,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { __clearPorts, __setClientForTests, registerPort } from '@abraxa/db';
 import { crearFakeDb, type Fila } from '../testing/fake-db';
 import { crearAgenteFalso, ctxDePrueba, type AgenteFalso } from '../testing/agente-falso';
+import {
+  BAUTIZO,
+  DOLOR,
+  ENTREGA,
+  GENTE,
+  IDENTIDAD,
+  MODELO,
+  PLANTILLAS_DE_GIRO,
+  PROCESO,
+  SALUDO,
+} from '../testing/guion-de-prueba';
 import { fotoDelRitual, historialParaElModelo, iniciar, pausar, responder } from './ritual';
 import type { TurnoTranscrito } from '../types';
-
-// ════════════════════════════════════════════════════════════════════════════
-// El guion de una entrevista real
-// ════════════════════════════════════════════════════════════════════════════
-
-const SALUDO = 'Hola. Voy a ser tu agente, pero todavía no tengo nombre. ¿Cómo me quieres llamar?';
-
-const BAUTIZO = `Aura. Me gusta.
-
-Ahora sí: cuéntame a qué te dedicas.
-[DATO:agente=Aura][FASE_COMPLETA:bienvenida]`;
-
-const IDENTIDAD = `Entonces panadería artesanal para cafeterías de la ciudad, ya operando, unos 12 clientes fijos. Anotado.
-
-[DATO:giro=panadería artesanal][DATO:nicho=cafeterías independientes][DATO:etapa=operando][DATO:tamano=12 clientes fijos]
-[FASE_COMPLETA:identidad]`;
-
-const MODELO = `Perfecto: pedido semanal recurrente, ticket de 4,500 al mes por cafetería, margen como del 35%.
-
-[DATO:modelo_ingreso=pedido semanal recurrente][DATO:ticket=4,500 al mes por cafetería][DATO:margen=35%]
-[LISTA:canales=whatsapp, recomendación]
-[FASE_COMPLETA:modelo]`;
-
-const PROCESO = `Ya me quedó claro el recorrido.
-
-[PASO:le escriben por WhatsApp|contesta él en el celular]
-[PASO:cotiza el pedido|calculadora y memoria]
-[PASO:entrega los lunes|camioneta propia]
-[LISTA:herramientas=whatsapp, libreta]
-[FASE_COMPLETA:proceso]`;
-
-const DOLOR = `Entonces los domingos en la noche se te juntan los pedidos y a veces uno se pierde entre los mensajes.
-
-[DOLOR:se le pierden pedidos entre los mensajes del domingo|ventas]
-[DOLOR:cotiza de memoria y a veces se equivoca de precio|direccion]
-[HITO:ventas|Que los pedidos del domingo entren solos a una lista|Hoy dependen de que él alcance a leer todo]
-[FASE_COMPLETA:dolor]`;
-
-const GENTE = `Solo tú, con tu hermano ayudando los lunes.
-
-[DATO:equipo=solo, con ayuda los lunes][DATO:equipo_detalle=su hermano apoya en la entrega]
-[FASE_COMPLETA:gente]`;
-
-const ENTREGA = 'Aquí está tu Mapa de Negocio. Empieza por Ventas.';
 
 // ════════════════════════════════════════════════════════════════════════════
 // Andamio
@@ -117,9 +84,9 @@ describe('reanudación real — criterio #2', () => {
     agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO);
 
     await iniciar(ctx, lunes);
-    await responder(ctx, 'Aura', lunes);
-    await responder(ctx, 'hago pan artesanal para cafeterías', lunes);
-    const tercera = await responder(ctx, 'les cobro por pedido semanal', lunes);
+    await responder(ctx, 'Aura', { ahora: lunes });
+    await responder(ctx, 'hago pan artesanal para cafeterías', { ahora: lunes });
+    const tercera = await responder(ctx, 'les cobro por pedido semanal', { ahora: lunes });
 
     expect(tercera.vista.fase).toBe('proceso');
     expect(tercera.vista.progreso).toBe(43); // 3 de 7 fases cerradas
@@ -148,7 +115,7 @@ describe('reanudación real — criterio #2', () => {
 
     // ── Sigue escribiendo, y el agente NO repite ───────────────────────────
     agente.guion(PROCESO);
-    const cuarta = await responder(ctx, 'les escriben por WhatsApp y yo contesto', martes);
+    const cuarta = await responder(ctx, 'les escriben por WhatsApp y yo contesto', { ahora: martes });
 
     const corrida = agente.ultima();
 
@@ -247,13 +214,7 @@ describe('el Ritual completo', () => {
       tenants: [{ id: 'tenant-a', slug: 'tenant-a', name: 'Panadería' }],
       // El catálogo de giros de H4 (migración 033), para que la resolución de
       // `industry_type` corra de verdad y no por falta de filas.
-      industry_templates: [
-        { id: 'servicios', name: 'Servicios profesionales', blurb: 'Despachos, consultorios, talleres, salones, estudios.', position: 1 },
-        { id: 'comercio', name: 'Comercio y tienda en linea', blurb: 'Vendes producto: local, tienda en linea, marketplace.', position: 2 },
-        { id: 'restaurante', name: 'Restaurante y cafeteria', blurb: 'Cocinas y vendes en el momento: local, para llevar o reparto.', position: 3 },
-        { id: 'agencia', name: 'Agencia o estudio', blurb: 'Vendes trabajo por proyecto o por iguala: marketing, diseno, software.', position: 4 },
-        { id: 'general', name: 'Otro giro', blurb: 'Lo minimo que todo negocio necesita tener claro.', position: 9 },
-      ],
+      industry_templates: PLANTILLAS_DE_GIRO,
     });
     agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO, PROCESO, DOLOR, GENTE, ENTREGA);
 

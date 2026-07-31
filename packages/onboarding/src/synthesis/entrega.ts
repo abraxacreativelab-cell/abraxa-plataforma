@@ -28,7 +28,8 @@ import { adminDb, tryPort, usePort } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { PROMPT_MAESTRO_BASE } from '../interview/guion';
 import { log } from '../logger';
-import type { EstadoNegocio, MapaDeNegocio } from '../types';
+import { marcarDocumentoMadre } from './blueprint';
+import type { BlueprintGuardado, EstadoNegocio, MapaDeNegocio } from '../types';
 
 // ════════════════════════════════════════════════════════════════════════════
 // El giro
@@ -102,17 +103,43 @@ function bloqueDeValores(e: EstadoNegocio): string {
 }
 
 /**
- * Manda el documento madre a la bóveda.
+ * Manda el documento madre a la bóveda. Una sola vez por Ritual.
  *
  * `tryPort` y no `usePort`: si H4 todavía no aterriza, el Ritual termina igual
  * y el documento queda en `app.onboarding_blueprints.summary`, de donde se
  * puede reenviar después. Es la regla 5 aplicada a un camino opcional.
+ *
+ * ── La llave de idempotencia, y dónde tuvo que vivir (auditoría PR #8) ────
+ *
+ * Ésta es la escritura más peligrosa del cierre, y lo es justamente porque no
+ * falla: la bóveda acepta con gusto un segundo «Mi negocio — panadería», H4 le
+ * extrae y clasifica LOS MISMOS valores canónicos otra vez, y el emprendedor
+ * termina con su documento fundacional duplicado sin un solo error en ningún
+ * log que lo delate. Un efecto que se duplica en silencio no lo cacha nadie.
+ *
+ * `VaultPort.ingestDocument()` no recibe llave de idempotencia y no se la puedo
+ * agregar: `packages/db/ports.ts` es de H1 y el gate de propiedad falla el PR
+ * por tocarlo. Es el mismo callejón que la 051 —y la misma salida—: se declara
+ * el contrato del lado de quien puede, y se propone el cambio de port en el PR.
+ *
+ * Así que la llave es el blueprint, que desde la 052 es UNO por Ritual: su
+ * `vault_document_id` es el acuse de que el documento ya entró. Lleno, no se
+ * manda otra vez; vacío, se manda y se anota. La llamada al port sigue siendo
+ * la misma que H4 declaró.
  */
 export async function sembrarBoveda(
   ctx: TenantContext,
-  mapa: MapaDeNegocio,
+  blueprint: BlueprintGuardado,
   estado: EstadoNegocio,
 ): Promise<{ documentId: string; valueIds: string[] } | null> {
+  if (blueprint.vaultDocumentId) {
+    log.info(
+      `el documento madre de este Ritual ya está en la bóveda (${blueprint.vaultDocumentId}); ` +
+        'no se manda otra vez.',
+    );
+    return null;
+  }
+
   const vault = tryPort('vault');
   if (!vault) {
     log.info(
@@ -125,9 +152,14 @@ export async function sembrarBoveda(
   try {
     const resultado = await vault.ingestDocument(ctx, {
       title: `Mi negocio — ${estado.giro ?? 'documento madre'}`,
-      content: mapa.resumen + bloqueDeValores(estado),
+      content: blueprint.resumen + bloqueDeValores(estado),
       areaSlug: 'direccion',
     });
+    // El acuse se anota INMEDIATAMENTE después de la ingesta, y antes de
+    // cualquier otra cosa del cierre. Lo que queda entre las dos líneas es la
+    // única ventana en la que un segundo cierre podría duplicar el documento,
+    // y es una escritura sin modelo de por medio.
+    await marcarDocumentoMadre(ctx, blueprint.id, resultado.documentId);
     log.info(`documento madre en la bóveda: ${resultado.valueIds.length} valores en borrador`);
     return resultado;
   } catch (err) {

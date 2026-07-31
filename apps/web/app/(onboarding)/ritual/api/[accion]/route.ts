@@ -34,6 +34,25 @@ const ACCIONES: Record<string, Destino> = {
  * Un turno de entrevista puede tardar: el modelo escribe varios párrafos y el
  * cierre corre DOS corridas (la síntesis y su narración). El default de `fetch`
  * cortaría justo el turno que más importa.
+ *
+ * ── Lo que este timeout NO hace, y por qué importa (auditoría PR #8) ───────
+ *
+ * `control.abort()` cierra el socket BFF→API. Nada más. El handler de Express
+ * del otro lado no se entera: termina su corrida del modelo, escribe su turno y
+ * COMMITEA, cinco segundos después de que aquí ya se contestó 504.
+ *
+ * Y no se cancela a propósito. Encadenar el abort hasta el motor cortaría la
+ * petición en cualquier punto —incluido el hueco entre "el modelo ya contestó"
+ * y "el turno está escrito"—, y ahí sí se perdería lo que la persona dijo. Un
+ * turno que termina de escribirse aunque nadie lo esté esperando es el
+ * comportamiento correcto: la escritura es lo que la protege.
+ *
+ * Lo que estaba mal era lo que se le decía después. El mensaje del 504 era
+ * «vuelve a mandar tu mensaje: no se perdió nada», el compositor le devolvía el
+ * texto y reenviar era un click — así que el producto pedía, activamente, la
+ * segunda petición que duplicaba el turno. Ahora el 504 dice que no se sabe, y
+ * el cliente reconcilia contra `GET /ritual` antes de ofrecer nada. Ver
+ * `ritual.tsx`.
  */
 const TIMEOUT_MS = 90_000;
 
@@ -86,8 +105,13 @@ async function reenviar(accion: string | undefined, cuerpo: unknown): Promise<Ne
       {
         error: {
           code: abortada ? 'RATE_LIMITED' : 'INTERNAL',
+          // Ni "se perdió" ni "no se perdió": desde aquí no se sabe, y decir
+          // cualquiera de las dos es adivinar con el trabajo de alguien más.
+          // Quien sí puede saberlo es el cliente, preguntándole al Ritual en
+          // qué quedó — y eso es justo lo que hace antes de ofrecer reenviar.
           message: abortada
-            ? 'Tu agente se tardó más de la cuenta. Vuelve a mandar tu mensaje: no se perdió nada.'
+            ? 'Tu agente se está tardando más de la cuenta. Puede que tu mensaje sí haya ' +
+              'entrado, así que no lo mandes otra vez todavía: estamos revisando en qué quedó.'
             : 'No se pudo hablar con la API del Ritual.',
         },
       },

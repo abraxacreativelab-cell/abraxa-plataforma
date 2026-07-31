@@ -31,21 +31,86 @@ import type { Foto, RespuestaDelRitual, Turno } from './lib/tipos';
  *  comentario hasta la auditoría del PR #8: `enviar` se tragaba el error y el
  *  compositor ya se había vaciado. Ahora `enviar` devuelve si el turno llegó, y
  *  el compositor restaura lo que la persona escribió. Ver `compositor.tsx`.
+ *
+ *  ── Y no se reenvía a ciegas (segunda auditoría del PR #8) ────────────────
+ *
+ *  El BFF corta a los 90 s, y su abort NO cancela nada del otro lado: la API
+ *  termina su corrida y escribe el turno cinco segundos después. La pantalla,
+ *  mientras tanto, decía «vuelve a mandar tu mensaje: no se perdió nada» y
+ *  devolvía el texto al compositor — o sea que el producto pedía la segunda
+ *  petición que duplicaba la frase de la persona, y que si el turno abortado
+ *  era el que cerraba la fase 5, disparaba la fase 6 por segunda vez.
+ *
+ *  Un 504 ya no significa "no llegó". Significa "no sé", y lo único honesto es
+ *  ir a preguntar: se relee `GET /ritual` y se comparan los turnos contra los
+ *  que había antes de mandar. Si avanzó, el mensaje SÍ entró y no hay nada que
+ *  reenviar. Si no avanzó, se le devuelve el texto — y con el mismo id de
+ *  envío, para que si las dos peticiones acaban entrando, la API reconozca la
+ *  segunda como lo que es.
  */
+
+/** El BFF se rindió esperando a la API. No dice si el turno entró o no. */
+class SeTardo extends Error {}
+
+/** La API contestó que alguien más movió el Ritual mientras tanto. */
+class SeAdelantaron extends Error {}
+
+/**
+ * Un id por ENVÍO.
+ *
+ * `crypto.randomUUID` no existe fuera de un contexto seguro —http en una IP de
+ * la red local, que es como se prueba esto en el Smart Lab—, así que hay
+ * respaldo. No tiene que ser criptográfico: sólo distinto para cada mensaje.
+ */
+function nuevoEnvio(): string {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === 'function') return c.randomUUID();
+
+  const b = new Uint8Array(16);
+  if (typeof c?.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
+  b[8] = ((b[8] ?? 0) & 0x3f) | 0x80;
+
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 export function Ritual({ inicial }: { inicial: Foto }) {
   const [foto, setFoto] = React.useState(inicial);
   const [enVuelo, setEnVuelo] = React.useState<Turno | null>(null);
   const [ocupado, setOcupado] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  /**
+   * Un canal aparte del error, y no un lujo.
+   *
+   * «Tu mensaje sí entró» y «tu mapa se está armando» son buenas noticias. Con
+   * un solo canal salían en el recuadro rojo de fallo, debajo de un icono de
+   * advertencia — o sea que el arreglo del 504 le habría dicho a la persona que
+   * algo salió mal justo cuando nada salió mal.
+   */
+  const [aviso, setAviso] = React.useState<string | null>(null);
   const arrancado = React.useRef(false);
 
+  /**
+   * El envío que todavía no aterriza.
+   *
+   * Sobrevive al fallo a propósito: mientras el mismo texto siga sin entrar,
+   * reintentarlo tiene que llevar el MISMO id. Si cambiara en cada intento, la
+   * API no tendría con qué distinguir un reenvío de un mensaje nuevo — que es
+   * exactamente el agujero que este id viene a tapar.
+   */
+  const envio = React.useRef<{ texto: string; id: string } | null>(null);
+
   const completada = foto.vista.status === 'completada';
+  const cerrando = foto.vista.status === 'cerrando';
   const bautizo = !completada && foto.vista.agente === null && foto.vista.fase === 'bienvenida';
 
   const llamar = React.useCallback(
     async (accion: 'iniciar' | 'turno', cuerpo?: Record<string, unknown>): Promise<void> => {
       setOcupado(true);
       setError(null);
+      setAviso(null);
       try {
         const r = await fetch(`/ritual/api/${accion}`, {
           method: 'POST',
@@ -57,7 +122,12 @@ export function Ritual({ inicial }: { inicial: Foto }) {
           error?: { message: string };
         };
 
-        if (!r.ok) throw new Error(datos.error?.message ?? 'No se pudo continuar.');
+        if (!r.ok) {
+          const dicho = datos.error?.message ?? 'No se pudo continuar.';
+          if (r.status === 504) throw new SeTardo(dicho);
+          if (r.status === 409) throw new SeAdelantaron(dicho);
+          throw new Error(dicho);
+        }
 
         // La vista del servidor manda, completa. Nada de parches locales.
         setFoto((previa) => ({
@@ -90,13 +160,64 @@ export function Ritual({ inicial }: { inicial: Foto }) {
   // entrevista venía a medias: entrar a /ritual es la misma acción.
   React.useEffect(() => {
     if (arrancado.current) return;
-    if (completada) return;
+    if (completada || cerrando) return;
     if (foto.transcript.length > 0 && foto.vista.status !== 'pausada') return;
     arrancado.current = true;
     void llamar('iniciar').catch(() => {
       /* el error ya quedó en pantalla */
     });
-  }, [completada, foto.transcript.length, foto.vista.status, llamar]);
+  }, [cerrando, completada, foto.transcript.length, foto.vista.status, llamar]);
+
+  /** Relee el Ritual del servidor. Es la única fuente de verdad que hay. */
+  const releer = React.useCallback(async (): Promise<Foto | null> => {
+    try {
+      const r = await fetch('/ritual/api/estado', { cache: 'no-store' });
+      if (!r.ok) return null;
+      const fresca = (await r.json()) as Foto;
+      setFoto(fresca);
+      return fresca;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * Mientras el Ritual se cierra no hay nada que teclear: se espera y ya.
+   *
+   * La fase 6 tarda entre 5 y 30 segundos y termina sola. Quien llegue aquí es
+   * alguien cuya petición se topó con un cierre en curso —otra pestaña, o su
+   * propio reenvío— y lo que necesita no es un botón: es que la pantalla se
+   * entere cuando el mapa esté.
+   */
+  const esperando = React.useRef(false);
+
+  const esperarElMapa = React.useCallback(async (): Promise<void> => {
+    if (esperando.current) return;
+    esperando.current = true;
+    try {
+      for (let intento = 0; intento < 30; intento++) {
+        await new Promise((listo) => setTimeout(listo, 2000));
+        const f = await releer();
+        if (f && f.vista.status !== 'cerrando') {
+          // Ya está el mapa: se retira el aviso de "espérate tantito", que ya
+          // no describe nada.
+          if (f.vista.status === 'completada') {
+            setError(null);
+            setAviso(null);
+          }
+          return;
+        }
+      }
+    } finally {
+      esperando.current = false;
+    }
+  }, [releer]);
+
+  // Recargar la página a media fase 6 tiene que terminar en el mapa, no en una
+  // pantalla congelada esperando un turno que ya nadie va a mandar.
+  React.useEffect(() => {
+    if (cerrando) void esperarElMapa();
+  }, [cerrando, esperarElMapa]);
 
   /**
    * Manda el turno y dice si llegó.
@@ -104,13 +225,63 @@ export function Ritual({ inicial }: { inicial: Foto }) {
    * El `false` no es cosmético: es lo que le permite al compositor devolverle
    * al emprendedor el párrafo que acababa de escribir. La burbuja optimista ya
    * se retiró en el `finally` de `llamar`, y el error ya está en pantalla.
+   *
+   * El `true` del camino del 504 tampoco lo es: significa «ya lo verifiqué
+   * contra el servidor y tu mensaje SÍ entró», y es lo que impide que el
+   * compositor le devuelva un texto que reenviar duplicaría.
    */
   const enviar = async (texto: string): Promise<boolean> => {
+    const turnosAntes = foto.vista.turnos;
+
+    // El mismo texto que sigue sin entrar conserva su id. Sólo se estrena uno
+    // cuando el mensaje es de verdad otro.
+    if (envio.current?.texto !== texto) envio.current = { texto, id: nuevoEnvio() };
+    const turnoId = envio.current.id;
+
     setEnVuelo(nuevoTurno('user', texto, foto.vista.fase));
     try {
-      await llamar('turno', { texto });
+      await llamar('turno', { texto, turnoId });
+      envio.current = null;
       return true;
-    } catch {
+    } catch (e) {
+      if (e instanceof SeTardo) {
+        // Un 504 no dice si el turno entró. Preguntar es barato; reenviar a
+        // ciegas le cuesta a la persona su mensaje repetido y, si ese turno
+        // cerraba la fase 5, un segundo Mapa de Negocio.
+        const fresca = await releer();
+
+        if (fresca && fresca.vista.turnos > turnosAntes) {
+          envio.current = null;
+          setError(null);
+          setAviso(
+            'Tu agente se tardó, pero tu mensaje sí entró: aquí está lo que contestó. ' +
+              'No hace falta que lo mandes otra vez.',
+          );
+          if (fresca.vista.status === 'cerrando') void esperarElMapa();
+          return true;
+        }
+
+        setError(
+          'Tu agente no alcanzó a contestar y tu mensaje no entró. ' +
+            'Te lo devolvimos al cuadro de texto: mándalo cuando quieras.',
+        );
+        return false;
+      }
+
+      if (e instanceof SeAdelantaron) {
+        // O se está cerrando el Ritual, o otra pestaña avanzó. En los dos casos
+        // lo que la pantalla tiene pintado ya es viejo.
+        const fresca = await releer();
+        if (fresca?.vista.status === 'cerrando') {
+          // No es un fallo: es la fase 6 corriendo. Se dice como lo que es y se
+          // espera, en vez de enseñarle un error por haber llegado a tiempo.
+          setError(null);
+          setAviso(e.message);
+          void esperarElMapa();
+        }
+        return false;
+      }
+
       return false;
     }
   };
@@ -138,11 +309,26 @@ export function Ritual({ inicial }: { inicial: Foto }) {
         {turnos.length === 0 && !completada ? (
           <Esqueleto />
         ) : (
-          <Conversacion turnos={turnos} agente={foto.vista.agente} pensando={ocupado} />
+          <Conversacion
+            turnos={turnos}
+            agente={foto.vista.agente}
+            pensando={ocupado || cerrando}
+          />
         )}
 
         {completada && foto.mapa ? (
           <MapaDeNegocio mapa={foto.mapa} agente={foto.vista.agente} />
+        ) : null}
+
+        {aviso ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="glass flex items-start gap-3 rounded-xl p-4"
+          >
+            <Icon name="sparkles" className="mt-0.5 h-4 w-4 text-[hsl(var(--glow))]" />
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">{aviso}</p>
+          </div>
         ) : null}
 
         {error ? (
@@ -169,7 +355,9 @@ export function Ritual({ inicial }: { inicial: Foto }) {
         <footer className="sticky bottom-0 -mx-5 bg-[hsl(var(--background)/0.9)] px-5 pb-6 pt-3 backdrop-blur-xl sm:-mx-8 sm:px-8">
           <Compositor
             bautizo={bautizo}
-            ocupado={ocupado}
+            // Mientras se arma el mapa no hay turno que mandar: cualquier cosa
+            // que se escriba aquí se toparía con la fase 6 en curso.
+            ocupado={ocupado || cerrando}
             pausada={foto.vista.status === 'pausada'}
             onEnviar={enviar}
             onPausar={pausar}

@@ -106,13 +106,31 @@ router.post(
   }),
 );
 
-/** Un turno de la entrevista. */
+/**
+ * Un turno de la entrevista.
+ *
+ * `turnoId` es la llave de idempotencia del ENVÍO, y llega del navegador. Se
+ * valida su forma antes de usarlo: es texto libre que viene de fuera, y lo que
+ * hace con él el motor es compararlo contra una columna `uuid`. Un id con
+ * cualquier otra forma se ignora —el turno se procesa normal, sin protección de
+ * reenvío— en vez de reventar la petición: perder la idempotencia es peor que
+ * un 400, pero mucho mejor que tirarle el turno en la cara a quien escribió.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.post(
   '/ritual/turno',
   manejar(async (req, res) => {
-    const body = req.body as { texto?: unknown } | undefined;
+    const body = req.body as { texto?: unknown; turnoId?: unknown } | undefined;
     const texto = typeof body?.texto === 'string' ? body.texto : '';
-    const r = await responder(await contextoDePeticion(req), texto);
+    const crudo = typeof body?.turnoId === 'string' ? body.turnoId.trim() : '';
+    const turnoId = UUID.test(crudo) ? crudo : undefined;
+
+    if (crudo && !turnoId) {
+      log.warn(`llegó un turnoId con forma inválida y se ignoró: ${crudo.slice(0, 60)}`);
+    }
+
+    const r = await responder(await contextoDePeticion(req), texto, { turnoId });
     res.json({ ...r, mensaje: sinMarcadores(r.mensaje) });
   }),
 );

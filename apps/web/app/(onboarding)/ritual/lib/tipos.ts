@@ -19,7 +19,12 @@ export type Fase =
   | 'gente'
   | 'sintesis';
 
-export type EstadoSesion = 'activa' | 'pausada' | 'completada';
+/**
+ * `cerrando` es la fase 6 en curso: el Ritual ya tiene todo y está armando el
+ * Mapa de Negocio. Dura entre 5 y 30 segundos y en la pantalla se ve como una
+ * espera, no como un turno más — el compositor no sirve de nada mientras tanto.
+ */
+export type EstadoSesion = 'activa' | 'pausada' | 'cerrando' | 'completada';
 export type AreaState = 'bloqueada' | 'disponible' | 'en_progreso' | 'activa';
 
 export interface Vista {

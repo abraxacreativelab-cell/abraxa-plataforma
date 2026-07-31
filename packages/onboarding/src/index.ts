@@ -35,6 +35,7 @@ export { meta } from './meta';
 
 // ── El motor de la entrevista ───────────────────────────────────────────────
 export {
+  CIERRE_EN_CURSO,
   fotoDelRitual,
   historialParaElModelo,
   iniciar,
@@ -43,6 +44,7 @@ export {
   responder,
   vistaDe,
   type FotoDelRitual,
+  type OpcionesDeRespuesta,
 } from './session/ritual';
 
 export {
@@ -88,9 +90,11 @@ export {
 export {
   aplicarBlueprint,
   aplicarBlueprintsPendientes,
+  blueprintDeSesion,
   blueprintVigente,
   guardarBlueprint,
   listarBlueprints,
+  marcarDocumentoMadre,
 } from './synthesis/blueprint';
 export { bautizarAgente, sembrarBoveda, sembrarGiro } from './synthesis/entrega';
 

@@ -45,6 +45,8 @@ class Builder implements PromiseLike<Resultado> {
     private readonly tabla: string,
     /** Ver `crearFakeDb`: simula una lectura que llegó antes que la escritura ajena. */
     private readonly lecturaCiega: () => boolean = () => false,
+    /** Tuplas UNIQUE de esta tabla. Ver `crearFakeDb`. */
+    private readonly unicos: string[][] = [],
   ) {}
 
   private get filas(): Fila[] {
@@ -113,9 +115,40 @@ class Builder implements PromiseLike<Resultado> {
     return this.filtros.every((f) => fila[f.col] === f.valor);
   }
 
+  /**
+   * La tupla UNIQUE que este INSERT violaría, o `null`.
+   *
+   * Sólo cuentan las tuplas cuyas columnas vienen TODAS en el payload: en
+   * Postgres un UNIQUE con un NULL de por medio no choca, y una tupla a la que
+   * le falta una columna aquí es exactamente ese caso.
+   */
+  private choqueDeUnicidad(p: Fila): string[] | null {
+    for (const tupla of this.unicos) {
+      if (tupla.some((c) => p[c] === undefined || p[c] === null)) continue;
+      if (this.filas.some((f) => tupla.every((c) => f[c] === p[c]))) return tupla;
+    }
+    return null;
+  }
+
   private ejecutar(): Resultado {
     switch (this.accion) {
       case 'insert': {
+        for (const p of this.payload) {
+          const chocada = this.choqueDeUnicidad(p);
+          if (chocada) {
+            // La forma exacta del error de PostgREST, porque el código de
+            // llamada distingue el 23505 de cualquier otro fallo para decidir
+            // si releer o reventar. Un doble que devolviera un error genérico
+            // haría pasar una prueba que en Postgres se cae.
+            return {
+              data: null,
+              error: {
+                code: '23505',
+                message: `duplicate key value violates unique constraint "${this.tabla}_${chocada.join('_')}_key"`,
+              } as Resultado['error'],
+            };
+          }
+        }
         const creadas = this.payload.map((p) => ({ id: nuevoId(), created_at: ahora(), updated_at: ahora(), ...p }));
         this.filas.push(...creadas);
         return { data: this.devolver ? creadas : null, error: null };
@@ -206,15 +239,24 @@ export interface FakeDb {
  * tabla ANTES de que otra insertara ve exactamente esto — nada — y sigue su
  * camino creyendo que es la primera. Sin el gancho, la única forma de llegar a
  * ese estado sería tener dos procesos.
+ *
+ * @param unicos Tuplas UNIQUE por tabla, p. ej.
+ *   `{ onboarding_blueprints: [['tenant_id', 'session_id']] }`.
+ *
+ * Se declaran a mano porque este doble no lee el esquema. Y hay que declararlas
+ * cuando la prueba dependa de ellas: un UNIQUE que sólo existe en la migración
+ * es un UNIQUE que ninguna prueba verifica, y el camino que lo atrapa —releer y
+ * quedarse con el que ganó— nunca correría hasta producción.
  */
 export function crearFakeDb(
   inicial: Record<string, Fila[]> = {},
   lecturaCiega: () => boolean = () => false,
+  unicos: Record<string, string[][]> = {},
 ): FakeDb {
   const tablas = new Map<string, Fila[]>(Object.entries(inicial).map(([k, v]) => [k, [...v]]));
 
   const cliente = {
-    from: (tabla: string) => new Builder(tablas, tabla, lecturaCiega),
+    from: (tabla: string) => new Builder(tablas, tabla, lecturaCiega, unicos[tabla] ?? []),
   } as unknown as AnyClient;
 
   return {

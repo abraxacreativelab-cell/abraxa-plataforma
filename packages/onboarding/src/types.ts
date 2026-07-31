@@ -21,7 +21,16 @@ export type Fase =
   | 'gente'
   | 'sintesis';
 
-export type EstadoSesion = 'activa' | 'pausada' | 'completada';
+/**
+ * En qué punto está la sesión.
+ *
+ * `cerrando` es la fase 6 en curso, y existe porque sin él ese minuto no se
+ * podía distinguir de 'activa'. Ver migración 052: se escribe en el mismo
+ * UPDATE que lleva la fase a 'sintesis' —antes de guardar el blueprint, sembrar
+ * el giro o mandar el documento madre— y es lo que impide que una segunda
+ * petición vuelva a correr la fase 6 entera.
+ */
+export type EstadoSesion = 'activa' | 'pausada' | 'cerrando' | 'completada';
 
 // ════════════════════════════════════════════════════════════════════════════
 // Lo que se extrae del negocio
@@ -146,6 +155,13 @@ export interface SesionRitual {
   checkpointAt: string | null;
   completedAt: string | null;
   turnos: number;
+  /**
+   * El id del último ENVÍO que se aplicó, tal como lo generó el navegador.
+   *
+   * No es el número de turno: es de qué envío vino. Un reenvío trae el mismo id
+   * y por eso se puede reconocer. Ver `OpcionesDeRespuesta.turnoId`.
+   */
+  ultimoEnvio: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -197,6 +213,14 @@ export interface BlueprintGuardado extends MapaDeNegocio {
   appliedAt: string | null;
   appliedBy: string | null;
   applyError: string | null;
+  /**
+   * El acuse de la bóveda: el id del documento madre que YA se ingirió.
+   *
+   * Lleno = no se vuelve a mandar. Es la llave de idempotencia de
+   * `VaultPort.ingestDocument()`, que vive aquí porque el port es de H1 y no
+   * recibe ninguna. Ver migración 052 §4.
+   */
+  vaultDocumentId: string | null;
   createdAt: string;
 }
 

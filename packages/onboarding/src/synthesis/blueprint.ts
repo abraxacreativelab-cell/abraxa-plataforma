@@ -17,7 +17,7 @@ import { blueprintSink } from '../ports/blueprint-sink';
 import type { AreaDelMapa, BlueprintGuardado, Hito, MapaDeNegocio } from '../types';
 
 const COLUMNAS =
-  'id, tenant_id, session_id, version, industry_type, areas, milestones, summary, applied_at, applied_by, apply_error, created_at';
+  'id, tenant_id, session_id, version, industry_type, areas, milestones, summary, applied_at, applied_by, apply_error, vault_document_id, created_at';
 
 interface FilaBlueprint {
   id: string;
@@ -31,7 +31,19 @@ interface FilaBlueprint {
   applied_at: string | null;
   applied_by: string | null;
   apply_error: string | null;
+  vault_document_id: string | null;
   created_at: string;
+}
+
+/** El SQLSTATE de una violación de UNIQUE. Lo devuelve PostgREST tal cual. */
+const CHOQUE_DE_UNICIDAD = '23505';
+
+function esChoqueDeUnicidad(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === CHOQUE_DE_UNICIDAD
+  );
 }
 
 function mapear(f: FilaBlueprint): BlueprintGuardado {
@@ -51,6 +63,7 @@ function mapear(f: FilaBlueprint): BlueprintGuardado {
     appliedAt: f.applied_at ?? null,
     appliedBy: f.applied_by ?? null,
     applyError: f.apply_error ?? null,
+    vaultDocumentId: f.vault_document_id ?? null,
     createdAt: f.created_at,
   };
 }
@@ -72,12 +85,41 @@ export async function blueprintVigente(ctx: TenantContext): Promise<BlueprintGua
   return todos[0] ?? null;
 }
 
+/** El blueprint de una sesión concreta, o `null`. */
+export async function blueprintDeSesion(
+  ctx: TenantContext,
+  sessionId: string,
+): Promise<BlueprintGuardado | null> {
+  return (await listarBlueprints(ctx)).find((b) => b.sessionId === sessionId) ?? null;
+}
+
 /**
- * Persiste el mapa como una versión nueva.
+ * Persiste el mapa del Ritual. Un Ritual, un mapa.
  *
- * No pisa la anterior. Un emprendedor puede corregir un dato y volver a pedir
- * su mapa, y lo que se le prometió la primera vez sigue siendo parte de su
- * historia — sobre todo si en el intermedio ya empezó a trabajar con él.
+ * ── Por qué ya no crea una versión nueva cada vez (auditoría PR #8) ───────
+ *
+ * Antes calculaba `version = previa + 1` y siempre insertaba, con este
+ * razonamiento: «un emprendedor puede corregir un dato y volver a pedir su
+ * mapa, y lo que se le prometió la primera vez sigue siendo parte de su
+ * historia». La intención está bien; el problema es que esa puerta nunca se
+ * abrió —`responder()` corta en seco cuando el status es 'completada', así que
+ * no hay camino de producto que pida una re-síntesis— y el único que llegaba a
+ * usar el `+1` era un defecto: la segunda entrada a la fase 6, que insertaba
+ * una v2 idéntica sin violar nada y dejaba al emprendedor con dos mapas y dos
+ * documentos madre.
+ *
+ * Ahora es idempotente por sesión. Y lo es en dos capas a propósito:
+ *
+ *   · la lectura de arriba resuelve el caso normal —volver a entrar a la fase
+ *     6— sin provocar un error en la base;
+ *   · el `UNIQUE (tenant_id, session_id)` de la 052 resuelve el caso que la
+ *     lectura no puede ver, que es el único que importa de verdad: dos cierres
+ *     que leyeron los dos "no hay blueprint" antes de que ninguno insertara.
+ *     Ahí el árbitro es Postgres, y el que pierde se lleva el mapa del que ganó
+ *     en vez de un 500.
+ *
+ * Comprobar y además dejar que la base compruebe no es redundancia: es que una
+ * de las dos comprobaciones no puede correr dentro de la carrera y la otra sí.
  */
 export async function guardarBlueprint(
   ctx: TenantContext,
@@ -85,6 +127,16 @@ export async function guardarBlueprint(
   mapa: MapaDeNegocio,
 ): Promise<BlueprintGuardado> {
   const previos = await listarBlueprints(ctx);
+
+  const suyo = previos.find((b) => b.sessionId === sessionId);
+  if (suyo) {
+    log.info(
+      `el ritual ${sessionId} ya tenía su blueprint (v${suyo.version}); ` +
+        'no se crea otro. La fase 6 se volvió a pedir y es idempotente.',
+    );
+    return suyo;
+  }
+
   const version = (previos[0]?.version ?? 0) + 1;
 
   const { data, error } = await tenantDb(ctx)
@@ -99,7 +151,20 @@ export async function guardarBlueprint(
     })
     .select(COLUMNAS);
 
-  if (error) throw error;
+  if (error) {
+    if (esChoqueDeUnicidad(error)) {
+      const ganador = await blueprintDeSesion(ctx, sessionId);
+      if (ganador) {
+        log.info(
+          `dos cierres del ritual ${sessionId} insertaron a la vez; ` +
+            `gana el v${ganador.version} y este se descarta sin tocar nada.`,
+        );
+        return ganador;
+      }
+    }
+    throw error;
+  }
+
   const fila = (data as FilaBlueprint[] | null)?.[0];
   if (!fila) throw new Error('El blueprint se guardó pero la base no devolvió la fila.');
 
@@ -107,6 +172,35 @@ export async function guardarBlueprint(
     `blueprint v${version} guardado: ${mapa.areas.length} áreas, ${mapa.hitos.length} hitos`,
   );
   return mapear(fila);
+}
+
+/**
+ * Anota qué documento madre entró a la bóveda, para no volver a mandarlo.
+ *
+ * `VaultPort.ingestDocument()` no recibe llave de idempotencia —el port es de
+ * H1 y agregársela falla el gate de propiedad—, así que la llave vive aquí: una
+ * fila por Ritual, con el acuse de la ingesta. Lleno = ya entró.
+ *
+ * Igual que `marcarAplicado`, sólo se registra: el documento YA está en la
+ * bóveda y no poder anotarlo no cambia ese hecho. Lo único que se pierde es la
+ * protección contra un segundo envío, y para eso está el resto del cierre.
+ */
+export async function marcarDocumentoMadre(
+  ctx: TenantContext,
+  blueprintId: string,
+  documentId: string,
+): Promise<void> {
+  const { error } = await tenantDb(ctx)
+    .from('onboarding_blueprints')
+    .update({ vault_document_id: documentId })
+    .eq('id', blueprintId);
+
+  if (error) {
+    log.warn(
+      `no se pudo anotar el documento madre ${documentId} en el blueprint ${blueprintId}: ` +
+        String(error),
+    );
+  }
 }
 
 /**
