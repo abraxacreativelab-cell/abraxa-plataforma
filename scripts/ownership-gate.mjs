@@ -184,21 +184,50 @@ export function revisarMigracion(sql, archivo) {
   return problemas;
 }
 
+/**
+ * El carril al que pertenece una rama.
+ *
+ * La regla base no cambia: la rama se llama igual que su entrada. Pero un
+ * carril puede declarar ramas ADICIONALES en `ramas: []`, y esto no es
+ * cosmético — un carril que abre más de un PR en su vida no puede reusar una
+ * sola rama. H0 es el caso obvio: mergea, aplica migraciones, corrige docs y
+ * despliega, muchas veces, a veces con dos PRs abiertos a la vez.
+ *
+ * `ramas` NO reparte propiedad: sólo dice "esta rama es ese carril". Los
+ * `paths` siguen siendo los del carril, y `--check-overlap` no la ve. El
+ * atajo prohibido sería darle a un carril una segunda ENTRADA con los mismos
+ * paths: eso pondría dos dueños sobre cada archivo y `--check-overlap` —que
+ * corre en el PR de los 15 carriles— se pondría rojo para todos.
+ */
+export function carrilDeRama(rama, ownership) {
+  if (ownership[rama]) return rama;
+  for (const [nombre, cfg] of Object.entries(ownership)) {
+    if (Array.isArray(cfg.ramas) && cfg.ramas.includes(rama)) return nombre;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 function resolverHandoff(argv, ownership) {
   const iFlag = argv.indexOf('--handoff');
   const explicito = iFlag !== -1 ? argv[iFlag + 1] : null;
   const rama = explicito || process.env.GITHUB_HEAD_REF || git('rev-parse', '--abbrev-ref', 'HEAD');
-  if (ownership[rama]) return { rama, cfg: ownership[rama] };
+  const carril = carrilDeRama(rama, ownership);
+  if (carril) return { rama: carril, ramaGit: rama, cfg: ownership[carril] };
+
+  const alias = Object.entries(ownership)
+    .flatMap(([n, c]) => (c.ramas ?? []).filter((r) => r !== n).map((r) => `    · ${r}  → ${n}`))
+    .join('\n');
 
   console.error(`${R.rojo}${R.bold}✖ El gate no reconoce la rama '${rama}'.${R.off}
 
-  Cada rama tiene que llamarse exactamente igual que su entrada en .ownership.json.
+  Cada rama tiene que llamarse igual que su entrada en .ownership.json, o estar
+  declarada en el \`ramas\` de su carril.
   Ramas válidas:
 ${Object.keys(ownership).map((k) => `    · ${k}`).join('\n')}
-
+${alias ? `  Alias declarados:\n${alias}\n` : ''}
   Si esto es trabajo del orquestador (H0), abre el PR desde una rama con uno de
-  esos nombres o pasa --handoff <rama>.`);
+  esos nombres, agrégala al \`ramas\` de h0-integracion, o pasa --handoff <rama>.`);
   process.exit(1);
 }
 
@@ -216,7 +245,7 @@ function resolverBase(argv) {
 // ═════════════════════════════════════════════════════════════════════════════
 function verificarPR(argv) {
   const ownership = cargarOwnership();
-  const { rama, cfg } = resolverHandoff(argv, ownership);
+  const { rama, ramaGit, cfg } = resolverHandoff(argv, ownership);
   const base = resolverBase(argv);
 
   const cambiados = git('diff', '--name-only', '--diff-filter=ACMRTD', `${base}...HEAD`)
@@ -226,7 +255,9 @@ function verificarPR(argv) {
   const globs = pathsEfectivos(rama, cfg);
 
   console.log(`${R.bold}ownership-gate${R.off} ${R.gris}·${R.off} ${cfg.label}`);
-  console.log(`${R.gris}  rama ${rama} · base ${base.slice(0, 10)} · ${cambiados.length} archivo(s)${R.off}`);
+  console.log(
+    `${R.gris}  rama ${ramaGit}${ramaGit === rama ? '' : ` (alias de ${rama})`} · base ${base.slice(0, 10)} · ${cambiados.length} archivo(s)${R.off}`,
+  );
 
   // La excepción transversal se ANUNCIA. Un permiso que se aplica en silencio
   // es un permiso que nadie audita.
