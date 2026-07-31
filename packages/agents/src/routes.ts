@@ -22,66 +22,33 @@
  * ── El 501 no es una defensa (H0, 2026-07-31) ──────────────────────────────
  *
  * Este archivo leía `x-user-email` crudo y se lo pasaba a `usePort('tenancy')`.
- * Hoy responde 501 porque el port no está registrado, así que "no pasa nada".
- * El día que el PR #6 (H2) mergee, `registerPort('tenancy')` empieza a
- * funcionar y ESTA MISMA LÍNEA sirve datos reales de un tenant autenticados
- * por un header que cualquiera pone con `curl`. Es escalada de privilegios
- * entre clientes, esperando un merge para activarse.
+ * Respondía 501 porque el port no estaba registrado, así que "no pasaba nada".
+ * El día que mergeó el PR #6 (H2), `registerPort('tenancy')` empezó a
+ * funcionar y ESA MISMA LÍNEA habría servido datos reales de un tenant
+ * autenticados por un header que cualquiera pone con `curl`. El PR #12 la
+ * cerró antes de que se activara.
  *
- * Por eso la puerta se cierra ahora, no cuando aterrice tenancy: `contextoDe`
- * exige PRIMERO el secreto compartido del BFF (`proxyVerified`), y sin él
- * ningún header vale nada. Ver `http/proxy-verified.ts` y `routes.test.ts`.
+ * ── Y por qué ya no hay un `contextoDe` aquí (H0, 2026-07-31) ──────────────
+ *
+ * Porque el PR #12 arregló ESTE archivo, y la auditoría encontró el mismo
+ * agujero escrito de nuevo desde cero en otros tres carriles: H6 (PR #10),
+ * H7 (PR #8) y H4 —que ya estaba en `main` sirviendo la bóveda—. Cuatro
+ * carriles reescribiendo el mismo resolvedor no es descuido: es que el patrón
+ * correcto no estaba disponible como pieza importable.
+ *
+ * Ahora lo está. `contextoDePeticion(req)` de `@abraxa/db` hace las tres
+ * puertas en orden —proxy verificado, identidad presente, membresía validada
+ * por H2— y es la ÚNICA forma correcta de convertir una petición en contexto.
+ * Ningún router de dominio escribe el suyo. Ver
+ * `packages/db/src/http/tenant-context.ts` y `routes.test.ts`.
  */
 import { Router } from 'express';
-import type { Request, Response } from 'express';
-import { PlatformError, usePort } from '@abraxa/db';
-import type { TenantContext } from '@abraxa/db';
-import { HEADER } from '@abraxa/config';
+import { contextoDePeticion, responderError } from '@abraxa/db';
 import { estadoPresupuesto } from './ledger/budget';
 import { listarDefiniciones, sembrarAgentes } from './definitions/repository';
-import { proxyVerified } from './http/proxy-verified';
 import { toolRegistry } from './tools/registry';
 
 export const router: Router = Router();
-
-/** Contexto verificado, o el 401/501/403 que corresponda. */
-async function contextoDe(req: Request): Promise<TenantContext> {
-  // ── Puerta 1: ¿de verdad habla el BFF? ───────────────────────────────────
-  // Va ANTES de mirar un solo header de identidad. `x-user-email` sólo
-  // significa algo si lo puso el proxy desde una sesión verificada
-  // server-side; puesto por el navegador es texto libre.
-  if (!proxyVerified(req)) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      'Sólo por el proxy verificado de la aplicación (sesión server-side). ' +
-        `El header ${HEADER.userEmail} no acredita nada por sí solo.`,
-    );
-  }
-
-  // ── Puerta 2: ¿quién y de qué empresa? ───────────────────────────────────
-  const userEmail = req.header(HEADER.userEmail);
-  const tenantSlug = req.header(HEADER.tenantSlug);
-
-  if (!userEmail || !tenantSlug) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      `Faltan las cabeceras ${HEADER.userEmail} y ${HEADER.tenantSlug}. ` +
-        'Las pone el BFF desde la sesión verificada, no el navegador.',
-    );
-  }
-
-  // ── Puerta 3: la membresía. La valida H2; el slug del navegador NO se cree.
-  // Lanza PORT_NOT_IMPLEMENTED nombrando a H2 mientras tenancy no aterrice.
-  return usePort('tenancy').contextFor({ userEmail, tenantSlug });
-}
-
-function responder(res: Response, err: unknown): void {
-  if (PlatformError.is(err)) {
-    res.status(err.status).json(err.toResponse());
-    return;
-  }
-  res.status(500).json({ error: { code: 'INTERNAL', message: 'Error interno' } });
-}
 
 /** Salud del motor: qué tools hay registradas y por quién. */
 router.get('/_status', (_req, res) => {
@@ -96,10 +63,10 @@ router.get('/_status', (_req, res) => {
 router.get('/', (req, res) => {
   void (async () => {
     try {
-      const ctx = await contextoDe(req);
+      const ctx = await contextoDePeticion(req);
       res.json({ agents: await listarDefiniciones(ctx) });
     } catch (err) {
-      responder(res, err);
+      responderError(res, err);
     }
   })();
 });
@@ -108,10 +75,10 @@ router.get('/', (req, res) => {
 router.get('/budget', (req, res) => {
   void (async () => {
     try {
-      const ctx = await contextoDe(req);
+      const ctx = await contextoDePeticion(req);
       res.json(await estadoPresupuesto(ctx));
     } catch (err) {
-      responder(res, err);
+      responderError(res, err);
     }
   })();
 });
@@ -120,12 +87,12 @@ router.get('/budget', (req, res) => {
 router.post('/seed', (req, res) => {
   void (async () => {
     try {
-      const ctx = await contextoDe(req);
+      const ctx = await contextoDePeticion(req);
       const body = req.body as { masterName?: string } | undefined;
       const opts = body?.masterName ? { nombreDelMaestro: body.masterName } : undefined;
       res.json(await sembrarAgentes(ctx, opts));
     } catch (err) {
-      responder(res, err);
+      responderError(res, err);
     }
   })();
 });

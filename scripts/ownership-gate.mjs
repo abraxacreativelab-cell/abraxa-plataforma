@@ -94,22 +94,49 @@ const cargarOwnership = () => JSON.parse(readFileSync(RUTA_OWNERSHIP, 'utf8'));
 export const CARRIL_ORQUESTADOR = 'h0-integracion';
 
 /**
+ * ¿Sigue viva la excepción transversal?
+ *
+ * La lección del PR #12: aquel PR se concedió una excepción para cerrar un
+ * agujero de seguridad en el árbol de H3, la usó, mergeó — y la dejó escrita.
+ * Diez días después seguía ahí, dando permiso permanente sobre `packages/agents`
+ * a un trabajo terminado. **Un permiso temporal que nadie retira es un permiso
+ * permanente.**
+ *
+ * Por eso la excepción caduca sola, y falla CERRADA en los dos casos que
+ * importan: sin `venceEn` no vale, y vencida tampoco. La fecha se compara como
+ * cadena ISO —`2026-08-14` ordena igual como texto que como fecha— para no
+ * depender de la zona horaria del corredor.
+ */
+export function excepcionVigente(exc, hoy = new Date()) {
+  if (!exc) return { vigente: false, motivo: 'sin excepción' };
+  if (!exc.venceEn) {
+    return { vigente: false, motivo: 'no declara `venceEn`, así que no se honra (fail-closed)' };
+  }
+  const dia = hoy.toISOString().slice(0, 10);
+  if (exc.venceEn < dia) {
+    return { vigente: false, motivo: `venció el ${exc.venceEn} (hoy es ${dia})` };
+  }
+  return { vigente: true, motivo: `vigente hasta el ${exc.venceEn}` };
+}
+
+/**
  * Los globs con los que se juzga UN PR: los del carril, más la excepción
- * transversal si el carril es H0 y la declaró.
+ * transversal si el carril es H0, la declaró y sigue vigente.
  *
  * Existe porque el orquestador a veces tiene que cerrar un agujero de seguridad
  * que vive en el árbol de otro handoff y no puede esperar a que despierte. La
- * excepción se declara en `.ownership.json` con fecha, PR y razón, es acotada a
- * rutas explícitas, y NO entra en `duenosDe()` — el archivo sigue siendo de su
- * dueño real, así que `--check-overlap` no cambia y la propiedad no se
- * transfiere en silencio.
+ * excepción se declara en `.ownership.json` con fecha, vencimiento, PR y razón,
+ * es acotada a rutas explícitas, y NO entra en `duenosDe()` — el archivo sigue
+ * siendo de su dueño real, así que `--check-overlap` no cambia y la propiedad
+ * no se transfiere en silencio.
  *
  * Si cualquier otro carril se declarara una, se ignora: un carril de
  * construcción no puede concederse permiso para salirse de su carril.
  */
-export function pathsEfectivos(rama, cfg) {
+export function pathsEfectivos(rama, cfg, hoy = new Date()) {
   if (rama !== CARRIL_ORQUESTADOR) return cfg.paths;
-  return [...cfg.paths, ...(cfg.excepcionTransversal?.paths ?? [])];
+  if (!excepcionVigente(cfg.excepcionTransversal, hoy).vigente) return cfg.paths;
+  return [...cfg.paths, ...cfg.excepcionTransversal.paths];
 }
 
 /** Quién es dueño de un archivo. Devuelve la lista de handoffs que lo reclaman. */
@@ -262,9 +289,10 @@ function verificarPR(argv) {
   // La excepción transversal se ANUNCIA. Un permiso que se aplica en silencio
   // es un permiso que nadie audita.
   const exc = rama === CARRIL_ORQUESTADOR ? cfg.excepcionTransversal : null;
-  if (exc) {
+  const vigencia = excepcionVigente(exc);
+  if (exc && vigencia.vigente) {
     console.log(
-      `${R.ambar}  ⚠ excepción transversal de H0 (${exc.fecha}) sobre ${exc.paths.length} ruta(s):${R.off}`,
+      `${R.ambar}  ⚠ excepción transversal de H0 (${exc.fecha}, ${vigencia.motivo}) sobre ${exc.paths.length} ruta(s):${R.off}`,
     );
     for (const p of exc.paths) console.log(`${R.gris}      · ${p}${R.off}`);
     console.log(`${R.gris}      razón: ${exc.razon}${R.off}`);
@@ -277,6 +305,19 @@ function verificarPR(argv) {
   }
 
   const fallas = [];
+
+  // ── 0 · la excepción caducada se RETIRA, no se ignora ──────────────────────
+  // Falla aunque este PR no toque ninguna de sus rutas: es exactamente así como
+  // el permiso del PR #12 sobrevivió a su propio trabajo. El arreglo es borrar
+  // la clave, y toma diez segundos.
+  if (exc && !vigencia.vigente) {
+    fallas.push(
+      `.ownership.json\n      la excepcionTransversal de H0 ${vigencia.motivo}.\n` +
+        `      Era para: ${exc.pr}\n` +
+        `      Retírala (deja la clave fuera o \`"excepcionTransversal": null\`). Un permiso\n` +
+        `      temporal que nadie retira es un permiso permanente — es lo que pasó con el PR #12.`,
+    );
+  }
 
   // ── 1 y 2 · propiedad y migraciones ────────────────────────────────────────
   const [minMig, maxMig] = cfg.migrations ?? [null, null];
