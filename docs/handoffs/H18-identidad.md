@@ -241,8 +241,14 @@ facilidades:
 | `nodemailer` (para `EmailProvider`) | **no** | `sendVerificationRequest` propio con **`resend`**, que **sí** está instalado |
 | `@next-auth/pg-adapter` | **no** | Un adaptador mínimo tuyo sobre `app.auth_*` |
 
-**No instales ninguna de las dos.** Regla 4 del contrato: el lockfile es de H1 y dos ramas
-tocándolo es un conflicto garantizado.
+**No instales ninguna de las dos.** Regla 4 del contrato: dos ramas moviendo versiones de
+terceros es un conflicto garantizado.
+
+> **Matiz que sí te toca.** Tu entrada de `.ownership.json` trae `"lockfile": true`, pero **no
+> es una licencia para instalar**: es que `packages/auth` es un workspace **nuevo** y `npm ci`
+> falla sin su nodo (`Missing: @abraxa/auth@0.1.0 from lock file`) **antes** del typecheck.
+> Aíslalo en un commit propio, que sea aditivo, y rebasa sobre `main` justo antes de abrir el PR
+> — H15 y H17 también tienen la llave ahora mismo. El orquestador la retira al mergear tu carril.
 
 Y no es un sacrificio: el adaptador que necesitas es corto porque la sesión es JWT. NextAuth v4
 exige adaptador **para el proveedor de correo** (tiene que persistir el token de verificación),
@@ -491,7 +497,9 @@ NO INSTALES NADA. next-auth ^4.24.11 ya está en apps/web/package.json. nodemail
 @next-auth/pg-adapter tampoco. En su lugar: sendVerificationRequest propio con `resend` (que sí
 está instalado) y un adaptador mínimo tuyo. El adaptador es corto porque la sesión es JWT:
 NextAuth v4 exige adaptador para el proveedor de CORREO (persistir el token), no para la sesión.
-El lockfile es de H1 (regla 4) — si crees que falta algo, anótalo en el PR y no lo instales.
+Regla 4: si crees que falta una dependencia, anótala en el PR y NO la instales. Tu entrada trae
+"lockfile": true sólo para el nodo del workspace nuevo packages/auth, sin el cual npm ci falla
+antes del typecheck: aíslalo en un commit propio y rebasa sobre main antes de abrir el PR.
 
 SIETE COSAS QUE NO SE NEGOCIAN (tu §7, léelas completas):
   1. Normaliza el correo ANTES de cualquier consulta. Google devuelve la capitalización que el

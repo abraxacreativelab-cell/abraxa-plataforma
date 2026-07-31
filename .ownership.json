@@ -290,13 +290,24 @@
   "h17-integraciones": {
     "label": "H17 · Integraciones por tenant (credenciales de canal por empresa)",
     "migrations": [140, 149],
+    "lockfile": true,
     "nota": [
       "Prerrequisito duro de H12 y H13: mientras las credenciales de canal sean variables del",
       "proceso (.env.example:44-51), dos clientes comparten el mismo WhatsApp.",
       "",
       "NO toca packages/inbox. No hace falta: el driver de WhatsApp ya acepta que le pasen",
       "baseUrl y apiKey y sólo cae al entorno si nadie lo hace",
-      "(packages/inbox/src/drivers/whatsapp/evolution.ts:225-226, rama h6-inbox)."
+      "(packages/inbox/src/drivers/whatsapp/evolution.ts:225-226, rama h6-inbox).",
+      "",
+      "`lockfile: true` por la misma razón mecánica que h15-crm, y no por conveniencia: estrena",
+      "el WORKSPACE `packages/integrations`, y `npm ci` se niega a instalar si el lockfile no lo",
+      "conoce ('Missing: @abraxa/integrations@0.1.0 from lock file'). Sin esto su CI revienta en",
+      "`npm ci`, antes del typecheck, y si toca el lockfile para arreglarlo el gate le rechaza el",
+      "PR: no tendría ninguna salida. Se detectó al fusionar main (2026-07-31) y está probado en",
+      "`ownership-gate.test.mjs` — 'todo carril que estrena paquete tiene permiso de lockfile',",
+      "que lo deduce del árbol en vez de creerle a una lista.",
+      "",
+      "QUITARLO en cuanto el carril mergee, junto con su línea en `ownership-gate.test.mjs`."
     ],
     "paths": ["packages/integrations/**", "apps/web/app/(app)/ajustes/integraciones/**"]
   },
@@ -304,7 +315,19 @@
   "h18-identidad": {
     "label": "H18 · Identidad: NextAuth, sesión y el puente BFF→API",
     "migrations": [150, 159],
+    "lockfile": true,
     "nota": [
+      "`lockfile: true` es mecánico, igual que en h15-crm y h17-integraciones: estrena el",
+      "WORKSPACE `packages/auth` y `npm ci` falla sin él ('Missing: @abraxa/auth@0.1.0 from lock",
+      "file'). Además este carril SÍ instala dependencias de verdad (next-auth y su adaptador),",
+      "así que su PR va a mover el lockfile de todos modos. QUITARLO al mergear, junto con su",
+      "línea en `ownership-gate.test.mjs`.",
+      "",
+      "Que tres carriles tengan la llave del lockfile a la vez es el riesgo que la regla 4",
+      "advierte, y no se puede evitar sin despertar a H1. Se acota así: H15 mergea primero (su",
+      "PR #9 ya está verde), y H17 y H18 rebasan sobre main antes de abrir el suyo. Dos ramas",
+      "que tocan el lockfile en paralelo dan un conflicto garantizado, no una sorpresa.",
+      "",
       "`apps/web/app/api/**` no era de nadie hasta hoy, y su ausencia estaba anotada por H4 en",
       "apps/web/app/(app)/direccion/_lib/session.ts: 'ni una ruta BFF en apps/web/app/api/**,",
       "que no está asignada a ningún handoff'. Se le asigna el árbol completo —no sólo",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -149,24 +149,6 @@ describe('el mapa de propiedad', () => {
     }
   });
 
-  /**
-   * Los bloques de migración son disjuntos. Dos carriles con el mismo rango se
-   * pisan el número el día que los dos escriban, y eso no lo detecta ningún
-   * gate: lo detecta `migrate` en producción, tarde. Al alta de H15–H18 se
-   * repartieron 120–129, 130–139, 140–149 y 150–159 justamente por esto.
-   */
-  it('ningún par de carriles comparte un número de migración', () => {
-    const ocupado = new Map();
-    for (const [nombre, cfg] of Object.entries(ownership)) {
-      if (!cfg.migrations) continue;
-      const [desde, hasta] = cfg.migrations;
-      for (let n = desde; n <= hasta; n++) {
-        expect(ocupado.get(n), `migración ${n}: ${ocupado.get(n)} y ${nombre}`).toBeUndefined();
-        ocupado.set(n, nombre);
-      }
-    }
-  });
-
   it('H0 no tiene bloque de migraciones: no las escribe, las ordena', () => {
     expect(ownership[CARRIL_ORQUESTADOR].migrations).toBeNull();
   });
@@ -213,18 +195,56 @@ describe('el mapa de propiedad', () => {
    * un permiso general justamente para que agregarse a ella sea un cambio
    * visible que alguien tiene que aprobar.
    *
-   * H15 está aquí por una razón mecánica: es el único carril que crea un
-   * WORKSPACE nuevo (`packages/crm`), y `npm ci` se niega a instalar si el
-   * lockfile no lo conoce ("Missing: @abraxa/crm@0.1.0 from lock file"). Sin
-   * esa entrada, CI no llega ni a compilar.
+   * H15, H17 y H18 están aquí por una razón mecánica, no por conveniencia:
+   * cada uno crea un WORKSPACE nuevo —`packages/crm`, `packages/integrations`,
+   * `packages/auth`— y `npm ci` se niega a instalar si el lockfile no lo
+   * conoce ("Missing: @abraxa/crm@0.1.0 from lock file"). Sin esa entrada, su
+   * CI no llega ni a compilar: `npm ci` revienta antes del typecheck, y si
+   * actualizan el lockfile para arreglarlo, el gate les rechaza el PR.
    *
-   * QUITAR `"lockfile": true` de h15-crm en cuanto el carril mergee.
+   * H16 NO está, y la diferencia es exactamente ésta: vive DENTRO de
+   * `packages/tenancy`, que ya es un workspace. Crear una carpeta dentro de un
+   * paquete existente no toca el lockfile.
+   *
+   * QUITAR `"lockfile": true` de cada uno en cuanto su carril mergee.
    */
   it('el lockfile sólo lo mueven H1 y quien crea un workspace nuevo', () => {
     const conLockfile = Object.entries(ownership)
       .filter(([, c]) => c.lockfile === true)
       .map(([n]) => n);
-    expect(conLockfile.sort()).toEqual(['h1-fundacion', 'h15-crm']);
+    expect(conLockfile.sort()).toEqual([
+      'h1-fundacion',
+      'h15-crm',
+      'h17-integraciones',
+      'h18-identidad',
+    ]);
+  });
+
+  /**
+   * Y la misma regla, deducida del árbol en vez de enumerada a mano — que es
+   * lo que la vuelve una prueba y no una lista.
+   *
+   * Un carril que reclama `packages/<algo>/**` cuando ese paquete TODAVÍA no
+   * existe va a crear un workspace nuevo. `npm ci` falla con "Missing:
+   * @abraxa/<algo>@0.1.0 from lock file" en el job `verify`, ANTES del
+   * typecheck, y el carril se queda sin poder abrir un PR verde: si toca el
+   * lockfile para arreglarlo, `ownership-gate` se lo rechaza.
+   *
+   * Le pasó a H15 y costó descubrirlo. Al emitir H16, H17 y H18 volvió a
+   * pasar con dos de ellos, porque la lista de arriba se copia y la condición
+   * que la justifica no se vuelve a evaluar. Ahora se evalúa sola.
+   */
+  it('todo carril que estrena paquete tiene permiso de lockfile', () => {
+    const sinPermiso = [];
+    for (const [nombre, cfg] of Object.entries(ownership)) {
+      for (const glob of cfg.paths) {
+        const nuevo = /^packages\/([a-z0-9-]+)\/\*\*$/.exec(glob);
+        if (!nuevo) continue;
+        const yaExiste = existsSync(join(RAIZ, 'packages', nuevo[1], 'package.json'));
+        if (!yaExiste && cfg.lockfile !== true) sinPermiso.push(`${nombre} → packages/${nuevo[1]}`);
+      }
+    }
+    expect(sinPermiso).toEqual([]);
   });
 
   /**

@@ -126,16 +126,24 @@ canal?) · H14 (ver el estado de las integraciones de un cliente en el panel de 
 
 ### Tu paquete es nuevo y eso tiene un costo
 
-`packages/integrations` no existe. Como le pasó a H15 con `packages/crm`, vas a topar con que
-`npm ci` exige que el lockfile conozca el workspace nuevo, y **el lockfile es de H1** (regla 4).
+`packages/integrations` no existe. Como le pasó a H15 con `packages/crm`, `npm ci` exige que el
+lockfile conozca el workspace nuevo o **falla antes del typecheck**: `Missing:
+@abraxa/integrations@0.1.0 from lock file`.
 
-**No lo instales.** Anótalo en tu PR con este texto exacto y déjalo aislado en un solo commit
-para que el orquestador lo pueda mover:
+**Tienes permiso para ese nodo, y sólo para ése.** Tu entrada de `.ownership.json` trae
+`"lockfile": true` justamente por esto (se le dio el 2026-07-31, al fusionar `main`: sin él tu
+CI no tenía ninguna salida — `npm ci` reventaba, y si tocabas el lockfile el gate te rechazaba
+el PR).
 
-```
-packages/integrations es un workspace nuevo. Falta su nodo en package-lock.json o CI no
-instala. Cambio aditivo, no mueve ninguna versión de terceros. Es de H1 (regla 4).
-```
+Las condiciones:
+
+- **Aíslalo en un solo commit**, sólo el nodo del workspace. Cambio aditivo; no mueve ninguna
+  versión de terceros.
+- **Sigues sin poder instalar dependencias nuevas** (regla 4). Si te falta una, anótala en el PR
+  y no la instales.
+- **Rebasa sobre `main` justo antes de abrir el PR.** H15 y H18 también tienen la llave del
+  lockfile ahora mismo; dos ramas que lo tocan en paralelo dan un conflicto garantizado.
+- El orquestador **quita** ese `"lockfile": true` en cuanto tu carril mergee.
 
 Lo mismo con el montaje del router (`apps/api/src/packages.ts`) y con `transpilePackages` de
 `apps/web/next.config.mjs`. Los tres van en §10.
@@ -504,8 +512,9 @@ Migraciones 140–149. NO edites packages/inbox/ ni packages/db/ports.ts: tu Int
 en packages/integrations/src/port.ts, por la misma razón que ContactsPort de H15 (ver
 H15-crm.md §9.4). Los ocho enganches que no puedes hacer van anotados en tu PR — tu §10.
 
-packages/integrations es un workspace NUEVO: npm ci va a exigir su nodo en el lockfile, y el
-lockfile es de H1. NO lo instales; anótalo en el PR y aísla el commit para que se pueda mover.
+packages/integrations es un workspace NUEVO: npm ci exige su nodo en el lockfile o falla antes
+del typecheck. Tu entrada trae "lockfile": true SÓLO para eso — aísla ese nodo en un commit
+propio, rebasa sobre main antes de abrir el PR, y NO instales ninguna dependencia nueva.
 
 Toda tabla nueva con tenant_id y RLS en la MISMA migración que la crea.
 
