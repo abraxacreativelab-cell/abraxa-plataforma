@@ -39,6 +39,12 @@ verifican lo mismo:
 > propio `package.json` raíz — un conflicto a cuatro bandas sobre los archivos más importantes del
 > repo. Se detectó a tiempo, y de ahí salió el gate.
 
+**El freno prueba ARCHIVOS de implementación, nunca directorios.** `test -d packages/agents/src`
+pasa en verde desde que H1 dejó los stubs: no prueba que H3 haya mergeado, prueba que existe una
+carpeta. Los handoffs H16–H18 ya lo hacen así (`test -f packages/agents/src/ledger/budget.ts`), y
+los de H6, H10, H12 y H13 todavía usan `test -d` — si retomas uno de ésos, cambia el freno por el
+archivo concreto del que depende tu carril antes de creerle.
+
 ---
 
 ## Olas — nunca más de 5 conversaciones a la vez
@@ -48,12 +54,16 @@ verifican lo mismo:
 | **0** | H1 | **1 — va solo, todo lo demás espera** | ✅ en `main` |
 | **1** | H2, H3, H4, H5 | 4 | ✅ los cuatro en `main` |
 | **2** | H6, H7, H9, H10, **H15** | 5 | PRs abiertos y en verde |
-| **3** | H8, H11, H12, H13, H14, **H18** | — | no arrancada |
+| **3** | H8, H11, H12, H13, H14 | — | no arrancada |
+| **4** | **H16**, **H17**, **H18** | 3 | emitidos el 2026-07-31, no arrancados |
 | continuo | **H0 Orquestador** | atraviesa todas | — |
 
 ```
 H1 → H3 → H6 → H7 → H11 → v1 usable        ← ruta crítica
      H6 → H15 ──► H8
+
+H18 ──────────────────────────────► TODO    ← sin sesión no entra nadie
+H17 ──────────────────────────────► H12, H13
 
 Trámite Meta (Santiago) ──────────► H12     ← espera externa
 ```
@@ -66,14 +76,35 @@ Trámite Meta (Santiago) ──────────► H12     ← espera ex
   `apps/api` y `apps/worker` son procesos distintos, así que un `EventEmitter` en proceso pasa las
   pruebas y no emite nada en producción. Se sustituyó por **polling de 1 s** detrás de una sola
   función de transporte. Todo en `H8-flows.md` §0.
-- **Dos carriles nuevos.** **H15 · CRM** (contactos, identidades por canal, embudo, línea de
-  tiempo) porque H6 y H8 lo daban por hecho el uno del otro y ninguno lo construía; y **H18 ·
-  identidad** (login), que salió de H10 porque `apps/web/app/api/auth/**` no le pertenece a nadie
-  en `.ownership.json` y un archivo huérfano pone en rojo el `--check-overlap` **de todos los
-  PRs**, no sólo del suyo.
+- **Cuatro carriles nuevos** — H15, H16, H17 y H18, uno por hueco, con su evidencia en la tabla
+  de más abajo. El primero, **H15 · CRM**, porque H6 y H8 lo daban por hecho el uno del otro y
+  ninguno lo construía. El último, **H18 · identidad** (login), salió de H10 porque
+  `apps/web/app/api/**` no le pertenecía a nadie en `.ownership.json` y un archivo huérfano pone
+  en rojo el `--check-overlap` **de todos los PRs**, no sólo del suyo.
 
 **H6 manda.** Es donde el agente empieza a contestar mensajes reales. Si algo se atrasa, que no
 sea H6.
+
+**H17 se adelanta a su ola.** Está en la 4, pero **tiene que mergear antes que H12 y H13**
+(`H17-integraciones.md` §Entregables, punto 6-7): mientras las credenciales de canal sean
+variables del proceso, dos clientes comparten el mismo WhatsApp. Si la Ola 3 arranca antes que la
+4, H12 y H13 esperan a H17 — no al revés.
+
+**Y H18 es la puerta.** Hoy `correoDeLaSesion()` devuelve `null`
+(`apps/web/app/(app)/direccion/_lib/session.ts`) y por lo tanto **nadie puede iniciar sesión en el
+producto**. Todo lo demás funciona por debajo y no se puede tocar desde un navegador.
+
+### Los cuatro carriles emitidos después del reparto original
+
+H1–H14 salieron del plan maestro. H15–H18 salieron de huecos que se encontraron **construyendo**,
+y ninguno se podía cerrar desde la columna de nadie:
+
+| # | El hueco, en una frase | Evidencia |
+|---|---|---|
+| H15 | No hay tabla de contactos | `H6-inbox.md:110` declara `contact_id` sin `REFERENCES` porque no había a qué apuntar |
+| H16 | Los planes sólo tienen números, y un tenant suspendido sigue gastando | `assertQuota` no tiene un solo llamador de producción; el webhook no pasa por `contextFor()` |
+| H17 | Las credenciales de canal son del proceso, no de la empresa | `.env.example:44-51` — ocho variables globales, cero dimensión de tenant |
+| H18 | No existe la sesión sobre la que está construido todo | `session.ts` → `correoDeLaSesion()` es `return null;` |
 
 ---
 
@@ -123,10 +154,15 @@ El detalle está en [CONTRIBUTING.md](../../CONTRIBUTING.md#quién-pide-contexto
 | H13 | [Drivers email + SMS](H13-email-sms.md) | 3 | |
 | H14 | [Panel de agencia](H14-admin.md) | 3 | |
 | H15 | CRM: contactos, embudo y línea de tiempo | 2 | ✅ |
-| H18 | Identidad: inicio de sesión | 3 | |
+| H16 | [Entitlements y ciclo de vida del plan](H16-entitlements.md) | 4 | |
+| H17 | [Integraciones por tenant](H17-integraciones.md) | 4 | ✅ |
+| H18 | [Identidad: NextAuth, sesión y BFF](H18-identidad.md) | 4 | ✅ |
 
-> H15 y H18 se abrieron el 2026-07-31 (ver arriba). Sus handoffs llegan en el PR de su propio
-> carril; hasta entonces esta tabla es lo único que los nombra.
+> **H15 va sin enlace a propósito.** Su carril y su entrada en `.ownership.json` ya están dados de
+> alta desde `main`, pero **`H15-crm.md` todavía no existe aquí**: llega con el **PR #9**, escrito
+> por el carril que lo construyó. Se lista porque el carril existe y H16, H17 y H18 lo dan por
+> hecho; se deja sin enlazar para no dejar un enlace roto en `main`. En cuanto el PR #9 mergee,
+> esta fila se enlaza como las demás.
 
 ---
 
@@ -137,8 +173,8 @@ detecta y falla el PR con el archivo exacto.
 
 | # | Directorios exclusivos | Migraciones | Rama |
 |---|---|---|---|
-| H0 | *ninguno* — sólo `docs/` y `deploy/` | *aplica*, no crea | — |
-| H1 | raíz, `packages/config`, `packages/db`, `.github/`, stubs | `001`–`009` | `h1-fundacion` |
+| H0 | `docs/`, `deploy/`, `scripts/`, `.ownership.json`, `eslint.config.mjs`, `CONTRIBUTING.md`, `packages/db/src/http/**` | *aplica*, no crea | `h0-integracion` |
+| H1 | raíz, `packages/config`, `packages/db` **excepto** `src/http/`, `.github/`, stubs | `001`–`009` | `h1-fundacion` |
 | H2 | `packages/tenancy/**` | `010`–`019` | `h2-tenancy` |
 | H3 | `packages/agents/**` | `020`–`029` | `h3-agents` |
 | H4 | `packages/vault/**`, `app/(app)/direccion/**` | `030`–`039` | `h4-vault` |
@@ -153,12 +189,22 @@ detecta y falla el PR con el archivo exacto.
 | H13 | `packages/inbox/drivers/{email,sms}/**` | `105`–`109` | `h13-email-sms` |
 | H14 | `apps/web/app/(admin)/**` | `110`–`119` | `h14-admin` |
 | H15 | `packages/crm/**`, `app/(app)/contactos/**` | `120`–`129` | `h15-crm` |
-| H18 | `apps/web/app/api/auth/**` (y lo que su PR declare) | `130`–`139` | `h18-identidad` |
+| H16 | `packages/tenancy/{,src/}entitlements/**`, `app/(app)/ajustes/plan/**` | `130`–`139` | `h16-entitlements` |
+| H17 | `packages/integrations/**`, `app/(app)/ajustes/integraciones/**` | `140`–`149` | `h17-integraciones` |
+| H18 | `packages/auth/**`, `app/api/**`, `app/(app)/ajustes/**` **excepto** `plan` e `integraciones` | `150`–`159` | `h18-identidad` |
 
 > **La tabla no es la ley: `.ownership.json` lo es.** El gate la lee a ella. Si abres un carril
 > nuevo, la fila de `.ownership.json` va **en el mismo PR** que el primer archivo — un archivo sin
 > dueño hace fallar `--check-overlap`, que corre en el job `verify` **de todos los PRs abiertos**.
-> Por eso H18 existe: `apps/web/app/api/auth/**` no era de nadie.
+> Por eso H18 existe: `apps/web/app/api/**` no era de nadie.
+>
+> **H18 se lleva `apps/web/app/api/**` entero, no sólo `api/auth`.** Es lo que decidió su handoff
+> al emitirse, y por la misma razón: un subárbol sin dueño bloquea al primero que escriba en él.
+> Si otro carril necesita ahí una ruta de servidor propia, se le excluye un subárbol, como H6 hizo
+> con H12 y H13. Y su bloque de migraciones es `150`–`159`, no `130`–`139`: ése es de H16.
+>
+> **`migrations/README.md` es de H1 y todavía no trae H15–H18.** Hasta que lo alinee, la fuente es
+> esta tabla y `.ownership.json`, que son las que el gate lee.
 
 ### Las cinco reglas
 

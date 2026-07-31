@@ -1,23 +1,26 @@
 import type { Metadata } from 'next';
+import InboxScreen from './inbox-screen';
+import RegistrarHerramienta from './registrar-herramienta';
 
 export const metadata: Metadata = { title: 'Bandeja · ABRAXA Plataforma' };
 
 /**
- * ANDAMIO DE H1 — bórralo y escribe lo tuyo. Es de H6.
- * Ruta: /bandeja · archivo: apps/web/app/(app)/bandeja/page.tsx
+ * `/bandeja` — la pantalla de H6.
+ *
+ * El shell, la navegación por áreas y el acento contextual los pone
+ * `(app)/layout.tsx`, que es de H5. Aquí sólo cuelga la pantalla.
+ *
+ * Es un componente de servidor que renderiza uno de cliente: la bandeja es
+ * interactiva de arriba abajo (envío optimista, interruptor de IA, cambio de
+ * hilo) y no hay nada que ganar renderizándola en el servidor. Los datos los
+ * pide el cliente a `/bandeja/api/*`, que sí corre en el servidor y es donde
+ * vive la sesión.
  */
 export default function Page() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-4 px-6 py-24">
-      <p className="text-sm font-medium uppercase tracking-widest text-[hsl(var(--primary))]">
-        H6
-      </p>
-      <h1 className="text-4xl font-semibold tracking-tight">Bandeja</h1>
-      <p className="text-lg text-[hsl(var(--muted-foreground))]">Tu agente contesta a tus clientes mientras duermes. Y se calla en cuanto tomas el hilo.</p>
-      <p className="mt-6 text-sm text-[hsl(var(--muted-foreground))]">
-        Andamio de H1. La ruta <code className="text-[hsl(var(--foreground))]">/bandeja</code> ya existe y
-        renderiza; el contenido lo trae H6 en su carril.
-      </p>
-    </main>
+    <>
+      <RegistrarHerramienta />
+      <InboxScreen />
+    </>
   );
 }
