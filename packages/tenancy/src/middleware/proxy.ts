@@ -1,7 +1,5 @@
 /**
- * El enforcement del BFF. Portado de GARDEN
- * (src/api/middleware/tenant.ts:22-35) prácticamente sin cambios: sólo el
- * nombre del secreto y el del header.
+ * El enforcement del BFF.
  *
  * ── El patrón ─────────────────────────────────────────────────────────────
  *
@@ -12,41 +10,21 @@
  *
  * Sin esta comprobación, `x-user-email` es un header como cualquier otro y
  * cualquiera se declara quien quiera con un curl.
+ *
+ * ── Dónde vive ahora, y por qué se movió (H0, 2026-07-31) ─────────────────
+ *
+ * La lógica se portó de GARDEN a este archivo y desde hoy vive en
+ * `@abraxa/db` (`packages/db/src/http/proxy-verified.ts`), byte por byte con
+ * el mismo criterio y la misma tabla de casos.
+ *
+ * El motivo es de adopción, no de estética: `@abraxa/db` es el único paquete
+ * del que YA dependen los catorce carriles, así que cualquiera puede importar
+ * la pieza con una línea dentro de su propio árbol. Puesta aquí, adoptarla
+ * exigía editarle su `package.json` —que es de H1— y el lockfile. Esa fricción
+ * es la razón por la que CUATRO carriles escribieron su propia copia y tres
+ * salieron mal igual (H3 PR #12, H6 PR #10, H7 PR #8, y H4 ya en `main`).
+ *
+ * La API pública de `@abraxa/tenancy` no cambia: `proxyVerified` se sigue
+ * exportando desde aquí, y `proxy.test.ts` se queda como prueba de contrato.
  */
-import { timingSafeEqual } from 'node:crypto';
-import type { Request } from 'express';
-import { HEADER } from '@abraxa/config';
-
-/**
- * ¿Esta petición viene de verdad del BFF?
- *
- * ── Fail-closed en producción ─────────────────────────────────────────────
- *
- * Sin `PROXY_SECRET` configurado, en producción esto devuelve `false` y la vía
- * de headers queda CERRADA. Es el caso que importa: si un deploy pierde la
- * variable — una rotación a medias, un `.env` truncado — el sistema no
- * reabre la suplantación de identidad por header, se cae de forma segura.
- *
- * En desarrollo, sin secreto, se permite la vía directa para poder trabajar
- * sin levantar el BFF. Es exactamente el criterio de GARDEN y es el criterio
- * #4 del handoff.
- *
- * Se lee `process.env` directamente y no `env()` de @abraxa/config a
- * propósito: `env()` valida TODO el entorno y lanza si falta cualquier otra
- * cosa. Una decisión de seguridad no puede depender de que quince variables
- * ajenas estén bien puestas.
- */
-export function proxyVerified(req: Pick<Request, 'headers'>): boolean {
-  const secret = process.env.PROXY_SECRET;
-
-  if (!secret) return process.env.NODE_ENV !== 'production';
-
-  const recibido = String(req.headers[HEADER.proxySecret] ?? '');
-  const a = Buffer.from(recibido);
-  const b = Buffer.from(secret);
-
-  // La comparación de longitud va antes porque `timingSafeEqual` lanza si los
-  // buffers difieren en tamaño. La longitud de un secreto no es información
-  // que valga la pena proteger contra un ataque de tiempo.
-  return a.length === b.length && timingSafeEqual(a, b);
-}
+export { proxyVerified } from '@abraxa/db';

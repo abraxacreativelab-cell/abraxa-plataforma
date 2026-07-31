@@ -98,6 +98,65 @@ registerPort('inbox', inboxService);
 
 ---
 
+## Quién pide: `contextoDePeticion()`
+
+> **Ningún router de dominio escribe su propio `contextoDe`. Se importa el
+> canónico.**
+
+Es la única regla de este documento que se ganó a golpes. Entre el 2026-07-30 y
+el 07-31, **cuatro carriles** escribieron cada uno su propio resolvedor de
+contexto a partir de las cabeceras, y **tres salieron mal de la misma manera**:
+leían `x-user-email` sin comprobar antes el secreto compartido del BFF, que es
+lo único que hace que esa cabecera signifique algo. Uno de los cuatro llegó a
+`main` y estuvo sirviendo la bóveda —precios, márgenes, documentos— a cualquiera
+con `curl`.
+
+Un carril que se equivoca es un error. Cuatro es un defecto de diseño: el patrón
+correcto no existía como pieza importable, así que cada carril lo reconstruía de
+memoria. Ahora existe.
+
+```ts
+import { contextoDePeticion, responderError } from '@abraxa/db';
+
+router.get('/cosas', (req, res) => {
+  void (async () => {
+    try {
+      const ctx = await contextoDePeticion(req); // ← lo único correcto
+      res.json(await listarCosas(ctx));
+    } catch (err) {
+      responderError(res, err);
+    }
+  })();
+});
+```
+
+`contextoDePeticion(req)` hace tres puertas, **en este orden**:
+
+1. **`proxyVerified(req)`**, antes de mirar una sola cabecera de identidad. Sin
+   `PROXY_SECRET` en producción está **cerrada** (fail-closed): si un deploy
+   pierde la variable, el sistema no reabre la suplantación por header.
+2. **Identidad presente.** Sin correo no hay quién; sin slug no hay cuál.
+3. **La membresía**, que valida H2 vía `TenancyPort.contextFor()`. El
+   `x-tenant-slug` lo manda el navegador y **no se cree**: ese 403 es lo único
+   que impide que el cliente A lea los datos del cliente B.
+
+Todo lo que lanza es `PlatformError` del catálogo de `ports.ts`.
+
+Para lo que ocurre **antes** de pertenecer a una empresa —crear la tuya, aceptar
+una invitación, arrancar el ritual— hay identidad sin empresa:
+
+```ts
+import { correoVerificadoDe } from '@abraxa/db';
+const email = correoVerificadoDe(req); // mismo candado, sin resolver tenant
+```
+
+**ESLint marca la lectura directa** de `x-user-email`, `x-tenant-slug` y
+`x-proxy-secret` fuera de la pieza canónica. No es un recordatorio: falla tu PR.
+La implementación vive en `packages/db/src/http/` y es de `h0-integracion`; si
+crees que le falta un caso, **anótalo en tu PR** — no la copies a tu árbol.
+
+---
+
 ## Antes de empezar
 
 **1. Verifica que tu ola esté habilitada.** Desde tu worktree:
@@ -161,6 +220,11 @@ Sin ese paso el compilador te frena, y es a propósito.
 alta un tenant, y las tablas globales (`app.users`, `app.plans`,
 `app.industry_templates`, `app.billing_events`). ESLint lo prohíbe dentro de
 `routes/` y `services/`. Si lo usas en otro lado, deja escrito por qué.
+
+**Y el `ctx` que le pasas tiene que venir de `contextoDePeticion(req)`.**
+`tenantDb(ctx)` filtra impecablemente por el `tenantId` que le den: si el
+contexto se armó con una cabecera que nadie verificó, la red de abajo aísla a la
+empresa equivocada. Ver la sección *Quién pide* más arriba.
 
 ---
 
