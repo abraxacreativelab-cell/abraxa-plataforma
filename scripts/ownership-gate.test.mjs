@@ -55,11 +55,87 @@ describe('perteneceA — exclusiones', () => {
     expect(perteneceA('packages/inbox/src/drivers/registry.ts', h6)).toBe(true);
     expect(perteneceA('packages/inbox/src/drivers/whatsapp/index.ts', h6)).toBe(true);
   });
+
+  /**
+   * El mismo patrón, tres carriles después. H16 (entitlements) vive DENTRO del
+   * paquete de H2 —lo que construye es la capa que quedó entre "el modelo, no
+   * el cobro" de H2 y "el cobro" de H10— y H2 le cede su subárbol igual que H6
+   * les cedió los drivers a H12 y H13.
+   *
+   * Sin estas dos exclusiones, H16 no puede escribir un solo archivo sin que el
+   * gate lo atribuya a h2-tenancy, y H2 podría pisar el carril de H16 sin que
+   * nada lo detenga.
+   */
+  it('H2 cede el subárbol de entitlements a H16, y sólo ése', () => {
+    const h2 = ownership['h2-tenancy'].paths;
+    const h16 = ownership['h16-entitlements'].paths;
+
+    expect(perteneceA('packages/tenancy/src/services/plans.ts', h2)).toBe(true);
+    expect(perteneceA('packages/tenancy/src/entitlements/can.ts', h2)).toBe(false);
+    expect(perteneceA('packages/tenancy/entitlements/sql/seed.sql', h2)).toBe(false);
+
+    expect(perteneceA('packages/tenancy/src/entitlements/can.ts', h16)).toBe(true);
+    expect(perteneceA('packages/tenancy/entitlements/sql/seed.sql', h16)).toBe(true);
+    // Y H16 no alcanza el resto del paquete de H2.
+    expect(perteneceA('packages/tenancy/src/services/plans.ts', h16)).toBe(false);
+    expect(perteneceA('packages/tenancy/src/middleware/tenant.ts', h16)).toBe(false);
+  });
+
+  /**
+   * `/ajustes` se reparte entre tres carriles: la sección es de H18 (la hace
+   * junto con la sesión), pero H16 necesita `plan` y H17 necesita
+   * `integraciones` — la pantalla de conexión que H12-meta.md §2.4 le promete
+   * al emprendedor ("vincula su cuenta desde Ajustes").
+   */
+  it('/ajustes se reparte: la sección es de H18, plan de H16 e integraciones de H17', () => {
+    const h18 = ownership['h18-identidad'].paths;
+
+    expect(perteneceA('apps/web/app/(app)/ajustes/page.tsx', h18)).toBe(true);
+    expect(perteneceA('apps/web/app/(app)/ajustes/layout.tsx', h18)).toBe(true);
+    expect(perteneceA('apps/web/app/(app)/ajustes/plan/page.tsx', h18)).toBe(false);
+    expect(perteneceA('apps/web/app/(app)/ajustes/integraciones/page.tsx', h18)).toBe(false);
+
+    expect(
+      perteneceA('apps/web/app/(app)/ajustes/plan/page.tsx', ownership['h16-entitlements'].paths),
+    ).toBe(true);
+    expect(
+      perteneceA(
+        'apps/web/app/(app)/ajustes/integraciones/page.tsx',
+        ownership['h17-integraciones'].paths,
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * `apps/web/app/api/**` no era de nadie hasta que se emitió H18, y su
+   * ausencia estaba anotada por H4 en
+   * apps/web/app/(app)/direccion/_lib/session.ts. Un archivo sin dueño falla
+   * `--check-overlap` y bloquea el PR de quien lo cree.
+   */
+  it('las rutas de servidor del front tienen dueño', () => {
+    expect(duenosDe('apps/web/app/api/auth/[...nextauth]/route.ts', ownership)).toContain(
+      'h18-identidad',
+    );
+    expect(duenosDe('apps/web/app/api/bff/[...path]/route.ts', ownership)).toContain(
+      'h18-identidad',
+    );
+  });
 });
 
 describe('el mapa de propiedad', () => {
-  it('tiene las 14 entradas de construcción más la de H0', () => {
-    expect(Object.keys(ownership)).toHaveLength(15);
+  /**
+   * 14 del plan maestro + H0 + los tres emitidos el 2026-07-31 al encontrarse
+   * huecos que ninguno de los 14 podía cerrar desde su columna: H16
+   * (entitlements), H17 (integraciones por tenant) y H18 (identidad).
+   *
+   * Que sea un número escrito a mano es a propósito: abrir un carril tiene que
+   * ser una decisión visible en un diff, no algo que pase solo. Se actualiza al
+   * ALTA de un carril, y sólo entonces.
+   *
+   * NOTA: H15 (CRM) llega con el PR #9 y sube esta cuenta a 19.
+   */
+  it('tiene las 18 entradas', () => {
+    expect(Object.keys(ownership)).toHaveLength(18);
     expect(ownership[CARRIL_ORQUESTADOR]).toBeDefined();
   });
 
