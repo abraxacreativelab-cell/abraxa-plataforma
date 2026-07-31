@@ -149,30 +149,23 @@ export async function marcarError(stripeEventId: string, motivo: string): Promis
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Slugs
+// Slugs — aquí NO hay nada, y es a propósito
 // ────────────────────────────────────────────────────────────────────────────
-
-/**
- * ¿Ya hay una empresa con este slug?
- *
- * FAIL-CLOSED: si la consulta falla, LANZA en vez de devolver `false`. Un
- * `false` por error de red haría que `derivarSlug` entregara un slug ocupado,
- * y el INSERT moriría contra el UNIQUE después de que Stripe ya cobró.
- */
-export async function slugOcupado(slug: string): Promise<boolean> {
-  const { data, error } = await adminDb()
-    .from('tenants')
-    .select('slug')
-    .eq('slug', slug)
-    .maybeSingle();
-
-  if (error) {
-    throw new PlatformError('INTERNAL', `No se pudo verificar el slug '${slug}': ${error.message}`, {
-      retryable: true,
-    });
-  }
-  return data !== null;
-}
+//
+// Aquí vivía `slugOcupado(slug)`: un SELECT sobre `app.tenants` que contestaba
+// si la fila existía. Era fail-closed y tenía prueba, y aun así era el defecto
+// más caro de este carril: al reprocesar un pago que había quedado a medias,
+// encontraba ocupado el slug que ÉL MISMO había creado en el intento anterior
+// y mandaba a `provision()` con `panaderia-lupita-2` — una segunda empresa por
+// un solo pago.
+//
+// La existencia de la fila nunca fue la pregunta correcta. La correcta es "¿es
+// de otro dueño?", y eso lo contesta `app.provision_tenant` dentro de su propia
+// transacción. Ver `provisionarEmpresa()` en `service.ts`.
+//
+// Si alguien vuelve a necesitar "¿está libre este slug?" para una vista previa
+// de la landing: que sea una consulta de LECTURA que no decida nada. La
+// decisión es de la base.
 
 // ────────────────────────────────────────────────────────────────────────────
 // Suscripciones

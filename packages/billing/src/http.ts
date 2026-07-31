@@ -11,14 +11,13 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { env, HEADER, isProduction } from '@abraxa/config';
-import { PlatformError, usePort } from '@abraxa/db';
+import { PlatformError } from '@abraxa/db';
 import { z } from 'zod';
 import { PLAN_CATALOG, PLAN_DE_PAGO, PLAN_POR_DEFECTO, MONEDA, MONTO } from './catalog';
 import { gateway, type EventoDeStripe } from './gateway';
 import { enlaceDeEntrada, enviarBienvenida } from './correo';
-import { altaDesdeSesion, type ResultadoDeAlta } from './service';
-import { marcarError, marcarProcesado, registrarEvento, slugOcupado } from './store';
-import { derivarSlug } from './slug';
+import { altaDesdeSesion, provisionarEmpresa, type ResultadoDeAlta } from './service';
+import { marcarError, marcarProcesado, registrarEvento } from './store';
 
 export const router: Router = Router();
 
@@ -289,10 +288,13 @@ router.post(
       throw new PlatformError('VALIDATION', parsed.error.issues[0]?.message ?? 'Datos inválidos.');
     }
 
-    const slug = await derivarSlug(parsed.data.businessName, slugOcupado);
-    const { tenantId, created } = await usePort('tenancy').provision({
-      slug,
-      name: parsed.data.businessName,
+    // La MISMA función que el webhook, y por la misma razón: si esto derivara
+    // el slug preguntando "¿está ocupado?", dos envíos del mismo formulario por
+    // la misma persona darían `panaderia-lupita` y `panaderia-lupita-2` — dos
+    // empresas por un solo clic doble. Con `provision()` de árbitro, el segundo
+    // envío cae en la misma empresa con `creado: false`.
+    const { tenantId, slug, created } = await provisionarEmpresa({
+      businessName: parsed.data.businessName,
       ownerEmail,
     });
 

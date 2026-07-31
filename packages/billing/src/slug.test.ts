@@ -8,21 +8,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_CANDIDATOS,
   SLUGS_RESERVADOS,
   SLUG_LARGO_MAX,
   SLUG_PATRON,
-  derivarSlug,
+  candidatosDeSlug,
   esSlugValido,
   slugify,
 } from './slug';
-
-/** Un `estaOcupado` que considera ocupados los slugs de la lista. */
-const ocupados = (...tomados: string[]) => {
-  const set = new Set(tomados);
-  return async (s: string) => set.has(s);
-};
-
-const libre = async () => false;
 
 describe('slugify', () => {
   it('convierte un nombre normal en algo legible', () => {
@@ -70,10 +63,18 @@ describe('esSlugValido', () => {
   });
 });
 
-describe('derivarSlug — criterio 5', () => {
-  it('dos negocios con el mismo nombre salen distintos y ambos legibles', async () => {
-    const primero = await derivarSlug('Panadería Lupita', libre);
-    const segundo = await derivarSlug('Panadería Lupita', ocupados(primero));
+describe('candidatosDeSlug — criterio 5', () => {
+  /*
+   * Esto ANTES era `derivarSlug(nombre, estaOcupado)`: preguntaba a la base si
+   * el slug estaba ocupado y devolvía el primero libre. La pregunta era la
+   * equivocada — "¿existe la fila?" en vez de "¿es de otro dueño?" — y por eso
+   * el reproceso de un pago creaba una segunda empresa con el sufijo. Ahora
+   * esto sólo GENERA candidatos; quien decide es `app.provision_tenant`, que es
+   * el único que sabe de quién es cada slug. Ver `provisionarEmpresa()`.
+   */
+
+  it('dos negocios con el mismo nombre salen distintos y ambos legibles', () => {
+    const [primero, segundo] = candidatosDeSlug('Panadería Lupita');
 
     expect(primero).toBe('panaderia-lupita');
     expect(segundo).toBe('panaderia-lupita-2');
@@ -82,41 +83,55 @@ describe('derivarSlug — criterio 5', () => {
     expect(segundo).toMatch(/^[a-z-]+-\d+$/);
   });
 
-  it('sigue subiendo el sufijo mientras haya colisión', async () => {
-    const tomados = ocupados('tacos-el-gordo', 'tacos-el-gordo-2', 'tacos-el-gordo-3');
-    expect(await derivarSlug('Tacos El Gordo', tomados)).toBe('tacos-el-gordo-4');
+  it('sigue subiendo el sufijo mientras haya colisión', () => {
+    expect(candidatosDeSlug('Tacos El Gordo').slice(0, 4)).toEqual([
+      'tacos-el-gordo',
+      'tacos-el-gordo-2',
+      'tacos-el-gordo-3',
+      'tacos-el-gordo-4',
+    ]);
   });
 
-  it('un nombre reservado sale con sufijo en vez de reventar', async () => {
+  it('un nombre reservado sale con sufijo en vez de reventar', () => {
     // El negocio de alguien se puede llamar "Stripe" o "Blog".
-    expect(await derivarSlug('Stripe', libre)).toBe('stripe-2');
-    expect(await derivarSlug('Blog', libre)).toBe('blog-2');
+    expect(candidatosDeSlug('Stripe')[0]).toBe('stripe-2');
+    expect(candidatosDeSlug('Blog')[0]).toBe('blog-2');
+    // Y el reservado no aparece NUNCA, ni más abajo en la lista.
+    expect(candidatosDeSlug('Stripe')).not.toContain('stripe');
   });
 
-  it('un nombre demasiado corto se alarga en vez de fallar', async () => {
-    const s = await derivarSlug('Ya', libre);
+  it('un nombre demasiado corto se alarga en vez de fallar', () => {
+    const s = candidatosDeSlug('Ya')[0]!;
     expect(esSlugValido(s)).toBe(true);
     expect(s).toBe('ya-negocio');
   });
 
-  it('un nombre que no deja nada usable todavía da un slug válido', async () => {
-    const s = await derivarSlug('☕☕☕', libre);
+  it('un nombre que no deja nada usable todavía da un slug válido', () => {
+    const s = candidatosDeSlug('☕☕☕')[0]!;
     expect(esSlugValido(s)).toBe(true);
   });
 
-  it('el sufijo respeta el largo máximo', async () => {
+  it('el sufijo respeta el largo máximo', () => {
     const nombre = 'a'.repeat(60);
-    const base = await derivarSlug(nombre, libre);
-    const conSufijo = await derivarSlug(nombre, ocupados(base));
 
-    expect(conSufijo.length).toBeLessThanOrEqual(SLUG_LARGO_MAX);
-    expect(esSlugValido(conSufijo)).toBe(true);
+    for (const c of candidatosDeSlug(nombre)) {
+      expect(c.length).toBeLessThanOrEqual(SLUG_LARGO_MAX);
+      expect(esSlugValido(c)).toBe(true);
+    }
   });
 
-  it('corta en vez de colgarse si `estaOcupado` siempre dice que sí', async () => {
-    // Una caída de red mal manejada dentro de un webhook de pago no puede
-    // convertirse en un bucle infinito.
-    await expect(derivarSlug('Panadería', async () => true, 5)).rejects.toThrow(/intentos/);
+  it('la lista es finita: el alta no se puede volver un bucle dentro de un webhook', () => {
+    expect(candidatosDeSlug('Panadería').length).toBeLessThanOrEqual(MAX_CANDIDATOS);
+    expect(candidatosDeSlug('Panadería', 5).length).toBeLessThanOrEqual(5);
+  });
+
+  it('no repite un candidato: cada intento de alta prueba un slug distinto', () => {
+    // Con nombres largos el recorte podría colapsar dos sufijos en el mismo
+    // slug y hacer que el alta reintentara el mismo candidato para siempre.
+    for (const nombre of ['Panadería Lupita', 'a'.repeat(60), 'Ya', 'Stripe']) {
+      const lista = candidatosDeSlug(nombre);
+      expect(new Set(lista).size).toBe(lista.length);
+    }
   });
 });
 
@@ -137,9 +152,14 @@ describe('todo lo que sale pasa los CHECK de app.tenants', () => {
     'Öñü Ãç',
   ];
 
-  it.each(nombres)('«%s» produce un slug que la base aceptaría', async (nombre) => {
-    const s = await derivarSlug(nombre, libre);
-    expect(SLUG_PATRON.test(s)).toBe(true);
-    expect(SLUGS_RESERVADOS.has(s)).toBe(false);
+  it.each(nombres)('«%s» produce slugs que la base aceptaría', (nombre) => {
+    const lista = candidatosDeSlug(nombre);
+    expect(lista.length).toBeGreaterThan(0);
+
+    // TODOS, no sólo el primero: el alta puede acabar en cualquiera de ellos.
+    for (const s of lista) {
+      expect(SLUG_PATRON.test(s)).toBe(true);
+      expect(SLUGS_RESERVADOS.has(s)).toBe(false);
+    }
   });
 });

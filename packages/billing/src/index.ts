@@ -58,9 +58,10 @@ export {
 } from './catalog';
 
 export {
-  derivarSlug,
+  candidatosDeSlug,
   slugify,
   esSlugValido,
+  MAX_CANDIDATOS,
   SLUGS_RESERVADOS,
   SLUG_PATRON,
   SLUG_LARGO_MAX,
@@ -88,4 +89,9 @@ export {
 export { syncPlanCatalog } from './store';
 
 export { enlaceDeEntrada } from './correo';
-export { altaDesdeSesion, altaDesdeSesionPagada, type ResultadoDeAlta } from './service';
+export {
+  altaDesdeSesion,
+  altaDesdeSesionPagada,
+  provisionarEmpresa,
+  type ResultadoDeAlta,
+} from './service';

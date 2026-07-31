@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlatformError, __clearPorts, __setClientForTests, registerPort } from '@abraxa/db';
 import { HEADER, resetEnvCache } from '@abraxa/config';
 import { FakeDb } from './pruebas/fake-db';
+import { crearProvisionDoble, type ProvisionDoble } from './pruebas/tenancy-doble';
 import { GatewayDoble, __setGatewayForTests } from './gateway';
 
 const PROXY = 'secreto-de-proxy-de-prueba-largo';
@@ -23,6 +24,7 @@ let servidor: Server;
 let base: string;
 let quitarCliente: () => void;
 let quitarGateway: () => void;
+let tenancy: ProvisionDoble;
 let provisionLlamadas: Array<{ slug: string; name: string; ownerEmail: string }>;
 
 beforeEach(async () => {
@@ -39,13 +41,15 @@ beforeEach(async () => {
   quitarCliente = __setClientForTests(db as never);
   quitarGateway = __setGatewayForTests(new GatewayDoble(undefined));
 
-  provisionLlamadas = [];
+  // El doble escribe de verdad en `db.tabla('tenants')` y aplica la regla del
+  // dueño de la migración 011: sin eso, `alta-gratis` parece idempotente
+  // cuando no lo es. Ver `pruebas/tenancy-doble.ts`.
+  tenancy = crearProvisionDoble(db);
+  provisionLlamadas = tenancy.llamadas;
+
   __clearPorts();
   registerPort('tenancy', {
-    provision: async (i) => {
-      provisionLlamadas.push(i);
-      return { tenantId: `tenant-de-${i.slug}`, created: true };
-    },
+    provision: (i) => tenancy.provision(i),
     contextFor: async () => {
       throw new Error('no se usa');
     },
@@ -172,6 +176,49 @@ describe('POST /billing/alta-gratis', () => {
     expect(provisionLlamadas).toEqual([
       { slug: 'panaderia-lupita', name: 'Panadería Lupita', ownerEmail: 'lupita@ejemplo.mx' },
     ]);
+  });
+
+  it('dos envíos del MISMO formulario dan la misma empresa, no dos', async () => {
+    // El mismo defecto que el del webhook, con menos dinero de por medio: si el
+    // slug se derivara preguntando "¿está ocupado?", el segundo envío —un doble
+    // clic, un reintento del navegador— vería ocupado el slug que él mismo creó
+    // y crearía `panaderia-lupita-2`. Con `provision()` de árbitro, cae en la
+    // misma empresa.
+    const enviar = () =>
+      postJson(
+        '/billing/alta-gratis',
+        { businessName: 'Panadería Lupita' },
+        cabeceras('lupita@ejemplo.mx'),
+      );
+
+    const primera = await leerJson<{ tenantId: string; slug: string; creado: boolean }>(
+      await enviar(),
+    );
+    const segunda = await leerJson<{ tenantId: string; slug: string; creado: boolean }>(
+      await enviar(),
+    );
+
+    expect(primera).toMatchObject({ slug: 'panaderia-lupita', creado: true });
+    expect(segunda).toMatchObject({ slug: 'panaderia-lupita', creado: false });
+    expect(segunda.tenantId).toBe(primera.tenantId);
+    expect(db.tabla('tenants')).toHaveLength(1);
+  });
+
+  it('pero OTRA persona con el mismo nombre de negocio sí obtiene su propia empresa', async () => {
+    await postJson(
+      '/billing/alta-gratis',
+      { businessName: 'Panadería Lupita' },
+      cabeceras('lupita@ejemplo.mx'),
+    );
+    const r = await postJson(
+      '/billing/alta-gratis',
+      { businessName: 'Panadería Lupita' },
+      cabeceras('otra@ejemplo.mx'),
+    );
+    const cuerpo = await leerJson<{ slug: string; creado: boolean }>(r);
+
+    expect(cuerpo).toMatchObject({ slug: 'panaderia-lupita-2', creado: true });
+    expect(db.tabla('tenants')).toHaveLength(2);
   });
 
   it('no cobra: no deja fila en subscriptions', async () => {

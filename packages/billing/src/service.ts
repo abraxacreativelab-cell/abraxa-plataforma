@@ -19,8 +19,8 @@
 import { usePort, PlatformError } from '@abraxa/db';
 import { centavosADecimal, isSellablePlan, PLAN_DE_PAGO } from './catalog';
 import { gateway, type SesionDePago } from './gateway';
-import { derivarSlug } from './slug';
-import { guardarSuscripcion, slugOcupado } from './store';
+import { candidatosDeSlug } from './slug';
+import { guardarSuscripcion } from './store';
 
 /** Lo que el webhook necesita saber para mandar el correo, después del 200. */
 export interface ResultadoDeAlta {
@@ -36,8 +36,9 @@ export interface ResultadoDeAlta {
  * Sesión pagada → tenant.
  *
  * Idempotente por partida doble: la bitácora de eventos descarta el reintento
- * antes de llegar aquí, y si aun así llega, `provision()` es idempotente por
- * slug (H2) y el upsert de la suscripción choca contra `UNIQUE (tenant_id)`.
+ * antes de llegar aquí, y si aun así llega —porque el intento anterior murió a
+ * la mitad y hay que reprocesarlo— `provisionarEmpresa()` vuelve a caer en el
+ * MISMO tenant y el upsert de la suscripción choca contra `UNIQUE (tenant_id)`.
  * Ninguna de las dos redes basta sola — la primera no cubre dos eventos
  * distintos del mismo pago, la segunda no cubre el correo duplicado.
  */
@@ -49,16 +50,7 @@ export async function altaDesdeSesion(sessionId: string): Promise<ResultadoDeAlt
 export async function altaDesdeSesionPagada(sesion: SesionDePago): Promise<ResultadoDeAlta> {
   const { ownerEmail, businessName, planId } = validarSesion(sesion);
 
-  // El slug se deriva ANTES de llamar a provision() porque `slugOcupado` es
-  // fail-closed: si la base no contesta, esto lanza aquí y Stripe reintenta,
-  // en vez de mandar un slug inventado a una función transaccional.
-  const slug = await derivarSlug(businessName, slugOcupado);
-
-  const { tenantId, created } = await usePort('tenancy').provision({
-    slug,
-    name: businessName,
-    ownerEmail,
-  });
+  const { tenantId, slug, created } = await provisionarEmpresa({ businessName, ownerEmail });
 
   // Después del alta. Si esto truena, el webhook no devuelve 200 y Stripe
   // reintenta: `provision()` devolverá el mismo tenant y el upsert cerrará el
@@ -75,6 +67,100 @@ export async function altaDesdeSesionPagada(sesion: SesionDePago): Promise<Resul
   });
 
   return { tenantId, slug, creado: created, ownerEmail, businessName };
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Nombre del negocio → empresa creada, con el primer slug que la base acepte.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  ── El bug que esta función existe para no volver a tener ──────────────────
+ *
+ *  Antes esto eran dos pasos: preguntarle a la base si el slug estaba ocupado
+ *  y luego llamar a `provision()` con el que estuviera libre. Pasaba typecheck,
+ *  lint y una prueba que afirmaba justo lo contrario de lo que hacía en
+ *  producción, y creaba una empresa de más por cada reproceso de un pago:
+ *
+ *    Lupita paga $25 · Stripe manda `evt_1`.
+ *    1er intento → `panaderia-lupita` libre → se CREA el tenant → falla el
+ *      upsert de la suscripción (un blip de red) → 500. Correcto: Stripe
+ *      tiene que reintentar.
+ *    Stripe reintenta el MISMO `evt_1` → `panaderia-lupita` ahora está
+ *      OCUPADO, porque lo ocupó el intento anterior → `panaderia-lupita-2` →
+ *      SEGUNDA empresa. Un pago, dos empresas, la suscripción colgada de la
+ *      segunda y la primera huérfana pero funcional. Si falla N veces, N
+ *      empresas.
+ *
+ *  ── Por qué así sí ─────────────────────────────────────────────────────────
+ *
+ *  El árbitro de "ocupado" es el DUEÑO, no la existencia de la fila, y quien
+ *  sabe distinguirlo es `app.provision_tenant` (migración 011), que además lo
+ *  hace dentro de la transacción:
+ *
+ *    · slug libre                     → lo crea, `created: true`
+ *    · slug MÍO (mismo owner)         → devuelve el MISMO tenant, `created: false`
+ *    · slug de OTRO (ABX01)           → CONFLICT (409)
+ *
+ *  Así que aquí no se pregunta nada de antemano: se intenta el candidato y sólo
+ *  se avanza al siguiente sufijo cuando la base dice que ese slug es de otra
+ *  persona. Un reintento del mismo pago vuelve a caer en el mismo tenant con
+ *  `created: false`, que es exactamente lo que el contrato del port promete.
+ *
+ *  Y de paso desaparece la ventana entre el "¿está libre?" y el INSERT: dos
+ *  altas simultáneas del mismo nombre ya no dependen de que el SELECT las vea.
+ *
+ *  Cualquier error que NO sea CONFLICT se relanza tal cual: un fallo de red no
+ *  puede disfrazarse de colisión y mandarnos a crear `panaderia-lupita-2`.
+ */
+export async function provisionarEmpresa(i: {
+  businessName: string;
+  ownerEmail: string;
+}): Promise<{ tenantId: string; slug: string; created: boolean }> {
+  const candidatos = candidatosDeSlug(i.businessName);
+  const tenancy = usePort('tenancy');
+
+  let ultimoConflicto: PlatformError | null = null;
+
+  for (const slug of candidatos) {
+    try {
+      const { tenantId, created } = await tenancy.provision({
+        slug,
+        name: i.businessName,
+        ownerEmail: i.ownerEmail,
+      });
+      return { tenantId, slug, created };
+    } catch (e) {
+      if (!esSlugDeOtroDueno(e)) throw e;
+      ultimoConflicto = e;
+    }
+  }
+
+  // Todos los candidatos son de otra gente. Es un caso absurdo (101 negocios
+  // llamados igual) y lanzar es lo correcto: Stripe reintenta, el evento queda
+  // en la bitácora con el motivo y esto lo termina un humano. Inventar un slug
+  // con uuid rompería el criterio #5 del handoff sin avisarle a nadie.
+  throw new PlatformError(
+    'CONFLICT',
+    `No quedó ningún slug libre para "${i.businessName}": los ${candidatos.length} ` +
+      'candidatos ya son de otras empresas. El alta necesita ojos humanos.',
+    {
+      details: { businessName: i.businessName, candidatos: candidatos.length },
+      // El último rechazo de la base, para no perder el mensaje real detrás
+      // del resumen.
+      ...(ultimoConflicto ? { cause: ultimoConflicto } : {}),
+    },
+  );
+}
+
+/**
+ * `true` si `provision()` rechazó el slug porque ya es de OTRO dueño.
+ *
+ * Es el contrato del port —"si el slug existe y pertenece a otra persona,
+ * lanza CONFLICT"—, no un detalle de la implementación de H2: se mira el
+ * `code` compartido, no el SQLSTATE `ABX01` que vive del otro lado.
+ */
+function esSlugDeOtroDueno(e: unknown): e is PlatformError {
+  return PlatformError.is(e) && e.code === 'CONFLICT';
 }
 
 /**

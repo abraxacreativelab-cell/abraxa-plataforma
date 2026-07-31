@@ -61,6 +61,53 @@ comentarios:
 
 ---
 
+## La regla 6, que costó una auditoría descubrir
+
+**Reprocesar un pago tiene que caer en la MISMA empresa. El árbitro de si un
+slug está ocupado es el DUEÑO, no la existencia de la fila.**
+
+La regla 2 abre a propósito el camino del reproceso: un evento que quedó a
+medias (`processed_at` nulo) se vuelve a procesar en lugar de darse por bueno.
+Ese camino tiene que ser idempotente de verdad, y la primera versión no lo era:
+
+```
+Lupita paga $25 · Stripe manda evt_1
+  1er intento → ¿'panaderia-lupita' ocupado? NO → se CREA el tenant
+              → falla el upsert de la suscripción (blip de red) → 500  ✅ correcto
+  reintento   → ¿'panaderia-lupita' ocupado? SÍ ← lo ocupó ÉL MISMO
+              → 'panaderia-lupita-2' → SEGUNDA EMPRESA con un solo pago  ❌
+```
+
+Con N fallos, N empresas: la suscripción colgada de la última, las anteriores
+huérfanas pero funcionales, y el correo de bienvenida mandando a la persona a
+una URL distinta de la que la landing le enseñó en la vista previa.
+
+El arreglo es que `slug.ts` ya no pregunta nada — sólo genera candidatos
+(`candidatosDeSlug`) — y `provisionarEmpresa()` (`service.ts`) los prueba en
+orden contra `app.provision_tenant`, que es el único que sabe de quién es cada
+slug y lo decide **dentro de su transacción**:
+
+| respuesta de `provision()` | qué hace el alta |
+|---|---|
+| slug libre → `created: true` | listo, es una empresa nueva |
+| slug del MISMO dueño → `created: false` | listo, es el mismo tenant: reproceso correcto |
+| slug de OTRO dueño → `CONFLICT` (ABX01) | avanza al siguiente sufijo |
+| cualquier otro error | se relanza tal cual — un fallo de red **no** se disfraza de colisión |
+
+De paso desaparece la ventana entre el «¿está libre?» y el INSERT.
+`POST /billing/alta-gratis` usa la misma función y por la misma razón: un doble
+clic en el formulario ya no crea dos empresas.
+
+**Y la lección de pruebas, que es la mitad del hallazgo:** esto pasó typecheck,
+lint, test y el gate de propiedad porque el `provision()` falso nunca escribía
+en la tabla `tenants` del doble, así que «¿ocupado?» contestaba `false` en
+todas las pruebas y la aserción «sigue habiendo una sola empresa» era cierta
+del doble y falsa de Postgres. El doble vive ahora en
+`src/pruebas/tenancy-doble.ts` e implementa las tres respuestas de la migración
+011. Un doble que no puede fallar no prueba nada.
+
+---
+
 ## Sin llaves de Stripe
 
 Si no hay `STRIPE_SECRET_KEY`, el gateway arranca en **modo doble** y lo avisa
@@ -136,13 +183,14 @@ desarrollo, con el web en `:3000` y la API en `:3100`, hay que ponerla en
 | Archivo | Qué es |
 |---|---|
 | `catalog.ts` | qué planes existen y qué incluyen — **la decisión** |
-| `slug.ts` | del nombre del negocio a la URL, cumpliendo los CHECK de H2 |
+| `slug.ts` | candidatos de slug, cumpliendo los CHECK de H2 — **no decide nada** |
 | `gateway.ts` | la única frontera con Stripe · doble sin llaves |
 | `store.ts` | el único lugar con acceso a datos, y por qué ahí sí va `adminDb()` |
-| `service.ts` | el `BillingPort`: sesión pagada → tenant |
+| `service.ts` | el `BillingPort`: sesión pagada → tenant · `provisionarEmpresa()` |
 | `correo.ts` | la bienvenida, que nunca puede tumbar el webhook |
 | `http.ts` | las rutas |
 | `pruebas/fake-db.ts` | doble en memoria de PostgREST, con violación de unicidad real |
+| `pruebas/tenancy-doble.ts` | doble de `provision()` con la regla del dueño de la migración 011 |
 
 ---
 

@@ -1,11 +1,15 @@
 /**
  * La capa de datos. Dos cosas que sólo se ven aquí:
  *
- *   · `slugOcupado` es FAIL-CLOSED. Si devolviera `false` cuando la consulta
- *     falla, `derivarSlug` entregaría un slug ya tomado y el alta moriría
- *     contra el UNIQUE — con el pago ya cobrado.
+ *   · La idempotencia del webhook vive en el `UNIQUE (stripe_event_id)`, no en
+ *     un SELECT-luego-INSERT: se inserta primero y se pregunta después.
  *   · `syncPlanCatalog` NUNCA borra. Un plan que desaparece de `app.plans` se
  *     lleva por delante el `REFERENCES` de toda suscripción que lo use.
+ *
+ * Aquí VIVÍA `slugOcupado`, con su prueba de fail-closed. Se fue con el defecto
+ * que provocaba: preguntar si la fila existe no es la pregunta correcta —la
+ * correcta es de quién es— y por eso el reproceso de un pago creaba una segunda
+ * empresa. Quien decide ahora es `app.provision_tenant`; ver `service.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlatformError, __setClientForTests } from '@abraxa/db';
@@ -17,7 +21,6 @@ import {
   marcarError,
   marcarProcesado,
   registrarEvento,
-  slugOcupado,
   syncPlanCatalog,
 } from './store';
 
@@ -80,20 +83,6 @@ describe('registrarEvento', () => {
     await expect(
       registrarEvento({ stripeEventId: 'evt_2', type: 't', payload: {} }),
     ).rejects.toMatchObject({ code: 'INTERNAL', retryable: true });
-  });
-});
-
-describe('slugOcupado — fail-closed', () => {
-  it('dice la verdad cuando la base contesta', async () => {
-    db.sembrar('tenants', [{ slug: 'panaderia-lupita' }]);
-    expect(await slugOcupado('panaderia-lupita')).toBe(true);
-    expect(await slugOcupado('tacos-el-gordo')).toBe(false);
-  });
-
-  it('LANZA en vez de decir "libre" cuando la consulta falla', async () => {
-    db.fallarEn = { tabla: 'tenants', mensaje: 'se cayó la red' };
-    // Un `false` aquí sería un slug ocupado entregado como libre.
-    await expect(slugOcupado('panaderia-lupita')).rejects.toThrow(PlatformError);
   });
 });
 

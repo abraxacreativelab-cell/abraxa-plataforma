@@ -92,25 +92,43 @@ export function esSlugValido(slug: string): boolean {
   return SLUG_PATRON.test(slug) && !SLUGS_RESERVADOS.has(slug);
 }
 
+/** Tope de candidatos. Cada uno cuesta un viaje a la base en el peor caso. */
+export const MAX_CANDIDATOS = 100;
+
 /**
- * El slug definitivo: legible, válido y libre.
+ * Los slugs que este nombre puede tener, en orden de preferencia.
  *
- * `estaOcupado` lo inyecta quien llama para que esto se pueda probar sin base
- * de datos y para que el webhook no tenga que conocer el esquema.
+ * `panaderia-lupita`, `panaderia-lupita-2`, `panaderia-lupita-3`… Todos
+ * legibles — que es el criterio #5 del handoff — y todos válidos contra los
+ * CHECK de `app.tenants`. Los reservados y los que no pasarían el patrón se
+ * saltan en silencio: "Stripe" (el negocio de alguien) empieza en `stripe-2`.
  *
- * Dos negocios con el mismo nombre salen `panaderia-lupita` y
- * `panaderia-lupita-2`. Ambos legibles — que es el criterio #5 del handoff.
+ * ── Por qué esto ya NO pregunta "¿está ocupado?" ───────────────────────────
  *
- * @param maxIntentos corta la búsqueda; sin tope, un `estaOcupado` que siempre
- *   diga `true` (una caída de red mal manejada) se vuelve un bucle infinito
+ * La versión anterior recibía un `estaOcupado(slug)` y devolvía el primer
+ * libre. Parecía correcta y tenía prueba, y creaba una SEGUNDA empresa por
+ * cada reproceso de un pago:
+ *
+ *   1er intento del webhook: `panaderia-lupita` libre → se crea el tenant →
+ *   falla el paso siguiente (un blip de red al guardar la suscripción) → 500.
+ *   Stripe reintenta EL MISMO evento → `panaderia-lupita` ahora está ocupado
+ *   (lo ocupó él mismo) → `panaderia-lupita-2` → segunda empresa, con un solo
+ *   pago. Si el fallo se repite N veces, N empresas.
+ *
+ * El árbitro de "ocupado" no puede ser la existencia de la fila: tiene que ser
+ * el DUEÑO. Y eso ya lo sabe `app.provision_tenant` (migración 011), que
+ * devuelve el mismo tenant si el dueño coincide y ABX01 si es de otro. Así que
+ * esta función se quedó pura —sólo genera candidatos— y quien da de alta
+ * prueba en orden hasta que la base acepte uno: ver `provisionarEmpresa()` en
+ * `service.ts`.
+ *
+ * @param maxIntentos cuántos candidatos generar. Es el tope de reintentos del
+ *   alta; sin él, un nombre absurdamente colisionado se volvería un bucle
  *   dentro de un webhook de pago.
  */
-export async function derivarSlug(
-  nombre: string,
-  estaOcupado: (slug: string) => Promise<boolean>,
-  maxIntentos = 100,
-): Promise<string> {
+export function candidatosDeSlug(nombre: string, maxIntentos = MAX_CANDIDATOS): string[] {
   const base = alargar(slugify(nombre));
+  const candidatos: string[] = [];
 
   for (let n = 1; n <= maxIntentos; n++) {
     const candidato = n === 1 ? base : conSufijo(base, n);
@@ -118,14 +136,10 @@ export async function derivarSlug(
     // reventar. "Stripe" (el negocio de alguien) → "stripe-2".
     if (SLUGS_RESERVADOS.has(candidato)) continue;
     if (!esSlugValido(candidato)) continue;
-    if (!(await estaOcupado(candidato))) return candidato;
+    candidatos.push(candidato);
   }
 
-  throw new Error(
-    `No se encontró un slug libre para "${nombre}" en ${maxIntentos} intentos. ` +
-      'O hay una colisión de nombres absurda, o `estaOcupado` está fallando ' +
-      'y devolviendo true por error — revísalo antes de subir el tope.',
-  );
+  return candidatos;
 }
 
 /** `panaderia-lupita` + 2 → `panaderia-lupita-2`, respetando el largo máximo. */

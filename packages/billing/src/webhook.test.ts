@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlatformError, __clearPorts, __setClientForTests, registerPort } from '@abraxa/db';
 import { resetEnvCache } from '@abraxa/config';
 import { FakeDb } from './pruebas/fake-db';
+import { crearProvisionDoble, type ProvisionDoble } from './pruebas/tenancy-doble';
 import { GatewayDoble, __setGatewayForTests, firmarComoStripe } from './gateway';
 import type { SesionDePago } from './gateway';
 
@@ -35,14 +36,14 @@ let servidor: Server;
 let base: string;
 let quitarCliente: () => void;
 let quitarGateway: () => void;
-let provisionLlamadas: Array<{ slug: string; name: string; ownerEmail: string }>;
 
-/** Lo que `provision()` va a hacer en cada prueba. */
-let provisionImpl: (i: {
-  slug: string;
-  name: string;
-  ownerEmail: string;
-}) => Promise<{ tenantId: string; created: boolean }>;
+/**
+ * El doble de `provision()`. Escribe de verdad en `db.tabla('tenants')` y
+ * aplica la regla del dueño de la migración 011 — ver `pruebas/tenancy-doble.ts`
+ * para la historia larga de por qué el doble anterior dejó pasar un bug alto.
+ */
+let tenancy: ProvisionDoble;
+let provisionLlamadas: Array<{ slug: string; name: string; ownerEmail: string }>;
 
 beforeEach(async () => {
   process.env.NODE_ENV = 'test';
@@ -60,15 +61,12 @@ beforeEach(async () => {
   doble = new GatewayDoble(SECRETO);
   quitarGateway = __setGatewayForTests(doble);
 
-  provisionLlamadas = [];
-  provisionImpl = async ({ slug }) => ({ tenantId: `tenant-de-${slug}`, created: true });
+  tenancy = crearProvisionDoble(db);
+  provisionLlamadas = tenancy.llamadas;
 
   __clearPorts();
   registerPort('tenancy', {
-    provision: async (i) => {
-      provisionLlamadas.push(i);
-      return provisionImpl(i);
-    },
+    provision: (i) => tenancy.provision(i),
     contextFor: async () => {
       throw new Error('no se usa');
     },
@@ -294,49 +292,192 @@ describe('criterio 2 — idempotencia', () => {
   });
 
   it('dos eventos DISTINTOS del mismo pago siguen dando un solo tenant', async () => {
-    // La segunda red: `provision()` es idempotente por slug (H2) y la
-    // suscripción choca contra UNIQUE (tenant_id).
+    // La segunda red: `provision()` es idempotente por slug PARA EL MISMO
+    // DUEÑO (H2) y la suscripción choca contra UNIQUE (tenant_id).
     doble.sembrarSesion(SESION_PAGADA);
-    provisionImpl = async ({ slug }) => ({
-      tenantId: `tenant-de-${slug}`,
-      created: provisionLlamadas.length === 1,
-    });
 
     await mandarWebhook(eventoCheckout(SESION_PAGADA.id, 'evt_uno'));
     await mandarWebhook(eventoCheckout(SESION_PAGADA.id, 'evt_dos'));
 
     expect(provisionLlamadas).toHaveLength(2);
     expect(db.tabla('billing_events')).toHaveLength(2);
-    // Una sola empresa y una sola suscripción.
-    expect(new Set(provisionLlamadas.map((p) => p.slug)).size).toBe(1);
+    // Una sola empresa y una sola suscripción. Ahora se afirma contra la
+    // tabla, no contra los argumentos de las llamadas: es la fila la que
+    // demuestra que no se creó una empresa de más.
+    expect(db.tabla('tenants')).toHaveLength(1);
+    expect(db.tabla('tenants')[0]!.slug).toBe('panaderia-lupita');
     expect(db.tabla('subscriptions')).toHaveLength(1);
+  });
+});
+
+describe('el reproceso NO puede crear una segunda empresa', () => {
+  /*
+   * ── El defecto que estas pruebas cierran ──────────────────────────────────
+   *
+   * El carril descubrió, con razón, que un alta que quedó a medias no se puede
+   * dar por buena sólo porque la fila del evento exista, y abrió a propósito el
+   * camino de reproceso. Ese camino NO era idempotente:
+   *
+   *   `derivarSlug()` volvía a preguntarle a la base si `panaderia-lupita`
+   *   estaba ocupado, la base decía que SÍ —lo había ocupado el intento
+   *   anterior— y el reproceso creaba `panaderia-lupita-2`: una segunda
+   *   empresa, para un solo pago de $25.
+   *
+   * No lo vio nadie porque el `provision()` falso nunca escribía en la tabla
+   * `tenants` del doble, así que "¿ocupado?" contestaba `false` siempre y la
+   * aserción «sigue habiendo una sola empresa» era cierta del doble y falsa de
+   * Postgres.
+   */
+
+  it('un alta que murió a la mitad se REPROCESA en la misma empresa, no en una nueva', async () => {
+    doble.sembrarSesion(SESION_PAGADA);
+
+    // 1er intento: el tenant se crea y el upsert de la suscripción se cae.
+    db.fallarEn = { tabla: 'subscriptions', mensaje: 'se cayó a la mitad' };
+    const primera = await mandarWebhook(eventoCheckout());
+
+    expect(primera.status).not.toBe(200);
+    expect(db.tabla('tenants')).toHaveLength(1);
+    expect(db.tabla('subscriptions')).toHaveLength(0);
+
+    // Stripe reintenta EL MISMO evento (o soporte lo reenvía a mano).
+    const segunda = await mandarWebhook(eventoCheckout());
+    const cuerpo = await segunda.json();
+
+    expect(segunda.status).toBe(200);
+    // Lo único que importa: UNA empresa, la misma, con el slug que la landing
+    // le prometió en la vista previa.
+    expect(db.tabla('tenants')).toHaveLength(1);
+    expect(db.tabla('tenants')[0]!.slug).toBe('panaderia-lupita');
+    expect(cuerpo).toMatchObject({
+      slug: 'panaderia-lupita',
+      tenantId: 'tenant-de-panaderia-lupita',
+      // No es un alta nueva: es la misma empresa, terminada.
+      creado: false,
+    });
+    // Y la suscripción quedó colgada del tenant que sí existe.
+    expect(db.tabla('subscriptions')).toHaveLength(1);
+    expect(db.tabla('subscriptions')[0]!.tenant_id).toBe('tenant-de-panaderia-lupita');
+  });
+
+  it('tres fallos seguidos NO dejan tres empresas', async () => {
+    doble.sembrarSesion(SESION_PAGADA);
+
+    for (let i = 0; i < 3; i++) {
+      db.fallarEn = { tabla: 'subscriptions', mensaje: `blip ${i}` };
+      const r = await mandarWebhook(eventoCheckout());
+      expect(r.status).not.toBe(200);
+    }
+
+    const final = await mandarWebhook(eventoCheckout());
+
+    expect(final.status).toBe(200);
+    expect(db.tabla('tenants')).toHaveLength(1);
+    expect(db.tabla('subscriptions')).toHaveLength(1);
+    // Y el correo de bienvenida sigue llevando al slug correcto.
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('https://mi.abraxa.club/bienvenida?empresa=panaderia-lupita'),
+    );
+  });
+
+  it('el correo del reproceso NO manda a la persona a una empresa distinta', async () => {
+    doble.sembrarSesion(SESION_PAGADA);
+
+    db.fallarEn = { tabla: 'subscriptions', mensaje: 'se cayó a la mitad' };
+    await mandarWebhook(eventoCheckout());
+    await mandarWebhook(eventoCheckout());
+
+    const { ultimoEnvio } = await import('./http');
+    await ultimoEnvio;
+
+    const enlaces = vi
+      .mocked(console.warn)
+      .mock.calls.flat()
+      .filter((a): a is string => typeof a === 'string' && a.includes('/bienvenida?empresa='));
+
+    expect(enlaces.length).toBeGreaterThan(0);
+    for (const enlace of enlaces) {
+      expect(enlace).toContain('empresa=panaderia-lupita');
+      expect(enlace).not.toContain('panaderia-lupita-2');
+    }
+  });
+
+  it('pero un slug de OTRO dueño sí saca al que paga al siguiente sufijo', async () => {
+    // La resolución de colisiones no se pierde: sólo deja de dispararse
+    // contra uno mismo. Otra empresa ya se llama así.
+    tenancy.sembrarEmpresa({ slug: 'panaderia-lupita', ownerEmail: 'otra@ejemplo.mx' });
+    doble.sembrarSesion(SESION_PAGADA);
+
+    const r = await mandarWebhook(eventoCheckout());
+    const cuerpo = await r.json();
+
+    expect(r.status).toBe(200);
+    expect(cuerpo).toMatchObject({ slug: 'panaderia-lupita-2', creado: true });
+    expect(db.tabla('tenants')).toHaveLength(2);
+    // Y el intento contra el slug ajeno quedó registrado: se probó y la base
+    // lo rechazó, que es justo el orden que se quería.
+    expect(provisionLlamadas.map((p) => p.slug)).toEqual([
+      'panaderia-lupita',
+      'panaderia-lupita-2',
+    ]);
+  });
+
+  it('si TODOS los candidatos son de otros, no se inventa nada: falla y lo ve un humano', async () => {
+    tenancy.cuando(async () => {
+      throw new PlatformError('CONFLICT', 'El slug ya está tomado por otra empresa.');
+    });
+    doble.sembrarSesion(SESION_PAGADA);
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).toBe(409);
+    expect(db.tabla('subscriptions')).toHaveLength(0);
+    expect(db.tabla('billing_events')[0]!.error).toContain('ningún slug libre');
+    expect(db.tabla('billing_events')[0]!.processed_at).toBeFalsy();
+  });
+
+  it('un fallo que NO es de slug se relanza tal cual — no manda a crear una empresa con sufijo', async () => {
+    // Sin esto, un blip de red disfrazado de colisión llevaría a
+    // `panaderia-lupita-2` de todas formas.
+    tenancy.cuando(async () => {
+      throw new PlatformError('INTERNAL', 'la base no contestó', { retryable: true });
+    });
+    doble.sembrarSesion(SESION_PAGADA);
+
+    const r = await mandarWebhook(eventoCheckout());
+
+    expect(r.status).toBe(500);
+    // UNA sola llamada: no se recorrieron los 100 candidatos.
+    expect(provisionLlamadas).toHaveLength(1);
+    expect(db.tabla('billing_events')[0]!.error).toContain('la base no contestó');
   });
 });
 
 describe('criterio 4 — si el alta falla, NO 200', () => {
   it('provision() que truena deja que Stripe reintente', async () => {
     doble.sembrarSesion(SESION_PAGADA);
-    provisionImpl = async () => {
+    tenancy.cuando(async () => {
       throw new PlatformError('INTERNAL', 'la base no contestó', { retryable: true });
-    };
+    });
 
     const r = await mandarWebhook(eventoCheckout());
 
     expect(r.status).not.toBe(200);
     expect(r.status).toBeGreaterThanOrEqual(400);
     expect(db.tabla('subscriptions')).toHaveLength(0);
+    expect(db.tabla('tenants')).toHaveLength(0);
   });
 
   it('anota el motivo en la bitácora antes de relanzar', async () => {
     doble.sembrarSesion(SESION_PAGADA);
-    provisionImpl = async () => {
-      throw new PlatformError('CONFLICT', 'el slug ya es de otro dueño');
-    };
+    tenancy.cuando(async () => {
+      throw new PlatformError('INTERNAL', 'la conexión con la base se cortó');
+    });
 
     await mandarWebhook(eventoCheckout());
 
     const evento = db.tabla('billing_events')[0]!;
-    expect(evento.error).toContain('el slug ya es de otro dueño');
+    expect(evento.error).toContain('la conexión con la base se cortó');
     expect(evento.processed_at).toBeFalsy();
     expect(evento.attempts).toBe(1);
   });
@@ -361,8 +502,11 @@ describe('criterio 4 — si el alta falla, NO 200', () => {
     // Y esta vez sí terminó.
     expect(db.tabla('subscriptions')).toHaveLength(1);
     expect(db.tabla('billing_events')[0]!.processed_at).toBeTruthy();
-    // Sigue habiendo UNA sola empresa: provision() es idempotente por slug.
-    expect(new Set(provisionLlamadas.map((p) => p.slug)).size).toBe(1);
+    // Sigue habiendo UNA sola empresa. Se afirma contra la TABLA, no contra
+    // los argumentos de las llamadas: la versión anterior de esta aserción
+    // miraba `provisionLlamadas` y por eso pasaba en verde con el bug puesto.
+    expect(db.tabla('tenants')).toHaveLength(1);
+    expect(db.tabla('tenants')[0]!.slug).toBe('panaderia-lupita');
   });
 
   it('guardar la suscripción que falla tampoco devuelve 200', async () => {
