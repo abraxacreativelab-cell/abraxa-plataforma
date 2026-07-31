@@ -7,7 +7,7 @@
  * flaky y el criterio, una opinión.
  */
 import { describe, expect, it } from 'vitest';
-import { areasPara, construirMapa, hitosPara, mensajeDeEntrega, tipoDeIndustria } from './mapa';
+import { areasPara, construirMapa, hitosPara, mensajeDeEntrega } from './mapa';
 import type { EstadoNegocio } from '../types';
 
 /** Solopreneur de servicios, apenas arrancando, sin nadie más. */
@@ -139,17 +139,16 @@ describe('el roadmap', () => {
   });
 });
 
-describe('el giro', () => {
-  it('se normaliza a slug sin acentos', () => {
-    expect(tipoDeIndustria({ giro: 'Panadería Artesanal' })).toBe('panaderia-artesanal');
-    expect(tipoDeIndustria({ giro: '  taller mecánico / hojalatería ' })).toBe(
-      'taller-mecanico-hojalateria',
-    );
-  });
-
-  it('sin giro no inventa uno', () => {
-    expect(tipoDeIndustria({})).toBeNull();
-    expect(tipoDeIndustria({ giro: '   ' })).toBeNull();
+/**
+ * El giro ya no se prueba aquí: dejó de ser una normalización de texto y pasó a
+ * ser una resolución contra `app.industry_templates`. Vive en `industria.ts` y
+ * se prueba en `industria.test.ts` — incluido por qué un slug inventado era
+ * peor que un `null`.
+ */
+describe('el giro no se inventa desde el mapa', () => {
+  it('sin catálogo, `industryType` sale null y no un slug', () => {
+    expect(construirMapa(TALLER).industryType).toBeNull();
+    expect(construirMapa({ giro: 'Panadería Artesanal' }).industryType).toBeNull();
   });
 });
 

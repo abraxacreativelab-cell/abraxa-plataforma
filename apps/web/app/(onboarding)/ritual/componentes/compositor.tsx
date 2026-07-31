@@ -14,6 +14,20 @@ import { Button, Icon, cn } from '@abraxa/ui';
  *    adentro y tiene que sentirse así.
  *  · **normal** — un compositor de chat, con "guardar y seguir después" SIEMPRE
  *    a la vista. Esa promesa se cumple estando visible, no en la letra chica.
+ *
+ * ── Lo que escribió no se pierde si el turno falla (auditoría PR #8) ───────
+ *
+ * `ritual.tsx` promete, en su encabezado, que «si el turno falla, se retira [la
+ * burbuja] y el texto se le devuelve». La burbuja sí se retiraba; el texto no
+ * volvía a ninguna parte. Se limpiaba el campo ANTES de llamar a `onEnviar` y
+ * nadie lo restauraba, así que un error de red a media entrevista se llevaba el
+ * párrafo que la persona acababa de escribir — y la pantalla, encima, le decía
+ * "tu avance está guardado".
+ *
+ * Se vacía optimista (esperar seis segundos a ver tu campo limpio se siente
+ * roto) y se devuelve si `onEnviar` no pudo. Y se devuelve **sólo si el campo
+ * sigue vacío**: si mientras tanto empezó a escribir otra cosa, pisarle lo
+ * nuevo con lo viejo sería el mismo error al revés.
  */
 export function Compositor({
   bautizo,
@@ -25,17 +39,26 @@ export function Compositor({
   bautizo: boolean;
   ocupado: boolean;
   pausada: boolean;
-  onEnviar: (texto: string) => void;
+  /** Resuelve `false` si el turno no pudo mandarse: el texto se restaura. */
+  onEnviar: (texto: string) => Promise<boolean> | boolean;
   onPausar: () => void;
 }) {
   const [texto, setTexto] = React.useState('');
   const campo = React.useRef<HTMLTextAreaElement>(null);
+  const campoBautizo = React.useRef<HTMLInputElement>(null);
 
   const enviar = (): void => {
     const limpio = texto.trim();
     if (!limpio || ocupado) return;
     setTexto('');
-    onEnviar(limpio);
+
+    void Promise.resolve(onEnviar(limpio)).then((llego) => {
+      if (llego !== false) return;
+      setTexto((actual) => (actual.trim() ? actual : limpio));
+      // Devolverle el texto sin devolverle el cursor lo deja buscando dónde
+      // estaba. El foco es parte de la restauración, no un adorno.
+      (campo.current ?? campoBautizo.current)?.focus();
+    });
   };
 
   // Enter manda, Shift+Enter salta de línea. Es lo que la gente espera de un
@@ -62,6 +85,7 @@ export function Compositor({
         </p>
         <div className="flex w-full max-w-md items-center gap-3 border-b border-[hsl(var(--glow)/0.45)] pb-3">
           <input
+            ref={campoBautizo}
             autoFocus
             value={texto}
             onChange={(e) => setTexto(e.target.value)}

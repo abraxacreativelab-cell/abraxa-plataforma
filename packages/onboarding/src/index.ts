@@ -46,6 +46,7 @@ export {
 } from './session/ritual';
 
 export {
+  CONFLICTO_DE_TURNO,
   abrirSesion,
   cargarSesion,
   guardarTurno,
@@ -75,8 +76,15 @@ export {
   hitosPara,
   mensajeDeEntrega,
   resumenDelNegocio,
-  tipoDeIndustria,
 } from './synthesis/mapa';
+export {
+  elegirPlantilla,
+  plantillasDeGiro,
+  slugDelGiro,
+  tipoDeIndustria,
+  type GiroResuelto,
+  type PlantillaDeGiro,
+} from './synthesis/industria';
 export {
   aplicarBlueprint,
   aplicarBlueprintsPendientes,

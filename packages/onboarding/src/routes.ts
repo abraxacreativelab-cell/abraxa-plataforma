@@ -3,21 +3,31 @@
  *
  * ── Sobre el contexto ──────────────────────────────────────────────────────
  *
- * `TenantContext` se arma con `TenancyPort.contextFor()` desde una sesión
- * verificada server-side. Ese port es de H2 y todavía no aterriza, así que
- * estas rutas responden 501 nombrando a quién se espera — eso lo hace `usePort`
- * de H1 solo, sin que aquí haya que escribir nada.
+ * `TenantContext` se arma con `contextoDePeticion(req)` de `@abraxa/db`, y NO
+ * con un resolvedor escrito aquí. Ésa es la única forma correcta: hace las tres
+ * puertas en orden —proxy verificado, identidad presente, membresía validada
+ * por H2— y ninguna se puede saltar por accidente.
  *
- * Lo que NO se hace es leer el tenant de un header y seguir adelante. Es
- * tentador "mientras tanto", y es exactamente cómo se cuela un agujero de
- * aislamiento a producción: ese 403 es lo único que impide que el cliente A lea
- * los datos del B.
+ * ── Por qué ya no hay un `contextoDe` en este archivo (auditoría PR #8) ────
+ *
+ * Este archivo tenía el suyo, y estaba mal de la misma forma en que lo estaban
+ * los de otros tres carriles: leía `x-user-email` crudo y se lo pasaba a
+ * `usePort('tenancy').contextFor()` SIN comprobar antes el secreto compartido
+ * del BFF. Un header es texto libre; lo pone cualquiera con un `curl`. Lo único
+ * que hacía que "no pasara nada" era que el port de H2 todavía no estaba
+ * registrado — y H2 mergeó (PR #6). Es decir: la defensa no era el código, era
+ * un accidente de calendario que ya venció.
+ *
+ * Con la cabecera forjada, un atacante habría podido leer el Ritual completo de
+ * cualquier empresa: su giro, su ticket, su margen, sus dolores y su
+ * conversación literal con el agente. Y además ESCRIBIR en él.
+ *
+ * La pieza canónica cierra eso en un solo archivo para los catorce carriles.
+ * Ver `packages/db/src/http/tenant-context.ts` y `routes.test.ts`.
  */
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { PlatformError, usePort } from '@abraxa/db';
-import type { TenantContext } from '@abraxa/db';
-import { HEADER } from '@abraxa/config';
+import { PlatformError, contextoDePeticion, responderError } from '@abraxa/db';
 import { FASES, FICHAS } from './interview/fases';
 import { tieneMarcadores } from './interview/marcadores';
 import { log } from './logger';
@@ -27,28 +37,19 @@ import { aplicarBlueprintsPendientes, blueprintVigente } from './synthesis/bluep
 
 export const router: Router = Router();
 
-async function contextoDe(req: Request): Promise<TenantContext> {
-  const userEmail = req.header(HEADER.userEmail);
-  const tenantSlug = req.header(HEADER.tenantSlug);
-
-  if (!userEmail || !tenantSlug) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      `Faltan las cabeceras ${HEADER.userEmail} y ${HEADER.tenantSlug}. ` +
-        'Las pone el BFF desde la sesión verificada, no el navegador.',
-    );
+/**
+ * Responde el error y, si no era del catálogo, lo deja escrito.
+ *
+ * La traducción a HTTP la hace `responderError` de `@abraxa/db` —que nunca
+ * filtra `details` internos—; lo único propio de aquí es el log, que existe
+ * porque un 500 silencioso en el Ritual es media hora de entrevista perdida sin
+ * rastro de por qué.
+ */
+function fallar(res: Response, err: unknown): void {
+  if (!PlatformError.is(err)) {
+    log.error(`error no controlado en una ruta del Ritual: ${String(err)}`);
   }
-
-  return usePort('tenancy').contextFor({ userEmail, tenantSlug });
-}
-
-function responderError(res: Response, err: unknown): void {
-  if (PlatformError.is(err)) {
-    res.status(err.status).json(err.toResponse());
-    return;
-  }
-  log.error(`error no controlado en una ruta del Ritual: ${String(err)}`);
-  res.status(500).json({ error: { code: 'INTERNAL', message: 'Error interno' } });
+  responderError(res, err);
 }
 
 /**
@@ -68,7 +69,7 @@ function sinMarcadores(mensaje: string): string {
 
 const manejar = (fn: (req: Request, res: Response) => Promise<void>) => {
   return (req: Request, res: Response): void => {
-    void fn(req, res).catch((err: unknown) => responderError(res, err));
+    void fn(req, res).catch((err: unknown) => fallar(res, err));
   };
 };
 
@@ -92,7 +93,7 @@ router.get('/_status', (_req, res) => {
 router.get(
   '/ritual',
   manejar(async (req, res) => {
-    res.json(await fotoDelRitual(await contextoDe(req)));
+    res.json(await fotoDelRitual(await contextoDePeticion(req)));
   }),
 );
 
@@ -100,7 +101,7 @@ router.get(
 router.post(
   '/ritual/iniciar',
   manejar(async (req, res) => {
-    const r = await iniciar(await contextoDe(req));
+    const r = await iniciar(await contextoDePeticion(req));
     res.json({ ...r, mensaje: sinMarcadores(r.mensaje) });
   }),
 );
@@ -111,7 +112,7 @@ router.post(
   manejar(async (req, res) => {
     const body = req.body as { texto?: unknown } | undefined;
     const texto = typeof body?.texto === 'string' ? body.texto : '';
-    const r = await responder(await contextoDe(req), texto);
+    const r = await responder(await contextoDePeticion(req), texto);
     res.json({ ...r, mensaje: sinMarcadores(r.mensaje) });
   }),
 );
@@ -120,7 +121,7 @@ router.post(
 router.post(
   '/ritual/pausa',
   manejar(async (req, res) => {
-    res.json({ vista: await pausar(await contextoDe(req)) });
+    res.json({ vista: await pausar(await contextoDePeticion(req)) });
   }),
 );
 
@@ -128,7 +129,7 @@ router.post(
 router.get(
   '/ritual/mapa',
   manejar(async (req, res) => {
-    const mapa = await blueprintVigente(await contextoDe(req));
+    const mapa = await blueprintVigente(await contextoDePeticion(req));
     if (!mapa) {
       res
         .status(404)
@@ -149,7 +150,7 @@ router.get(
 router.post(
   '/ritual/proyectar-pendientes',
   manejar(async (req, res) => {
-    const aplicados = await aplicarBlueprintsPendientes(await contextoDe(req));
+    const aplicados = await aplicarBlueprintsPendientes(await contextoDePeticion(req));
     res.json({ aplicados, sink: haySink() ? 'registrado' : 'pendiente' });
   }),
 );

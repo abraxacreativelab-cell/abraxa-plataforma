@@ -37,11 +37,14 @@ class Builder implements PromiseLike<Resultado> {
   private payload: Fila[] = [];
   private patch: Fila = {};
   private conflicto: string[] = [];
+  private ignorarDuplicados = false;
   private devolver = false;
 
   constructor(
     private readonly tablas: Map<string, Fila[]>,
     private readonly tabla: string,
+    /** Ver `crearFakeDb`: simula una lectura que llegó antes que la escritura ajena. */
+    private readonly lecturaCiega: () => boolean = () => false,
   ) {}
 
   private get filas(): Fila[] {
@@ -65,10 +68,14 @@ class Builder implements PromiseLike<Resultado> {
     return this;
   }
 
-  upsert(rows: Fila | Fila[], opts?: { onConflict?: string }): this {
+  upsert(rows: Fila | Fila[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }): this {
     this.accion = 'upsert';
     this.payload = Array.isArray(rows) ? rows : [rows];
     this.conflicto = (opts?.onConflict ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+    // `ignoreDuplicates` es la diferencia entre DO NOTHING y DO UPDATE, y con
+    // ella se pisaba una entrevista entera. Un doble que no la distinguiera
+    // haría verde la prueba de la carrera con el bug puesto.
+    this.ignorarDuplicados = opts?.ignoreDuplicates === true;
     return this;
   }
 
@@ -122,6 +129,11 @@ class Builder implements PromiseLike<Resultado> {
               ? this.filas.find((f) => this.conflicto.every((c) => f[c] === p[c]))
               : undefined;
           if (previa) {
+            // DO NOTHING: ni escribe ni devuelve fila. Quien pierde la carrera
+            // se entera porque no le tocó nada, y vuelve a leer.
+            if (this.ignorarDuplicados) continue;
+            // DO UPDATE: pisa la fila con el payload. Es el comportamiento por
+            // defecto de PostgREST, y por eso hay que pedir el otro a mano.
             Object.assign(previa, p);
             salida.push(previa);
           } else {
@@ -146,6 +158,7 @@ class Builder implements PromiseLike<Resultado> {
       }
 
       default: {
+        if (this.lecturaCiega()) return { data: [], error: null };
         let salida = this.filas.filter((f) => this.coincide(f));
         if (this.orden) {
           const { col, asc } = this.orden;
@@ -185,11 +198,23 @@ export interface FakeDb {
   filas(tabla: string): Fila[];
 }
 
-export function crearFakeDb(inicial: Record<string, Fila[]> = {}): FakeDb {
+/**
+ * @param lecturaCiega Mientras devuelva `true`, todo SELECT sale vacío.
+ *
+ * Es cómo se reproduce una carrera de verdad sin depender del orden en que el
+ * planificador de promesas resuelva dos llamadas: una petición que leyó la
+ * tabla ANTES de que otra insertara ve exactamente esto — nada — y sigue su
+ * camino creyendo que es la primera. Sin el gancho, la única forma de llegar a
+ * ese estado sería tener dos procesos.
+ */
+export function crearFakeDb(
+  inicial: Record<string, Fila[]> = {},
+  lecturaCiega: () => boolean = () => false,
+): FakeDb {
   const tablas = new Map<string, Fila[]>(Object.entries(inicial).map(([k, v]) => [k, [...v]]));
 
   const cliente = {
-    from: (tabla: string) => new Builder(tablas, tabla),
+    from: (tabla: string) => new Builder(tablas, tabla, lecturaCiega),
   } as unknown as AnyClient;
 
   return {

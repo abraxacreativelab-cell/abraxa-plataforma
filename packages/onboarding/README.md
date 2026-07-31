@@ -30,6 +30,7 @@ src/
   synthesis/          el Mapa de Negocio — también puro
     catalogo.ts        las 6 áreas genéricas y su regla de arranque
     mapa.ts            construirMapa(): áreas + hitos + documento madre ← criterio #4
+    industria.ts       el giro, resuelto contra app.industry_templates (H4)
     blueprint.ts       persistir la decisión, y proyectarla si hay quién
     entrega.ts         giro, bóveda y bautizo del agente
   ports/

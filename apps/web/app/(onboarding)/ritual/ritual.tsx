@@ -26,6 +26,11 @@ import type { Foto, RespuestaDelRitual, Turno } from './lib/tipos';
  *  Lo único optimista es la burbuja del emprendedor: se pinta antes de que el
  *  servidor conteste porque esperar 6 segundos a ver tu propio mensaje se
  *  siente roto. Si el turno falla, se retira y el texto se le devuelve.
+ *
+ *  Esa segunda mitad —devolverle el texto— era sólo una promesa de este
+ *  comentario hasta la auditoría del PR #8: `enviar` se tragaba el error y el
+ *  compositor ya se había vaciado. Ahora `enviar` devuelve si el turno llegó, y
+ *  el compositor restaura lo que la persona escribió. Ver `compositor.tsx`.
  */
 export function Ritual({ inicial }: { inicial: Foto }) {
   const [foto, setFoto] = React.useState(inicial);
@@ -93,11 +98,21 @@ export function Ritual({ inicial }: { inicial: Foto }) {
     });
   }, [completada, foto.transcript.length, foto.vista.status, llamar]);
 
-  const enviar = (texto: string): void => {
+  /**
+   * Manda el turno y dice si llegó.
+   *
+   * El `false` no es cosmético: es lo que le permite al compositor devolverle
+   * al emprendedor el párrafo que acababa de escribir. La burbuja optimista ya
+   * se retiró en el `finally` de `llamar`, y el error ya está en pantalla.
+   */
+  const enviar = async (texto: string): Promise<boolean> => {
     setEnVuelo(nuevoTurno('user', texto, foto.vista.fase));
-    void llamar('turno', { texto }).catch(() => {
-      /* la burbuja optimista ya se retiró en el finally */
-    });
+    try {
+      await llamar('turno', { texto });
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const pausar = (): void => {

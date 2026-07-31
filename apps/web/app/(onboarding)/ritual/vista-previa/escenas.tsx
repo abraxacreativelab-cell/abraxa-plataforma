@@ -51,6 +51,10 @@ const VISTA_FINAL: Vista = {
 export function Escenas() {
   const [escena, setEscena] = React.useState<Escena>('bautizo');
   const nada = (): void => undefined;
+  // `onEnviar` devuelve si el turno llegó: es lo que le permite al compositor
+  // restaurar el texto cuando falla. En la vista previa no falla nunca, así que
+  // el campo se vacía como en la pantalla de verdad.
+  const siempreLlega = (): boolean => true;
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-5 py-8 sm:px-8">
@@ -82,7 +86,7 @@ export function Escenas() {
         <>
           <Progreso vista={VISTA_BAUTIZO} />
           <Conversacion turnos={CONVERSACION.slice(0, 1)} agente={null} pensando={false} />
-          <Compositor bautizo ocupado={false} pausada={false} onEnviar={nada} onPausar={nada} />
+          <Compositor bautizo ocupado={false} pausada={false} onEnviar={siempreLlega} onPausar={nada} />
         </>
       ) : null}
 
@@ -94,7 +98,7 @@ export function Escenas() {
             bautizo={false}
             ocupado={false}
             pausada={false}
-            onEnviar={nada}
+            onEnviar={siempreLlega}
             onPausar={nada}
           />
         </>
@@ -109,7 +113,7 @@ export function Escenas() {
             bautizo={false}
             ocupado
             pausada={false}
-            onEnviar={nada}
+            onEnviar={siempreLlega}
             onPausar={nada}
           />
         </>

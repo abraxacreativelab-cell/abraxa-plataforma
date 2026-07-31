@@ -18,8 +18,24 @@
  *  primera y la segunda, la sesión quedaría en una fase que sus datos no
  *  soportan — y la siguiente vuelta la máquina de estados leería un estado
  *  imposible. Un turno se guarda entero o no se guarda.
+ *
+ *  ── Y una sola escritura POR TURNO (auditoría PR #8) ──────────────────────
+ *
+ *  Escribir la fila entera de una vez arregla el turno partido a la mitad, pero
+ *  no arregla dos turnos que se pisan. Un turno del Ritual es leer-pensar-
+ *  escribir con una llamada al modelo en medio: entre la lectura y la escritura
+ *  pasan segundos. Dos pestañas abiertas, un doble Enter o un reintento del
+ *  navegador y las dos peticiones leen la MISMA fila, las dos calculan sobre el
+ *  mismo transcript y la segunda en llegar reescribe la fila entera — el turno
+ *  de la primera desaparece sin dejar rastro, y con él el mensaje que el
+ *  emprendedor sí vio en pantalla.
+ *
+ *  `turns` es el número de versión de la fila. Cada escritura exige el valor
+ *  que leyó (`turnoPrevio`) y falla con CONFLICT si ya no es ése. Perder una
+ *  carrera es recuperable —la pantalla recarga y ve el turno que sí quedó—;
+ *  perder el turno en silencio, no.
  */
-import { tenantDb } from '@abraxa/db';
+import { PlatformError, tenantDb } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { log } from '../logger';
 import type {
@@ -81,6 +97,21 @@ export async function cargarSesion(ctx: TenantContext): Promise<SesionRitual | n
  * Idempotente por el UNIQUE (tenant_id) de la migración 050: abrir dos pestañas
  * no crea dos rituales, y el primer turno de la segunda pestaña continúa el
  * mismo hilo en vez de arrancar de cero.
+ *
+ * ── `ignoreDuplicates` no es un detalle (auditoría PR #8) ─────────────────
+ *
+ * Sin él, el `upsert` de PostgREST es `ON CONFLICT DO UPDATE`: PISA la fila.
+ * Y lo que se manda arriba es un ritual RECIÉN NACIDO — `phase: 'bienvenida'`,
+ * `transcript: []`, `turns: 0`. O sea que la carrera que este código dice
+ * manejar era exactamente la que borraba la entrevista: la pestaña que leyó
+ * "no hay ritual" hace tres segundos, cuando por fin escribe, deja en cero la
+ * conversación que la otra pestaña ya empezó, y el `.select()` le devuelve esa
+ * fila vacía como si fuera suya. Veinte minutos de entrevista, sin excepción y
+ * sin rastro.
+ *
+ * Con `ignoreDuplicates: true` es `ON CONFLICT DO NOTHING`: la segunda no
+ * escribe nada, no recibe fila, y cae a la relectura de abajo — que es lo que
+ * el comentario de la carrera siempre dijo que pasaba.
  */
 export async function abrirSesion(ctx: TenantContext): Promise<SesionRitual> {
   const existente = await cargarSesion(ctx);
@@ -96,7 +127,7 @@ export async function abrirSesion(ctx: TenantContext): Promise<SesionRitual> {
         status: 'activa',
         turns: 0,
       },
-      { onConflict: 'tenant_id' },
+      { onConflict: 'tenant_id', ignoreDuplicates: true },
     )
     .select(COLUMNAS);
 
@@ -104,8 +135,8 @@ export async function abrirSesion(ctx: TenantContext): Promise<SesionRitual> {
   const fila = (data as FilaSesion[] | null)?.[0];
   if (fila) return mapear(fila);
 
-  // Carrera perdida contra otra pestaña: el upsert no devolvió fila porque
-  // alguien más la insertó primero. Volver a leer es la respuesta correcta,
+  // Carrera perdida contra otra pestaña: el upsert no escribió nada porque
+  // alguien más insertó primero. Volver a leer es la respuesta correcta,
   // no reintentar la escritura.
   const recargada = await cargarSesion(ctx);
   if (!recargada) throw new Error('No se pudo abrir el Ritual de Fundación.');
@@ -121,15 +152,42 @@ export interface CambiosDelTurno {
   /** Se sella sólo cuando una fase cerró de verdad. */
   cerroFase: boolean;
   completada?: boolean;
+  /**
+   * El `turns` que traía la fila CUANDO SE LEYÓ.
+   *
+   * Es la versión sobre la que se calculó este turno. Si la fila ya no está en
+   * ese número, alguien más escribió mientras el modelo pensaba y esta
+   * escritura pisaría su trabajo: se rechaza en vez de aplicarse.
+   */
+  turnoPrevio: number;
 }
 
 /**
- * Guarda el turno completo. Una sola escritura.
+ * El error de la carrera perdida.
+ *
+ * Se nombra aparte porque quien lo atrape tiene que poder distinguirlo de
+ * cualquier otro CONFLICT sin leer el mensaje.
+ */
+export const CONFLICTO_DE_TURNO =
+  'Alguien más avanzó este Ritual mientras se preparaba tu turno. ' +
+  'Nada se perdió: vuelve a cargar y sigue desde donde quedó.';
+
+/**
+ * Guarda el turno completo. Una sola escritura, y sólo si nadie se adelantó.
  *
  * `checkpoint_at` se mueve nada más cuando `cerroFase` — es "hasta dónde llegó",
  * no "cuándo escribió". Esa distinción es la que le permite a la UI decirle al
  * que vuelve "cerraste la fase de tu modelo de negocio el martes" en vez de
  * "tu última actividad fue el martes", que no le dice nada.
+ *
+ * ── El `.eq('turns', …)` es lo que hace que un turno no se pierda ─────────
+ *
+ * Es control de concurrencia optimista con `turns` de número de versión, y va
+ * en el WHERE del mismo UPDATE: Postgres resuelve la carrera al nivel de la
+ * fila, sin transacción explícita y sin un SELECT ... FOR UPDATE que PostgREST
+ * no sabe mandar. La perdedora actualiza CERO filas — y eso, que sin `.select()`
+ * es indistinguible del éxito, es justamente lo que hacía que el turno se
+ * esfumara callado. Por eso se piden las filas tocadas y se cuentan.
  */
 export async function guardarTurno(
   ctx: TenantContext,
@@ -151,12 +209,25 @@ export async function guardarTurno(
   if (cambios.cerroFase) patch.checkpoint_at = iso;
   if (cambios.completada) patch.completed_at = iso;
 
-  const { error } = await tenantDb(ctx)
+  const { data, error } = await tenantDb(ctx)
     .from('onboarding_sessions')
     .update(patch)
-    .eq('id', sesionId);
+    .eq('id', sesionId)
+    .eq('turns', cambios.turnoPrevio)
+    .select('id');
 
   if (error) throw error;
+
+  if (!data || (data as unknown[]).length === 0) {
+    // Cero filas tocadas con un id que sí existe = otra petición escribió
+    // primero. No se reintenta desde aquí: este turno se calculó sobre un
+    // transcript que ya es viejo, y reescribirlo es exactamente el bug.
+    log.warn(
+      `turno descartado por carrera en el ritual ${sesionId}: ` +
+        `se esperaba turns=${cambios.turnoPrevio} y la fila ya avanzó`,
+    );
+    throw new PlatformError('CONFLICT', CONFLICTO_DE_TURNO);
+  }
 }
 
 /**

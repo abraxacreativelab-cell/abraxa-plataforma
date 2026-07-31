@@ -41,6 +41,13 @@ import type { EstadoNegocio, MapaDeNegocio } from '../types';
  * propone `setIndustry(ctx, industryType)` en el PR. Mientras tanto se escribe
  * directo, acotado por `id = ctx.tenantId`: nunca puede tocar otra empresa.
  *
+ * `mapa.industryType` YA viene resuelto contra `app.industry_templates` (ver
+ * `synthesis/industria.ts`): o es el id de una plantilla que existe, o es
+ * `null`. Aquí no se normaliza nada ni se inventa un slug de respaldo — esta
+ * función escribe lo que el catálogo reconoció, y si no reconoció nada, no
+ * toca la columna. La 033 dice que esa columna apunta a una fila; escribir algo
+ * que no lo hace es peor que dejarla vacía, porque se ve igual de válida.
+ *
  * También se guarda `stage` porque la columna existe desde la migración 001 y
  * el prompt de H3 la lee para darle contexto al agente en cada mensaje
  * (compose.ts). Dejarla vacía teniendo el dato sería tirarlo.

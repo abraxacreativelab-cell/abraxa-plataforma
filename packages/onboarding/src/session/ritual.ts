@@ -35,6 +35,7 @@ import { ausenciaEnPalabras, mensajeDeRegreso } from '../interview/regreso';
 import { log } from '../logger';
 import { aplicarBlueprint, blueprintVigente, guardarBlueprint } from '../synthesis/blueprint';
 import { bautizarAgente, sembrarBoveda, sembrarGiro } from '../synthesis/entrega';
+import { plantillasDeGiro } from '../synthesis/industria';
 import { construirMapa, mensajeDeEntrega } from '../synthesis/mapa';
 import type {
   EstadoNegocio,
@@ -370,6 +371,10 @@ async function correrTurno(
       turnos: actualizada.turnos,
       status: actualizada.status,
       cerroFase: r.avanzo,
+      // La versión que traía la fila cuando se leyó, al principio del turno.
+      // Entre esa lectura y esta escritura corrió el modelo: si otra pestaña
+      // escribió en ese hueco, esto lanza CONFLICT en vez de pisarla.
+      turnoPrevio: sesion.turnos,
     },
     o.ahora,
   );
@@ -422,7 +427,10 @@ async function cerrar(
   mensajePrevio: string,
   ahora: Date,
 ): Promise<RespuestaDelRitual> {
-  const mapa = construirMapa(sesion.estado);
+  // El catálogo de giros de H4, para que `industry_type` apunte a una plantilla
+  // que existe y no a un slug inventado. Si la tabla no responde viene vacío y
+  // el mapa sale con `industryType: null` — nunca con algo que parezca válido.
+  const mapa = construirMapa(sesion.estado, await plantillasDeGiro());
 
   const guardado = await guardarBlueprint(ctx, sesion.id, mapa);
 
@@ -462,6 +470,10 @@ async function cerrar(
       status: 'completada',
       cerroFase: true,
       completada: true,
+      // `sesion` aquí es la fila que `correrTurno` acaba de escribir, así que
+      // su `turnos` ES la versión vigente. El cierre también corre una llamada
+      // al modelo antes de escribir: la carrera es la misma.
+      turnoPrevio: sesion.turnos,
     },
     ahora,
   );

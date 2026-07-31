@@ -243,7 +243,18 @@ describe('el Ritual completo', () => {
     // Con la empresa ya dada de alta, para poder verificar que el giro
     // detectado aterriza en `app.tenants` como pide el §7 del handoff.
     desmontar();
-    montar({ tenants: [{ id: 'tenant-a', slug: 'tenant-a', name: 'Panadería' }] });
+    montar({
+      tenants: [{ id: 'tenant-a', slug: 'tenant-a', name: 'Panadería' }],
+      // El catálogo de giros de H4 (migración 033), para que la resolución de
+      // `industry_type` corra de verdad y no por falta de filas.
+      industry_templates: [
+        { id: 'servicios', name: 'Servicios profesionales', blurb: 'Despachos, consultorios, talleres, salones, estudios.', position: 1 },
+        { id: 'comercio', name: 'Comercio y tienda en linea', blurb: 'Vendes producto: local, tienda en linea, marketplace.', position: 2 },
+        { id: 'restaurante', name: 'Restaurante y cafeteria', blurb: 'Cocinas y vendes en el momento: local, para llevar o reparto.', position: 3 },
+        { id: 'agencia', name: 'Agencia o estudio', blurb: 'Vendes trabajo por proyecto o por iguala: marketing, diseno, software.', position: 4 },
+        { id: 'general', name: 'Otro giro', blurb: 'Lo minimo que todo negocio necesita tener claro.', position: 9 },
+      ],
+    });
     agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO, PROCESO, DOLOR, GENTE, ENTREGA);
 
     await iniciar(ctx);
@@ -266,7 +277,14 @@ describe('el Ritual completo', () => {
     // Criterio #1: termina con áreas e hitos creados.
     expect(foto.mapa?.areas.length).toBe(6);
     expect(foto.mapa?.hitos.length).toBeGreaterThan(0);
-    expect(foto.mapa?.industryType).toBe('panaderia-artesanal');
+    // "panadería artesanal" no corresponde a ninguna de las cinco plantillas
+    // sembradas, así que el giro queda SIN clasificar — y eso se ve. Antes se
+    // escribía `panaderia-artesanal`, que parecía un id bueno y no lo era:
+    // `detectGaps()` de la bóveda lo buscaba en el catálogo y no encontraba
+    // nada. Ver synthesis/industria.ts y su prueba.
+    expect(foto.mapa?.industryType).toBeNull();
+    // Lo que el emprendedor dijo no se pierde por eso: va en el documento madre.
+    expect(foto.mapa?.resumen).toContain('panadería artesanal');
 
     // Criterio #7: puede entrar a usar al menos un área.
     expect(foto.mapa?.areas.some((a) => a.estado !== 'bloqueada')).toBe(true);
@@ -283,9 +301,11 @@ describe('el Ritual completo', () => {
     // Criterio #3: el nombre llegó a la definición del agente.
     expect(agente.definiciones.some((d) => d.role === 'master' && d.name === 'Aura')).toBe(true);
 
-    // El giro y la etapa se escribieron en app.tenants (handoff §7).
+    // La etapa se escribió en app.tenants (handoff §7). `industry_type` NO: la
+    // columna apunta a app.industry_templates.id y este giro no cuadró con
+    // ninguna plantilla. Vacía es correcto; un slug inventado no lo era.
     const empresa = db.filas('tenants')[0];
-    expect(empresa?.industry_type).toBe('panaderia-artesanal');
+    expect(empresa?.industry_type).toBeUndefined();
     expect(empresa?.stage).toBe('operando');
   });
 

@@ -16,32 +16,7 @@
  */
 import type { AreaDelMapa, EstadoNegocio, Hito, MapaDeNegocio } from '../types';
 import { CATALOGO } from './catalogo';
-
-// ════════════════════════════════════════════════════════════════════════════
-// El giro
-// ════════════════════════════════════════════════════════════════════════════
-
-/**
- * El giro, normalizado a slug para `tenants.industry_type`.
- *
- * Apunta al catálogo `app.industry_templates` de H4. Mientras ese catálogo no
- * exista, el slug del giro tal como lo dijo el emprendedor es la mejor
- * aproximación posible y NO se pierde información: el giro literal queda en el
- * resumen y en el estado de la sesión. El día que H4 publique su taxonomía, el
- * mapeo de este slug a una plantilla es una tabla, no una re-entrevista.
- */
-export function tipoDeIndustria(e: EstadoNegocio): string | null {
-  const giro = (e.giro ?? '').trim();
-  if (!giro) return null;
-  const slug = giro
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48);
-  return slug || null;
-}
+import { tipoDeIndustria, type PlantillaDeGiro } from './industria';
 
 // ════════════════════════════════════════════════════════════════════════════
 // Las áreas
@@ -273,11 +248,26 @@ export function mensajeDeEntrega(mapa: MapaDeNegocio, e: EstadoNegocio): string 
   return bloques.join('\n\n');
 }
 
-export function construirMapa(e: EstadoNegocio): MapaDeNegocio {
+/**
+ * El mapa completo.
+ *
+ * `plantillas` son las filas de `app.industry_templates` que existen hoy; las
+ * lee `plantillasDeGiro()` justo antes de cerrar. Se pasan como argumento y no
+ * se consultan aquí adentro para que esta función siga siendo pura: el criterio
+ * #4 —dos giros distintos, dos mapas distintos— se verifica con dos objetos y
+ * cero tokens, y ahora también sin base.
+ *
+ * Sin catálogo (el default), `industryType` sale `null`. Nunca un slug
+ * inventado: ver el encabezado de `synthesis/industria.ts`.
+ */
+export function construirMapa(
+  e: EstadoNegocio,
+  plantillas: PlantillaDeGiro[] = [],
+): MapaDeNegocio {
   const areas = areasPara(e);
   const hitos = hitosPara(e, areas);
   return {
-    industryType: tipoDeIndustria(e),
+    industryType: tipoDeIndustria(e, plantillas),
     areas,
     hitos,
     resumen: resumenDelNegocio(e, areas, hitos),
