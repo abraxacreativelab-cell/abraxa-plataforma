@@ -18,8 +18,8 @@ al que pertenece.
 
 | # | Directorios exclusivos | Migraciones | Rama |
 |---|---|---|---|
-| **H0** | *ninguno* — sólo `docs/` y `deploy/` | *aplica*, no crea | — |
-| **H1** | raíz, `packages/config`, `packages/db`, `.github/`, `scripts/`, stubs | `001`–`009` | `h1-fundacion` |
+| **H0** | `docs/`, `deploy/`, `scripts/`, `.ownership.json`, `eslint.config.mjs`, `CONTRIBUTING.md`, `packages/db/src/http/**` | *aplica*, no crea | `h0-integracion` |
+| **H1** | raíz, `packages/config`, `packages/db` **excepto** `src/http/`, `.github/`, stubs | `001`–`009` | `h1-fundacion` |
 | **H2** | `packages/tenancy/**` | `010`–`019` | `h2-tenancy` |
 | **H3** | `packages/agents/**` | `020`–`029` | `h3-agents` |
 | **H4** | `packages/vault/**`, `app/(app)/direccion/**` | `030`–`039` | `h4-vault` |
@@ -33,9 +33,19 @@ al que pertenece.
 | **H12** | `packages/inbox/src/drivers/meta/**` | `100`–`104` | `h12-meta` |
 | **H13** | `packages/inbox/src/drivers/{email,sms}/**` | `105`–`109` | `h13-email-sms` |
 | **H14** | `apps/web/app/(admin)/**` | `110`–`119` | `h14-admin` |
+| **H15** | `packages/crm/**`, `app/(app)/contactos/**` | `120`–`129` | `h15-crm` |
+| **H16** | `packages/tenancy/{,src/}entitlements/**`, `app/(app)/ajustes/plan/**` | `130`–`139` | `h16-entitlements` |
+| **H17** | `packages/integrations/**`, `app/(app)/ajustes/integraciones/**` | `140`–`149` | `h17-integraciones` |
+| **H18** | `packages/auth/**`, `app/api/**`, `app/(app)/ajustes/**` **excepto** `plan` e `integraciones` | `150`–`159` | `h18-identidad` |
 
 > **La rama tiene que llamarse exactamente igual que la clave de
 > `.ownership.json`.** El gate deriva de ahí quién eres.
+>
+> La única excepción es H0, que abre varios PRs a la vez y por eso su entrada
+> trae una lista `ramas` con sus alias. Un alias dice sólo *"esta rama es este
+> carril"*: **no reparte propiedad**, y sólo el orquestador la tiene. Un carril
+> de construcción con dos entradas pondría dos dueños sobre los mismos archivos
+> y dejaría `--check-overlap` en rojo para **todos** los PRs abiertos.
 
 ### 2. Numera migraciones sólo en tu rango
 
@@ -44,7 +54,9 @@ Jamás salgas de tu bloque de diez. Ver [`migrations/README.md`](migrations/READ
 ### 3. No toques el cableado central
 
 `apps/api/src/packages.ts`, `packages/db/**`, `package.json` raíz, los
-`tsconfig`, el `eslint.config.mjs`. **H1 los dejó terminados.**
+`tsconfig`. **H1 los dejó terminados.** `eslint.config.mjs` y
+`packages/db/src/http/**` son de **H0** desde el 2026-07-31, y la regla es la
+misma: no se editan desde un carril de construcción.
 
 Este archivo era el punto de colisión número uno del repo: cuatro
 conversaciones iban a crear cada una su propio `packages/db/ports.ts`. Por eso
@@ -95,6 +107,65 @@ Y registra el tuyo desde el `index.ts` de **tu** paquete:
 // packages/inbox/src/index.ts
 registerPort('inbox', inboxService);
 ```
+
+---
+
+## Quién pide: `contextoDePeticion()`
+
+> **Ningún router de dominio escribe su propio `contextoDe`. Se importa el
+> canónico.**
+
+Es la única regla de este documento que se ganó a golpes. Entre el 2026-07-30 y
+el 07-31, **cuatro carriles** escribieron cada uno su propio resolvedor de
+contexto a partir de las cabeceras, y **tres salieron mal de la misma manera**:
+leían `x-user-email` sin comprobar antes el secreto compartido del BFF, que es
+lo único que hace que esa cabecera signifique algo. Uno de los cuatro llegó a
+`main` y estuvo sirviendo la bóveda —precios, márgenes, documentos— a cualquiera
+con `curl`.
+
+Un carril que se equivoca es un error. Cuatro es un defecto de diseño: el patrón
+correcto no existía como pieza importable, así que cada carril lo reconstruía de
+memoria. Ahora existe.
+
+```ts
+import { contextoDePeticion, responderError } from '@abraxa/db';
+
+router.get('/cosas', (req, res) => {
+  void (async () => {
+    try {
+      const ctx = await contextoDePeticion(req); // ← lo único correcto
+      res.json(await listarCosas(ctx));
+    } catch (err) {
+      responderError(res, err);
+    }
+  })();
+});
+```
+
+`contextoDePeticion(req)` hace tres puertas, **en este orden**:
+
+1. **`proxyVerified(req)`**, antes de mirar una sola cabecera de identidad. Sin
+   `PROXY_SECRET` en producción está **cerrada** (fail-closed): si un deploy
+   pierde la variable, el sistema no reabre la suplantación por header.
+2. **Identidad presente.** Sin correo no hay quién; sin slug no hay cuál.
+3. **La membresía**, que valida H2 vía `TenancyPort.contextFor()`. El
+   `x-tenant-slug` lo manda el navegador y **no se cree**: ese 403 es lo único
+   que impide que el cliente A lea los datos del cliente B.
+
+Todo lo que lanza es `PlatformError` del catálogo de `ports.ts`.
+
+Para lo que ocurre **antes** de pertenecer a una empresa —crear la tuya, aceptar
+una invitación, arrancar el ritual— hay identidad sin empresa:
+
+```ts
+import { correoVerificadoDe } from '@abraxa/db';
+const email = correoVerificadoDe(req); // mismo candado, sin resolver tenant
+```
+
+**ESLint marca la lectura directa** de `x-user-email`, `x-tenant-slug` y
+`x-proxy-secret` fuera de la pieza canónica. No es un recordatorio: falla tu PR.
+La implementación vive en `packages/db/src/http/` y es de `h0-integracion`; si
+crees que le falta un caso, **anótalo en tu PR** — no la copies a tu árbol.
 
 ---
 
@@ -161,6 +232,11 @@ Sin ese paso el compilador te frena, y es a propósito.
 alta un tenant, y las tablas globales (`app.users`, `app.plans`,
 `app.industry_templates`, `app.billing_events`). ESLint lo prohíbe dentro de
 `routes/` y `services/`. Si lo usas en otro lado, deja escrito por qué.
+
+**Y el `ctx` que le pasas tiene que venir de `contextoDePeticion(req)`.**
+`tenantDb(ctx)` filtra impecablemente por el `tenantId` que le den: si el
+contexto se armó con una cabecera que nadie verificó, la red de abajo aísla a la
+empresa equivocada. Ver la sección *Quién pide* más arriba.
 
 ---
 

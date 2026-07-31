@@ -61,9 +61,25 @@ la tienes tú, y `apps/web/app/api/**` ya es tuyo en el mapa de propiedad.
 | `x-user-email` | de la sesión verificada server-side, **nunca** de un header del cliente |
 | `x-tenant-slug` | del navegador, y **no se confía**: `contextFor()` lo valida contra `app.memberships` |
 
-`proxyVerified()` (`packages/tenancy/src/middleware/proxy.ts`) está portado de GARDEN, probado, y
-es correcto. **Le falta el otro extremo.** Hoy nadie manda esos headers, porque el BFF que los
-debía poner no está escrito. La mitad que recibe está terminada; la mitad que emite es tuya.
+`proxyVerified()` está portado de GARDEN, probado, y es correcto. **Le falta el otro extremo.**
+Hoy nadie manda esos headers, porque el BFF que los debía poner no está escrito. La mitad que
+recibe está terminada; la mitad que emite es tuya.
+
+> **Dónde vive, desde el 2026-07-31 (PR #16).** La pieza canónica está en `@abraxa/db`, no en
+> `@abraxa/tenancy`:
+>
+> ```ts
+> import { contextoDePeticion, correoVerificadoDe, responderError } from '@abraxa/db';
+> ```
+>
+> `contextoDePeticion(req)` corre `proxyVerified()` **antes** de mirar una sola cabecera de
+> identidad y resuelve la membresía por `usePort('tenancy')`. Para tus rutas de identidad **sin**
+> empresa —alta, invitación, ritual— usa `correoVerificadoDe(req)`.
+> `packages/tenancy/src/middleware/proxy.ts` sigue re-exportando `proxyVerified` por
+> compatibilidad, pero **no escribas tu propia copia**: cuatro carriles lo hicieron y tres
+> salieron mal igual. **ESLint marca la lectura directa** de `x-user-email`, `x-tenant-slug` y
+> `x-proxy-secret` fuera de la pieza canónica, y falla tu PR. Ver
+> [CONTRIBUTING.md](../../CONTRIBUTING.md) y `docs/handoffs/README.md`.
 
 ### 2.3 El incidente que define tu carril
 

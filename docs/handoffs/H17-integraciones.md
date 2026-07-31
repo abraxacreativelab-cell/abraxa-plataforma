@@ -26,7 +26,7 @@ y no un sistema de un solo inquilino con una tabla `tenants`.
 
 ### 2.1 Un solo juego de credenciales para todos
 
-`.env.example:43-51` — el bloque de canales completo:
+`.env.example:44-51` — el bloque de canales completo:
 
 ```
 EVOLUTION_API_URL       EVOLUTION_API_KEY
@@ -455,7 +455,7 @@ Lee primero, completo:
 
 POR QUÉ EXISTES, en una frase: hoy dos clientes comparten el mismo WhatsApp.
 
-.env.example:43-51 tiene ocho variables de canal y ninguna tiene dimensión de tenant. El
+.env.example:44-51 tiene ocho variables de canal y ninguna tiene dimensión de tenant. El
 driver de WhatsApp ya las lee así — packages/inbox/src/drivers/whatsapp/evolution.ts:225-226
 en la rama h6-inbox:
     baseUrl ??= e.EVOLUTION_API_URL ?? 'http://127.0.0.1:8080';
