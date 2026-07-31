@@ -8,6 +8,7 @@ import {
   duenosDe,
   revisarMigracion,
   pathsEfectivos,
+  carrilDeRama,
   CARRIL_ORQUESTADOR,
 } from './ownership-gate.mjs';
 
@@ -211,5 +212,53 @@ ALTER TABLE app.billing_events ENABLE ROW LEVEL SECURITY;`;
   it('la migración 001 pasa su propia regla', () => {
     const sql = readFileSync(join(RAIZ, 'migrations/001_foundation.sql'), 'utf8');
     expect(revisarMigracion(sql, '001_foundation.sql')).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Alias de rama. El gate exigía que la rama se llamara EXACTAMENTE igual que su
+// entrada, y eso mata al segundo PR de cualquier carril que abra más de uno.
+// H0 abre muchos: mergea, aplica migraciones, corrige handoffs y despliega.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('carrilDeRama — alias de rama', () => {
+  it('la rama que se llama igual que su entrada resuelve a sí misma', () => {
+    for (const nombre of Object.keys(ownership)) {
+      expect(carrilDeRama(nombre, ownership)).toBe(nombre);
+    }
+  });
+
+  it('una rama declarada en `ramas` resuelve a su carril', () => {
+    expect(carrilDeRama('h0-docs-ola2', ownership)).toBe(CARRIL_ORQUESTADOR);
+  });
+
+  it('una rama inventada no resuelve a nada', () => {
+    expect(carrilDeRama('arreglito-rapido', ownership)).toBeNull();
+    expect(carrilDeRama('h0', ownership)).toBeNull();
+    expect(carrilDeRama('', ownership)).toBeNull();
+  });
+
+  it('todo alias declarado incluye el nombre de su propio carril', () => {
+    for (const [nombre, cfg] of Object.entries(ownership)) {
+      if (!cfg.ramas) continue;
+      expect(Array.isArray(cfg.ramas), nombre).toBe(true);
+      expect(cfg.ramas, nombre).toContain(nombre);
+    }
+  });
+
+  it('ningún alias es reclamado por dos carriles', () => {
+    const visto = new Map();
+    for (const [nombre, cfg] of Object.entries(ownership)) {
+      for (const r of cfg.ramas ?? []) {
+        expect(visto.has(r) ? `${r} ya es de ${visto.get(r)}` : r, r).toBe(r);
+        visto.set(r, nombre);
+      }
+    }
+  });
+
+  it('un alias NO reparte propiedad: los paths siguen siendo los del carril', () => {
+    // La prueba de que el alias es inocuo para `--check-overlap`: el mapa de
+    // dueños se calcula sobre `paths`, y `ramas` no aparece ahí.
+    expect(duenosDe('docs/handoffs/H6-inbox.md', ownership)).toEqual([CARRIL_ORQUESTADOR]);
+    expect(duenosDe('packages/vault/src/resolver.ts', ownership)).not.toContain(CARRIL_ORQUESTADOR);
   });
 });
