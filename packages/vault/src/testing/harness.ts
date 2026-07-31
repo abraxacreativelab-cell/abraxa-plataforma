@@ -31,6 +31,22 @@ export function ctxDe(tenantId: string, over: Partial<TenantContext> = {}): Tena
   };
 }
 
+/**
+ * El dueño TAL COMO LLEGA EN PRODUCCIÓN, que no es como llega `ctxDe`.
+ *
+ * `loadAreaGrants()` de H2 (packages/tenancy/src/middleware/rbac.ts) ni siquiera
+ * consulta `area_grants` para dueños y administradores: devuelve `{'*':'admin'}`
+ * y punto. La clave literal `direccion` JAMÁS existe para ellos.
+ *
+ * `AREAS_TOTALES` —las cuatro áreas escritas a mano— es una forma cómoda para
+ * las pruebas que la producción nunca produce. Esa comodidad escondió durante
+ * todo un carril que la bóveda era de sólo lectura para su propio dueño. Lo que
+ * se prueba con este contexto se prueba de verdad.
+ */
+export function ctxDueno(tenantId: string): TenantContext {
+  return ctxDe(tenantId, { role: 'owner', areas: { '*': 'admin' } });
+}
+
 /** Alguien que puede ver la bóveda pero no tocarla. */
 export function ctxSoloLectura(tenantId: string): TenantContext {
   return ctxDe(tenantId, { role: 'member', areas: { ventas: 'view', direccion: 'view' } });
