@@ -41,15 +41,17 @@ describe('las migraciones de H2', () => {
     }
   });
 
-  it('no numera nada fuera de su bloque', () => {
-    const fuera = readdirSync(DIR).filter((f) => {
-      const m = /^(\d{3})_/.exec(f);
-      if (!m) return false;
-      const n = Number(m[1]);
-      // 001–009 es de H1 y ya estaba.
-      return n >= 10 && (n < 10 || n > 19);
-    });
-    expect(fuera).toEqual([]);
+  /**
+   * Se afirma sobre las migraciones de H2 y sobre ninguna más.
+   *
+   * La primera versión de esta prueba recorría todo `migrations/` buscando
+   * números fuera de 010–019, y empezó a fallar en cuanto H3 mergeó las suyas
+   * (020–024) — que son perfectamente válidas. Vigilar el carril ajeno no es
+   * trabajo de este paquete: de eso se encarga `ownership-gate`, que sabe de
+   * quién es cada bloque. Aquí sólo se comprueba lo propio.
+   */
+  it('son exactamente las tres de H2', () => {
+    expect(mias).toEqual(['010_tenancy.sql', '011_provision.sql', '012_invitations.sql']);
   });
 
   /**
