@@ -23,6 +23,8 @@ import {
   editarDocumento,
   editarValor,
   ingestDocument,
+  resolverConflicto,
+  type DecisionConflicto,
   type DocStatus,
   type DocType,
   type IngestResult,
@@ -90,6 +92,29 @@ export async function accionGuardarValor(
         ? `«${v.label}» guardado y propagado como {valor.${v.key}}.`
         : `«${v.label}» guardado como borrador. Apruébalo para que empiece a usarse.`,
       datos: { id: v.id },
+    };
+  }, RUTAS_VALORES);
+}
+
+/**
+ * Cuando un documento nuevo contradice un número que ya se aprobó, la ingesta
+ * NO decide: lo deja marcado. Aquí es donde decide la persona.
+ *
+ * El mensaje dice qué queda vigente en los dos casos, no un "listo": el punto
+ * de todo esto es que nadie se entere tarde de que su precio cambió.
+ */
+export async function accionResolverConflicto(
+  id: string,
+  decision: DecisionConflicto,
+): Promise<Resultado> {
+  return ejecutar(async () => {
+    const ctx = await contextoActual();
+    const { propagado } = await resolverConflicto(ctx, id, decision);
+    return {
+      mensaje:
+        decision === 'aceptar'
+          ? `Actualizado y propagado a contratos, mensajes y agentes · ${propagado}`
+          : `Se descartó lo que decía el documento nuevo · ${propagado}`,
     };
   }, RUTAS_VALORES);
 }

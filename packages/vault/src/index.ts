@@ -58,6 +58,9 @@ export {
   desactivarValor,
   borrarValor,
   contarBorradores,
+  contarConflictos,
+  resolverConflicto,
+  tieneConflicto,
 } from './values/service';
 export { crearValorSchema, editarValorSchema, claveSchema, CLAVE_RE } from './values/schema';
 
@@ -86,8 +89,20 @@ export {
 } from './documents/embeddings';
 
 // ── Ingesta ─────────────────────────────────────────────────────────────────
-export { ingestDocument, type IngestResult, type ValorPropuesto } from './ingest/pipeline';
-export { parsePricingDoc, normalizarClave, etiquetaDesdeClave } from './ingest/money';
+export {
+  ingestDocument,
+  type IngestResult,
+  type ValorPropuesto,
+  type ConflictoValor,
+} from './ingest/pipeline';
+export {
+  parsePricingDoc,
+  normalizarClave,
+  etiquetaDesdeClave,
+  detectarMoneda,
+  monedaDeclarada,
+  MONEDA_POR_DEFECTO,
+} from './ingest/money';
 export {
   anthropicClassifier,
   desdeAgentPort,
@@ -120,6 +135,7 @@ export type {
   ScopeType,
   DocType,
   DocStatus,
+  DecisionConflicto,
   VaultRow,
   VaultContext,
   ResolvedVault,

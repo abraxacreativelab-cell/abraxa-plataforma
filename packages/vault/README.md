@@ -35,6 +35,26 @@ confianza es alta».
 
 Un número que ningún humano aprobó no puede llegar a un contrato.
 
+**Y su corolario: lo aprobado tampoco se pisa solo.** Si el emprendedor aprobó
+`consulta_inicial = $850` y meses después pega un documento que dice $900, la ingesta **no
+decide**. Deja el $850 vigente —el agente lo sigue citando—, guarda el $900 en las
+columnas `conflict_*` de la 031 y lo devuelve en `IngestResult.conflictos` para que la UI
+lo enseñe. Lo resuelve una persona con `resolverConflicto(ctx, id, 'aceptar' | 'descartar')`.
+
+Un `upsert` a secas haría lo contrario: cambiaría el precio **y** apagaría la aprobación,
+en silencio. El emprendedor se enteraría cuando un contrato saliera con un número que
+nunca autorizó.
+
+Reglas de la contradicción, por si hace falta cambiarlas algún día:
+
+| Estado previo del valor | Qué hace una reingesta que dice otra cosa |
+|---|---|
+| No existe | Lo crea en borrador (`active = false`) |
+| Borrador | Lo sobrescribe: nadie ha respondido por él todavía |
+| Aprobado, dice lo mismo | Nada. Si venía en conflicto, lo apaga: ya no hay contradicción |
+| Aprobado, dice otra cosa | **No lo toca.** Marca `conflict_*` y lo reporta |
+| No se pudo leer el estado previo | **No escribe ningún valor** y lo avisa. Escribir a ciegas podría pisar algo aprobado |
+
 ### 3. La inyección al prompt es best effort.
 
 `injectIntoPrompt()` **nunca lanza**. Si la bóveda falla, devuelve el prompt intacto.
@@ -99,6 +119,23 @@ heredar el vocabulario de otro negocio.
 | **`src/crm/pricing/service.ts:23-55`** | `ingest/money.ts` | La joya que el handoff no menciona: extracción determinista |
 | `src/services/embeddings.ts` | `documents/embeddings.ts` | Cortacircuito íntegro, sin proveedor de respaldo (a propósito) |
 | `src/vault/area-templates.ts` | `industry/` + migración 033 | La estructura sirve; las 8 empresas de Santiago se fueron a una tabla |
+
+### La moneda se detecta, no se asume
+
+`money.ts` lee la moneda de cada cifra y la lleva hasta `canonical_values.currency`.
+Se detecta en dos niveles y en este orden:
+
+1. **En el valor**: `- deposito: $1,200 USD`, `US$499`, `€99`, `499 dólares`, `dlls`.
+2. **En una declaración explícita del documento**: una línea `Moneda: USD` o
+   «Todos los precios están en dólares».
+
+El segundo nivel es a propósito **estrecho**: bastaría con buscar «USD» en cualquier parte
+para que un «el proveedor nos cobra en USD» perdido en un párrafo convirtiera toda la lista
+de precios a dólares. La nota de un valor tampoco se mira, por lo mismo — «ya no cobramos
+en dólares» marcaría la cifra como USD.
+
+Un falso positivo aquí envenena la bóveda entera; un falso negativo sólo deja el valor en
+MXN, que es lo correcto casi siempre. Probado en `money.test.ts` y `pipeline.test.ts`.
 
 ### Dos cosas que aquí se arreglaron
 

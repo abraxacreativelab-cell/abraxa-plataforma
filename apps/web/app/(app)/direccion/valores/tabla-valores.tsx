@@ -1,14 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   CheckCircle2,
+  GitCompareArrows,
   KeyRound,
   Pencil,
   Plus,
   Search,
   ShieldAlert,
   Undo2,
+  X,
 } from 'lucide-react';
 import type { VaultRow } from '@abraxa/vault/api';
 import {
@@ -16,6 +18,7 @@ import {
   accionBorrarValor,
   accionDesactivar,
   accionGuardarValor,
+  accionResolverConflicto,
 } from '../_lib/actions';
 import {
   Avisos,
@@ -34,8 +37,18 @@ export interface AreaSimple {
   label: string;
 }
 
+/** Lo mínimo que hace falta para pintar una cifra: el tipo, el número y la moneda. */
+interface Pintable {
+  kind: VaultRow['kind'];
+  value: number | null;
+  value_text?: string | null;
+  value_json?: unknown;
+  currency?: string | null;
+  unit?: string | null;
+}
+
 /** Espejo de `formatVault`, en el cliente. Sólo para pintar. */
-function mostrar(v: VaultRow): string {
+function mostrar(v: Pintable): string {
   const num = (n: number, opts?: Intl.NumberFormatOptions) =>
     new Intl.NumberFormat('es-MX', opts).format(n);
 
@@ -62,6 +75,22 @@ function mostrar(v: VaultRow): string {
     default:
       return v.value_text || '—';
   }
+}
+
+/** `true` si un documento posterior desmiente esta cifra y nadie ha decidido. */
+function enConflicto(v: VaultRow): boolean {
+  return v.conflict_at != null;
+}
+
+/** Lo que propone el documento nuevo, listo para pintar al lado de lo vigente. */
+function loPropuesto(v: VaultRow): Pintable {
+  return {
+    kind: v.kind,
+    value: v.conflict_value ?? null,
+    value_text: v.conflict_value_text ?? null,
+    currency: v.conflict_currency ?? v.currency,
+    unit: v.unit,
+  };
 }
 
 const NOMBRE_TIPO: Record<string, string> = {
@@ -93,6 +122,8 @@ function usePendiente() {
   return { pendiente, correr };
 }
 
+export type FiltroEstado = 'todos' | 'borrador' | 'activo' | 'conflicto';
+
 export function TablaValores({
   valores,
   areas,
@@ -103,7 +134,7 @@ export function TablaValores({
   valores: VaultRow[];
   areas: AreaSimple[];
   puedeEditar: boolean;
-  filtroInicial: 'todos' | 'borrador';
+  filtroInicial: 'todos' | 'borrador' | 'conflicto';
   areaInicial: string;
 }) {
   const { avisos, ok, error, cerrar } = useAvisos();
@@ -111,17 +142,19 @@ export function TablaValores({
 
   const [busqueda, setBusqueda] = useState('');
   const [filtroArea, setFiltroArea] = useState(areaInicial);
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'borrador' | 'activo'>(filtroInicial);
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>(filtroInicial);
   const [editando, setEditando] = useState<VaultRow | null>(null);
   const [creando, setCreando] = useState(false);
 
   const borradores = valores.filter((v) => !v.active).length;
+  const conflictos = valores.filter(enConflicto).length;
 
   const filtrados = useMemo(() => {
     const t = busqueda.trim().toLowerCase();
     return valores.filter((v) => {
       if (filtroEstado === 'borrador' && v.active) return false;
       if (filtroEstado === 'activo' && !v.active) return false;
+      if (filtroEstado === 'conflicto' && !enConflicto(v)) return false;
       if (filtroArea === '__ninguna' ? v.area_slug != null : filtroArea && v.area_slug !== filtroArea)
         return false;
       if (!t) return true;
@@ -208,12 +241,16 @@ export function TablaValores({
           <option value="todos">Todos</option>
           <option value="activo">Sólo los vigentes</option>
           <option value="borrador">Sólo los que esperan tu visto bueno</option>
+          <option value="conflicto">Sólo los que un documento contradice</option>
         </Selector>
 
         <div className="flex items-center gap-2 text-xs sm:ml-auto">
           <span className="font-mono text-[hsl(var(--muted-foreground))]">
             {filtrados.length} de {valores.length}
           </span>
+          {conflictos > 0 ? (
+            <Insignia tono="alerta">{conflictos} en conflicto</Insignia>
+          ) : null}
           {borradores > 0 ? (
             <Insignia tono="borrador">
               {borradores} por revisar
@@ -221,6 +258,24 @@ export function TablaValores({
           ) : null}
         </div>
       </div>
+
+      {conflictos > 0 ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-rose-500/25 bg-rose-500/[0.04] px-3 py-2.5 text-sm">
+          <GitCompareArrows className="h-4 w-4 shrink-0 text-rose-400" />
+          <p className="flex-1 leading-snug">
+            Un documento nuevo contradice <b>{conflictos}</b> número
+            {conflictos === 1 ? '' : 's'} que ya habías aprobado.{' '}
+            <span className="text-[hsl(var(--muted-foreground))]">
+              No cambié ninguno: sigue vigente el que aprobaste. Decide tú cuál se queda.
+            </span>
+          </p>
+          {filtroEstado !== 'conflicto' ? (
+            <Boton variante="contorno" onClick={() => setFiltroEstado('conflicto')}>
+              Ver sólo ésos
+            </Boton>
+          ) : null}
+        </div>
+      ) : null}
 
       {!puedeEditar && valores.length > 0 ? (
         <div className="flex items-center gap-2 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-3 py-2 text-xs text-[hsl(var(--muted-foreground))]">
@@ -275,12 +330,14 @@ export function TablaValores({
                   </thead>
                   <tbody>
                     {g.valores.map((v) => (
+                      <Fragment key={v.id}>
                       <tr
-                        key={v.id}
                         className={`border-b border-[hsl(var(--border))]/50 last:border-0 transition-colors ${
-                          v.active
-                            ? 'hover:bg-[hsl(var(--muted))]/40'
-                            : 'bg-amber-500/[0.04] hover:bg-amber-500/[0.08]'
+                          enConflicto(v)
+                            ? 'bg-rose-500/[0.05] hover:bg-rose-500/[0.09]'
+                            : v.active
+                              ? 'hover:bg-[hsl(var(--muted))]/40'
+                              : 'bg-amber-500/[0.04] hover:bg-amber-500/[0.08]'
                         }`}
                       >
                         <td className="px-4 py-2.5">
@@ -310,7 +367,14 @@ export function TablaValores({
                           {mostrar(v)}
                         </td>
                         <td className="px-4 py-2.5">
-                          {v.active ? (
+                          {enConflicto(v) ? (
+                            <Insignia
+                              tono="alerta"
+                              title="Un documento posterior dice otra cosa. Lo de abajo sigue vigente hasta que decidas."
+                            >
+                              <GitCompareArrows className="h-2.5 w-2.5" /> En conflicto
+                            </Insignia>
+                          ) : v.active ? (
                             <Insignia tono="activo" title="Se está usando ahora mismo">
                               Vigente
                             </Insignia>
@@ -358,6 +422,65 @@ export function TablaValores({
                           </td>
                         ) : null}
                       </tr>
+
+                      {/*
+                        La contradicción, enseñada entera: qué se está usando,
+                        qué dice el documento nuevo, y las dos únicas salidas.
+                        Sin esta fila, «En conflicto» sería una etiqueta sin
+                        manera de hacer nada al respecto.
+                      */}
+                      {enConflicto(v) ? (
+                        <tr className="border-b border-[hsl(var(--border))]/50 bg-rose-500/[0.03] last:border-0">
+                          <td colSpan={puedeEditar ? 7 : 6} className="px-4 pb-3 pt-0">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                              <span className="text-[hsl(var(--muted-foreground))]">
+                                Un documento nuevo dice{' '}
+                                <b className="tabular-nums text-[hsl(var(--foreground))]">
+                                  {mostrar(loPropuesto(v))}
+                                </b>{' '}
+                                donde tú aprobaste{' '}
+                                <b className="tabular-nums text-[hsl(var(--foreground))]">
+                                  {mostrar(v)}
+                                </b>
+                                . Se sigue usando el tuyo.
+                              </span>
+                              {v.conflict_note ? (
+                                <span className="text-[hsl(var(--muted-foreground))]/70">
+                                  «{v.conflict_note}»
+                                </span>
+                              ) : null}
+                              {puedeEditar ? (
+                                <div className="flex items-center gap-1">
+                                  <Boton
+                                    variante="contorno"
+                                    className="h-7 px-2 text-xs"
+                                    disabled={pendiente}
+                                    title="Usar la cifra del documento nuevo a partir de ahora"
+                                    onClick={() =>
+                                      correr(() => accionResolverConflicto(v.id, 'aceptar'))
+                                    }
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> Usar{' '}
+                                    {mostrar(loPropuesto(v))}
+                                  </Boton>
+                                  <Boton
+                                    variante="silencioso"
+                                    className="h-7 px-2 text-xs"
+                                    disabled={pendiente}
+                                    title="Quedarse con la cifra aprobada y olvidar la del documento"
+                                    onClick={() =>
+                                      correr(() => accionResolverConflicto(v.id, 'descartar'))
+                                    }
+                                  >
+                                    <X className="h-3.5 w-3.5" /> Dejar {mostrar(v)}
+                                  </Boton>
+                                </div>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>

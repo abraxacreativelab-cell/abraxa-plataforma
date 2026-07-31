@@ -280,6 +280,70 @@ async function main() {
     debe(ajeno.length === 0, 'FUGA: devolvió trozos de otro tenant');
   });
 
+  await check('un documento archivado desaparece de las DOS búsquedas', async () => {
+    // Archivar es la única forma de retirar un documento: la UI no borra,
+    // porque los valores aprobados apuntan a él. Si la búsqueda siguiera
+    // devolviéndolo, el agente citaría la lista de precios del año pasado.
+    const vector = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0));
+    await db.from('documents').update({ status: 'archived' }).eq('id', docId);
+
+    const { data: sem, error } = await db.rpc('match_knowledge_chunks', {
+      p_tenant_id: tenantId,
+      p_embedding: JSON.stringify(vector),
+      p_limit: 5,
+      p_min_similarity: 0,
+    });
+    if (error) throw new Error(error.message);
+    debe(sem.length === 0, `la semántica todavía devuelve ${sem.length} trozo(s) de un archivado`);
+
+    const { data: lex } = await db.rpc('search_documents', {
+      p_tenant_id: tenantId,
+      p_query: 'envios zona metropolitana',
+      p_limit: 5,
+    });
+    debe((lex ?? []).length === 0, 'la léxica todavía devuelve un documento archivado');
+
+    await db.from('documents').update({ status: 'active' }).eq('id', docId);
+    return 'semántica y léxica dicen lo mismo';
+  });
+
+  await check('lo aprobado no se puede pisar a medias: el CHECK del conflicto', async () => {
+    // Media contradicción escrita es una contradicción invisible: sin
+    // `conflict_at` no la vería ni la UI ni el badge.
+    const { error } = await db.from('canonical_values').insert({
+      ...valorBase,
+      key: 'medio_conflicto',
+      conflict_value: 1200,
+    });
+    debe(error?.code === '23514', `esperaba 23514 y llegó ${error?.code ?? 'ningún error'}`);
+  });
+
+  await check('un conflicto completo convive con la cifra vigente intacta', async () => {
+    const ahora = new Date().toISOString();
+    const { data, error } = await db
+      .from('canonical_values')
+      .insert({
+        tenant_id: tenantId,
+        key: 'consulta_inicial',
+        label: 'Consulta',
+        kind: 'money',
+        value: 850,
+        currency: 'MXN',
+        active: true,
+        approved_at: ahora,
+        approved_by: 'verificacion@abraxa.mx',
+        conflict_value: 900,
+        conflict_currency: 'MXN',
+        conflict_doc_id: docId,
+        conflict_at: ahora,
+      })
+      .select('value, active, conflict_value')
+      .single();
+    if (error) throw new Error(error.message);
+    debe(Number(data.value) === 850 && data.active === true, 'la cifra aprobada no quedó intacta');
+    debe(Number(data.conflict_value) === 900, 'la contradicción no quedó anotada');
+  });
+
   await check('un trozo sin vector se guarda igual (embedding NULL es válido)', async () => {
     const { error } = await db.from('knowledge_chunks').insert({
       tenant_id: tenantId,

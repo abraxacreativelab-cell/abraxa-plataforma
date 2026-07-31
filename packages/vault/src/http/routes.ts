@@ -12,11 +12,13 @@ import {
   aprobarValor,
   borrarValor,
   contarBorradores,
+  contarConflictos,
   crearValor,
   desactivarValor,
   editarValor,
   listarValores,
   obtenerValor,
+  resolverConflicto,
 } from '../values/service';
 import {
   archivarDocumento,
@@ -63,6 +65,7 @@ router.get(
     const rows = await listarValores(ctx, {
       areaSlug: q(req, 'area') ?? undefined,
       soloBorradores: q(req, 'estado') === 'borrador',
+      soloConflictos: q(req, 'estado') === 'conflicto',
       busqueda: q(req, 'q'),
     });
     res.json({ values: rows, canEdit: canEditVault(ctx) });
@@ -110,6 +113,29 @@ router.post(
   h(async (req, res) => {
     const ctx = await contextoDe(req);
     res.json(await desactivarValor(ctx, String(req.params.id)));
+  }),
+);
+
+/**
+ * Las dos salidas de una contradicción.
+ *
+ * Dos rutas explícitas y no un `PATCH` con un campo `decision`: aceptar cambia
+ * un número que ya está en contratos y mensajes vivos. Que se lea en el log de
+ * acceso qué se hizo, sin abrir el cuerpo de la petición.
+ */
+router.post(
+  '/values/:id/conflict/accept',
+  h(async (req, res) => {
+    const ctx = await contextoDe(req);
+    res.json(await resolverConflicto(ctx, String(req.params.id), 'aceptar'));
+  }),
+);
+
+router.post(
+  '/values/:id/conflict/discard',
+  h(async (req, res) => {
+    const ctx = await contextoDe(req);
+    res.json(await resolverConflicto(ctx, String(req.params.id), 'descartar'));
   }),
 );
 
@@ -314,14 +340,18 @@ router.get(
   h(async (req, res) => {
     const ctx = await contextoDe(req);
     const embeddings = embeddingsStatus();
-    const [borradores, sinVector] = await Promise.all([
+    const [borradores, conflictos, sinVector] = await Promise.all([
       contarBorradores(ctx),
+      contarConflictos(ctx),
       contarTrozosSinVector(ctx),
     ]);
     res.json({
       ok: true,
       embeddings,
       borradoresPendientes: borradores,
+      // Distinto de un borrador y más urgente: aquí hay una cifra VIGENTE que
+      // un documento posterior desmiente, y se sigue propagando mientras tanto.
+      conflictosPendientes: conflictos,
       fragmentosSinIndexar: sinVector,
       ...(sinVector > 0
         ? { aviso: `${sinVector} fragmento(s) esperan indexado; la búsqueda por palabras sí los ve.` }

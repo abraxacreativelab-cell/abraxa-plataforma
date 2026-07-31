@@ -12,18 +12,43 @@ import type { TenantContext } from '@abraxa/db';
 import { notifyVaultChanged } from '../cache';
 import { formatVault } from '../format';
 import { requireVaultEdit, requireVaultRead } from '../rbac';
-import type { VaultRow } from '../types';
+import type { DecisionConflicto, VaultRow } from '../types';
 import { crearValorSchema, editarValorSchema } from './schema';
 import { fila as filaDe, filas as filasDe } from '../rows';
 
 const COLUMNS =
   'id, key, label, kind, value, value_text, value_json, currency, unit, note, ' +
   'area_slug, scope_type, scope_id, active, source_doc_id, position, ' +
-  'approved_at, approved_by, created_at, updated_at';
+  'approved_at, approved_by, conflict_value, conflict_value_text, ' +
+  'conflict_currency, conflict_note, conflict_doc_id, conflict_at, ' +
+  'created_at, updated_at';
+
+/**
+ * Las seis columnas de conflicto, apagadas.
+ *
+ * Se escriben SIEMPRE juntas: la 031 tiene un CHECK que impide dejar media
+ * contradicción escrita, porque un conflicto sin `conflict_at` no lo vería
+ * nadie —ni la UI, ni el badge— y existiría en la base para siempre.
+ */
+const CONFLICTO_LIMPIO = {
+  conflict_value: null,
+  conflict_value_text: null,
+  conflict_currency: null,
+  conflict_note: null,
+  conflict_doc_id: null,
+  conflict_at: null,
+} as const;
+
+/** `true` si un documento posterior contradice esta cifra y nadie ha decidido. */
+export function tieneConflicto(row: VaultRow): boolean {
+  return row.conflict_at != null;
+}
 
 export interface ListarValoresOpts {
   areaSlug?: string | null;
   soloBorradores?: boolean;
+  /** Sólo los que un documento posterior contradice. El otro badge urgente. */
+  soloConflictos?: boolean;
   busqueda?: string;
 }
 
@@ -42,6 +67,11 @@ export async function listarValores(
   if (error) throw new PlatformError('INTERNAL', `No se pudieron leer los valores: ${error.message}`);
 
   let resultado = filasDe<VaultRow>(data);
+
+  // En memoria y no con un `.not()` de PostgREST: la lista de valores de un
+  // negocio cabe holgadamente en una respuesta, y así el filtro se comporta
+  // igual en la base real y en el doble de las pruebas.
+  if (opts.soloConflictos) resultado = resultado.filter(tieneConflicto);
 
   if (opts.busqueda?.trim()) {
     const t = opts.busqueda.trim().toLowerCase();
@@ -121,6 +151,16 @@ export async function editarValor(
   // Dejarlo colgando pasaría el CHECK de la 031 sólo por accidente.
   if (v.scope_type === 'tenant') parche.scope_id = '';
 
+  // Si el emprendedor toca la cifra, la contradicción pendiente deja de tener
+  // sentido: acaba de decidir a mano, que es exactamente lo que se le pedía.
+  // Dejar el conflicto marcado lo mandaría a resolver algo que ya resolvió.
+  const tocaLaCifra =
+    v.value !== undefined ||
+    v.value_text !== undefined ||
+    v.value_json !== undefined ||
+    v.currency !== undefined;
+  if (tocaLaCifra) Object.assign(parche, CONFLICTO_LIMPIO);
+
   // Activarlo desde la edición cuenta como aprobación: quien lo prendió es
   // quien responde por esa cifra, y eso queda escrito.
   if (v.active === true) {
@@ -178,6 +218,87 @@ export async function aprobarValor(
   await notifyVaultChanged(ctx.tenantId);
   const row = filaDe<VaultRow>(data);
   return { row, propagado: `{valor.${row.key}} → ${formatVault(row)}` };
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Resolver una contradicción.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * La ingesta no decide cuando un documento nuevo desmiente una cifra que ya se
+ * aprobó: la deja marcada y sigue de largo (ver `ingest/pipeline.ts`). Aquí es
+ * donde una persona decide, que es el único lugar donde se puede decidir.
+ *
+ *   `aceptar`   — la cifra del documento nuevo pasa a ser la vigente, y queda
+ *                 aprobada por quien lo aceptó. La trazabilidad se mueve con
+ *                 ella: `source_doc_id` pasa a ser el documento que la trajo.
+ *   `descartar` — se queda la de siempre. El documento nuevo no cambia nada.
+ *
+ * En los dos casos el conflicto se apaga: si no, el aviso reaparecería en cada
+ * pantalla para siempre y el emprendedor aprendería a ignorarlo.
+ */
+export async function resolverConflicto(
+  ctx: TenantContext,
+  id: string,
+  decision: DecisionConflicto,
+): Promise<{ row: VaultRow; propagado: string }> {
+  requireVaultEdit(ctx);
+
+  const actual = await obtenerValor(ctx, id);
+  if (!tieneConflicto(actual)) {
+    throw new PlatformError(
+      'VALIDATION',
+      `«${actual.label}» no tiene ninguna contradicción pendiente. ` +
+        'Puede que alguien más ya la haya resuelto.',
+    );
+  }
+
+  const parche: Record<string, unknown> =
+    decision === 'aceptar'
+      ? {
+          value: actual.conflict_value ?? null,
+          value_text: actual.conflict_value_text ?? null,
+          currency: actual.conflict_currency ?? actual.currency,
+          // La nota del documento nuevo sólo pisa a la vieja si dice algo.
+          note: actual.conflict_note ?? actual.note,
+          source_doc_id: actual.conflict_doc_id ?? actual.source_doc_id,
+          // Aceptar es aprobar: quien lo acepta responde por esa cifra.
+          active: true,
+          approved_at: new Date().toISOString(),
+          approved_by: ctx.userEmail,
+          ...CONFLICTO_LIMPIO,
+        }
+      : { ...CONFLICTO_LIMPIO };
+
+  const { data, error } = await tenantDb(ctx)
+    .from('canonical_values')
+    .update(parche)
+    .eq('id', id)
+    .select(COLUMNS)
+    .maybeSingle();
+
+  if (error) throw traducirError(error);
+  if (!data) throw notFound('Ese valor no existe en tu bóveda.');
+
+  await notifyVaultChanged(ctx.tenantId);
+  const row = filaDe<VaultRow>(data);
+  return {
+    row,
+    propagado:
+      decision === 'aceptar'
+        ? `{valor.${row.key}} → ${formatVault(row)}`
+        : `{valor.${row.key}} se queda en ${formatVault(row)}`,
+  };
+}
+
+/** Cuántas contradicciones esperan decisión. El badge urgente de Dirección. */
+export async function contarConflictos(ctx: TenantContext): Promise<number> {
+  requireVaultRead(ctx);
+  const { data, error } = await tenantDb(ctx)
+    .from('canonical_values')
+    .select('id, conflict_at');
+  if (error) return 0;
+  return filasDe<{ conflict_at: string | null }>(data).filter((v) => v.conflict_at != null).length;
 }
 
 /** Devolver un valor a borrador. Deja de propagarse sin perder el dato. */

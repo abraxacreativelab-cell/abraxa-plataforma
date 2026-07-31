@@ -4,7 +4,13 @@
  * bien los números — que es exactamente lo que no puede pasar.
  */
 import { describe, expect, it } from 'vitest';
-import { etiquetaDesdeClave, normalizarClave, parsePricingDoc } from './money';
+import {
+  detectarMoneda,
+  etiquetaDesdeClave,
+  monedaDeclarada,
+  normalizarClave,
+  parsePricingDoc,
+} from './money';
 
 const buscar = (doc: string, key: string) => parsePricingDoc(doc).find((c) => c.key === key);
 
@@ -104,6 +110,65 @@ describe('parsePricingDoc · porcentajes', () => {
 
   it('un porcentaje con decimal se conserva', () => {
     expect(buscar('- retencion_isr_pct: 10.67%', 'retencion_isr_pct')?.value).toBe(10.67);
+  });
+});
+
+describe('moneda · cómo la escribe la gente', () => {
+  it.each([
+    ['- licencia_anual: USD 499', 'USD'],
+    ['- licencia_anual: $499 USD', 'USD'],
+    ['- licencia_anual: US$499', 'USD'],
+    ['- licencia_anual: 499 dólares', 'USD'],
+    ['- licencia_anual: $499 dlls', 'USD'],
+    ['- licencia_anual: €499', 'EUR'],
+    ['- licencia_anual: 499 euros', 'EUR'],
+    ['- licencia_anual: $499 MXN', 'MXN'],
+    ['- licencia_anual: 499 pesos', 'MXN'],
+    // Sin señal: pesos, que es donde vive el cliente.
+    ['- licencia_anual: $499', 'MXN'],
+  ])('%s → %s', (linea, esperado) => {
+    expect(buscar(linea, 'licencia_anual')?.currency).toBe(esperado);
+  });
+
+  it('la moneda declarada del documento aplica a todos sus montos', () => {
+    // El caso que de verdad rompe una cotización: el documento lo dice UNA vez,
+    // arriba, y ninguna línea repite "USD".
+    const doc = ['# Tabulador internacional', 'Moneda: USD', '', '- setup: $1,200', '- iguala: $800'].join('\n');
+    const cifras = parsePricingDoc(doc);
+    expect(cifras.map((c) => c.currency)).toEqual(['USD', 'USD']);
+  });
+
+  it('un valor con moneda propia gana sobre la del documento', () => {
+    const doc = ['Moneda: USD', '- setup: $1,200', '- traslado: $900 MXN'].join('\n');
+    const porClave = Object.fromEntries(parsePricingDoc(doc).map((c) => [c.key, c.currency]));
+    expect(porClave.setup).toBe('USD');
+    expect(porClave.traslado).toBe('MXN');
+  });
+
+  it('«Todos los precios están en dólares» también cuenta', () => {
+    const doc = 'Todos los precios están en dólares.\n\n- hosting: $49';
+    expect(buscar(doc, 'hosting')?.currency).toBe('USD');
+  });
+
+  it('una mención suelta NO convierte el documento entero', () => {
+    // El falso positivo caro: bastaría con buscar "USD" en cualquier parte para
+    // que este documento en pesos se volviera un documento en dólares.
+    const doc = [
+      '# Costos de operación',
+      'El proveedor de hosting nos cobra en USD, pero nosotros vendemos aquí.',
+      '',
+      '- plan_basico: $499',
+    ].join('\n');
+    expect(buscar(doc, 'plan_basico')?.currency).toBe('MXN');
+  });
+
+  it('monedaDeclarada devuelve null cuando el documento no dice nada', () => {
+    expect(monedaDeclarada('# Lista de precios\n- consulta: $850')).toBeNull();
+  });
+
+  it('detectarMoneda respeta el valor por defecto que se le pase', () => {
+    expect(detectarMoneda('sin señal alguna', 'EUR')).toBe('EUR');
+    expect(detectarMoneda('sin señal alguna')).toBe('MXN');
   });
 });
 

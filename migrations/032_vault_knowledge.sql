@@ -63,6 +63,22 @@ CREATE INDEX knowledge_chunks_embedding_idx
 --
 -- STABLE + search_path fijo: el operador `<=>` vive en `extensions` y sin
 -- fijar la ruta la función dejaría de resolver según quién la llame.
+--
+-- ── Y por qué se unen los documentos ───────────────────────────────────────
+--
+-- ARCHIVAR ES LA ÚNICA FORMA DE RETIRAR UN DOCUMENTO. La UI no borra: archiva,
+-- porque el documento es de dónde salieron los valores que ya se aprobaron
+-- (ver el comentario de `archivarDocumento`). Si la búsqueda semántica siguiera
+-- devolviendo sus trozos, archivar no serviría de nada: el agente citaría la
+-- lista de precios del año pasado con la misma confianza que la vigente, y el
+-- emprendedor no tendría manera de saber por qué.
+--
+-- La búsqueda léxica de la 030 ya filtra `status <> 'archived'`. Ésta también,
+-- o las dos vías del mismo buscador contestarían cosas distintas.
+--
+-- LEFT JOIN y no INNER: `document_id` es nullable, y un trozo huérfano no debe
+-- desaparecer por no tener documento. `d.tenant_id` se comprueba igual —
+-- defensa en profundidad, no confianza en la FK.
 -- ───────────────────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION app.match_knowledge_chunks(
@@ -88,8 +104,13 @@ AS $$
          k.chunk_index,
          1 - (k.embedding <=> p_embedding) AS similarity
     FROM app.knowledge_chunks k
+    LEFT JOIN app.documents d
+           ON d.id = k.document_id
+          AND d.tenant_id = p_tenant_id
    WHERE k.tenant_id = p_tenant_id
      AND k.embedding IS NOT NULL
+     -- Un documento archivado ya no contesta. Ver la nota de arriba.
+     AND (k.document_id IS NULL OR (d.id IS NOT NULL AND d.status <> 'archived'))
      AND 1 - (k.embedding <=> p_embedding) >= p_min_similarity
    ORDER BY k.embedding <=> p_embedding
    LIMIT greatest(1, least(coalesce(p_limit, 8), 50));
@@ -102,4 +123,5 @@ COMMENT ON TABLE app.knowledge_chunks IS
 
 COMMENT ON FUNCTION app.match_knowledge_chunks IS
   'Búsqueda por significado. Existe porque PostgREST no expone el operador <=>. '
-  'Filtra por tenant dentro del SQL: el aislamiento no depende del llamador.';
+  'Filtra por tenant dentro del SQL: el aislamiento no depende del llamador. '
+  'Excluye los documentos archivados, igual que app.search_documents.';

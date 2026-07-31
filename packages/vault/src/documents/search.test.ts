@@ -167,3 +167,48 @@ describe('fusión de las dos vías', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+/**
+ * Archivar es la ÚNICA forma de retirar un documento: la UI no borra, porque el
+ * documento es de dónde salieron los valores que ya se aprobaron.
+ *
+ * Si la vía semántica siguiera contestando con sus trozos, archivar no serviría
+ * de nada: el agente citaría la lista de precios del año pasado con la misma
+ * confianza que la vigente, y el emprendedor no tendría manera de saber por qué.
+ */
+describe('un documento archivado deja de contestar', () => {
+  it('desaparece de la búsqueda por significado', async () => {
+    const { archivarDocumento, listarDocumentos } = await import('./service');
+
+    const antes = await buscar(h.a, 'cuánto cobro por instalar');
+    expect(antes.hits.some((x) => x.via === 'semantica')).toBe(true);
+
+    const tarifas = (await listarDocumentos(h.a)).find((d) => d.title === 'Tarifas de servicio')!;
+    await archivarDocumento(h.a, tarifas.id);
+
+    const despues = await buscar(h.a, 'cuánto cobro por instalar');
+    expect(despues.semanticaDegradada).toBe(false);
+    expect(despues.hits.map((x) => x.documentId)).not.toContain(tarifas.id);
+  });
+
+  it('las dos vías contestan lo mismo: la léxica tampoco lo devuelve', async () => {
+    // Que una vía lo esconda y la otra lo enseñe sería peor que cualquiera de
+    // las dos por separado: el mismo buscador diría cosas distintas según qué
+    // proveedor esté arriba ese día.
+    const { archivarDocumento, listarDocumentos } = await import('./service');
+    const tarifas = (await listarDocumentos(h.a)).find((d) => d.title === 'Tarifas de servicio')!;
+    await archivarDocumento(h.a, tarifas.id);
+
+    const r = await buscar(h.a, 'tarifa puesta marcha proyecto');
+    expect(r.hits.map((x) => x.documentId)).not.toContain(tarifas.id);
+  });
+
+  it('los demás documentos siguen encontrándose', async () => {
+    const { archivarDocumento, listarDocumentos } = await import('./service');
+    const tarifas = (await listarDocumentos(h.a)).find((d) => d.title === 'Tarifas de servicio')!;
+    await archivarDocumento(h.a, tarifas.id);
+
+    const r = await buscar(h.a, 'a qué horario abrimos');
+    expect(r.hits[0]?.excerpt).toContain('nueve');
+  });
+});

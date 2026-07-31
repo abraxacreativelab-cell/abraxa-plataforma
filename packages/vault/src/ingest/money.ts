@@ -41,6 +41,24 @@
  *  B. Se extraen también PORCENTAJES. `comision_pct: 20%` es tan determinista
  *     como un monto, y sacarlos del regex en vez de del modelo hace que la
  *     ingesta sin credenciales de IA siga entregando lo que más importa.
+ *
+ *  ── Sobre la moneda ─────────────────────────────────────────────────────────
+ *
+ *  `$1,200 USD` y `$1,200` no son el mismo número: a 18 pesos por dólar, la
+ *  diferencia entre uno y otro son veinte mil pesos en una cotización. Por eso
+ *  la moneda se DETECTA y viaja con la cifra hasta la base — no se asume.
+ *
+ *  Se detecta en dos niveles, y en este orden:
+ *
+ *    1. En el propio valor: `- deposito: $1,200 USD`.
+ *    2. En una DECLARACIÓN EXPLÍCITA del documento: una línea que diga
+ *       «Moneda: USD» o «Todos los precios están en dólares».
+ *
+ *  El segundo nivel es a propósito estrecho. Bastaría con buscar "USD" en
+ *  cualquier parte del documento para que un «el proveedor nos cobra en USD»
+ *  perdido en un párrafo convirtiera TODA la lista de precios a dólares. Un
+ *  falso positivo aquí envenena la bóveda entera; un falso negativo sólo deja
+ *  el valor en la moneda por defecto, que es la correcta el 99% de las veces.
  */
 
 export interface CifraExtraida {
@@ -78,9 +96,64 @@ const FILA_TABLA = /^\s*\|\s*([a-záéíóúñü0-9_ *]+?)\s*\|\s*([^|]+?)\s*\|(
 const SEPARADOR_TABLA = /^[-\s:|]+$/;
 const ENCABEZADO_TABLA = /\b(clave|concepto|key|campo|item|descripci[óo]n)\b/i;
 
+// ─── Moneda ──────────────────────────────────────────────────────────────────
+
+/** Lo que se asume cuando el documento no dice otra cosa. */
+export const MONEDA_POR_DEFECTO = 'MXN';
+
+/**
+ * Cómo escribe la gente cada moneda. El orden importa: se evalúa de arriba
+ * abajo y gana la primera que case.
+ *
+ * `$` a secas NO está en ninguna lista: en México significa pesos y en medio
+ * mundo significa dólares, así que por sí solo no es evidencia de nada.
+ */
+const MONEDAS: ReadonlyArray<readonly [string, RegExp]> = [
+  // `dlls` y `dls` son como se escribe en una cotización mexicana de verdad.
+  ['USD', /\busd\b|\bus\s?\$|\bdlls?\b|\bd[oó]lar(?:es)?\b/i],
+  ['EUR', /€|\beur\b|\beuros?\b/i],
+  ['MXN', /\bmxn\b|\bmx\s?\$|\bpesos?\b/i],
+];
+
+/** Código ISO de 3 letras de la moneda que declara un texto. */
+export function detectarMoneda(texto: string, porDefecto = MONEDA_POR_DEFECTO): string {
+  const t = String(texto ?? '');
+  for (const [codigo, re] of MONEDAS) if (re.test(t)) return codigo;
+  return porDefecto;
+}
+
+/**
+ * La moneda que el DOCUMENTO declara para todo, si es que lo declara.
+ *
+ * Sólo dos formas, las dos inequívocas: un encabezado tipo `Moneda: USD` o una
+ * frase que diga que los precios están en tal moneda. Cualquier otra mención
+ * suelta se ignora — ver la nota de arriba sobre por qué.
+ */
+const DECLARACION_MONEDA: readonly RegExp[] = [
+  // Un encabezado o un bullet: `Moneda: USD`, `- Divisa: dólares`.
+  /^[-*>#\s]*(?:moneda|divisa|currency)\s*:\s*([^\n]{1,24})$/im,
+  // Una frase, en la misma línea: «Todos los precios están en dólares».
+  /\b(?:precios?|montos?|tarifas?|cifras?|cantidades|todos?)\b[^.\n]{0,40}?\ben\s+([^\n.,;]{2,24})/i,
+];
+
+export function monedaDeclarada(contenido: string): string | null {
+  const texto = String(contenido ?? '');
+  for (const re of DECLARACION_MONEDA) {
+    const m = texto.match(re);
+    if (!m?.[1]) continue;
+    const codigo = detectarMoneda(m[1], '');
+    if (codigo) return codigo;
+  }
+  return null;
+}
+
 export function parsePricingDoc(content: string): CifraExtraida[] {
   const out: CifraExtraida[] = [];
   const vistas = new Set<string>();
+
+  // La moneda del documento entero, si la declara. Es sólo el punto de partida:
+  // un valor que trae la suya («$99 USD» en una lista en pesos) la pisa.
+  const monedaDelDoc = monedaDeclarada(content) ?? MONEDA_POR_DEFECTO;
 
   const registrar = (
     claveCruda: string,
@@ -107,8 +180,10 @@ export function parsePricingDoc(content: string): CifraExtraida[] {
         out.push({
           key,
           kind: 'percent',
+          // Un porcentaje no tiene moneda. Va la del documento para que la
+          // columna —que es NOT NULL— no mienta con un valor arbitrario.
           value: n,
-          currency: 'MXN',
+          currency: monedaDelDoc,
           label: etiquetaCruda?.trim() || null,
           note: notaCruda?.trim() || null,
           pendiente: false,
@@ -132,7 +207,13 @@ export function parsePricingDoc(content: string): CifraExtraida[] {
       key,
       kind: 'money',
       value,
-      currency: /\busd\b|us\$/i.test(valor) ? 'USD' : 'MXN',
+      // La del valor gana sobre la del documento; la del documento sobre MXN.
+      //
+      // La NOTA no se mira a propósito, aunque «$1,200 — dólares» exista: la
+      // nota es prosa libre y «ya no cobramos en dólares» marcaría el valor
+      // como USD. Entre no detectar una moneda y detectar la equivocada, la
+      // segunda es la que acaba en una cotización con un cero de más.
+      currency: detectarMoneda(valor, monedaDelDoc),
       label: etiquetaCruda?.trim() || null,
       // Un rango o un pendiente pierden el número, así que el texto original
       // se conserva: es la única pista que le queda al emprendedor.

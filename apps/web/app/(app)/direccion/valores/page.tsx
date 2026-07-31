@@ -52,7 +52,13 @@ export default async function PaginaValores({
       valores={datos.valores as VaultRow[]}
       areas={datos.taxonomia.areas.map((a) => ({ slug: a.slug, label: a.label }))}
       puedeEditar={datos.puedeEditar}
-      filtroInicial={searchParams?.estado === 'borrador' ? 'borrador' : 'todos'}
+      filtroInicial={
+        searchParams?.estado === 'borrador'
+          ? 'borrador'
+          : searchParams?.estado === 'conflicto'
+            ? 'conflicto'
+            : 'todos'
+      }
       areaInicial={searchParams?.area ?? ''}
     />
   );

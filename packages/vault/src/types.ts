@@ -71,9 +71,25 @@ export interface VaultRow {
   position: number;
   approved_at?: string | null;
   approved_by?: string | null;
+
+  /**
+   * La contradicción pendiente: lo que un documento POSTERIOR propone para este
+   * valor, sin haberlo pisado. `conflict_at != null` es el marcador. Ver la
+   * migración 031 y el corolario de `ingest/pipeline.ts`.
+   */
+  conflict_value?: number | null;
+  conflict_value_text?: string | null;
+  conflict_currency?: string | null;
+  conflict_note?: string | null;
+  conflict_doc_id?: string | null;
+  conflict_at?: string | null;
+
   created_at?: string;
   updated_at?: string;
 }
+
+/** Qué hacer con una contradicción. No hay una tercera opción a propósito. */
+export type DecisionConflicto = 'aceptar' | 'descartar';
 
 /** Lo que hace falta saber del tenant para poblar `{empresa.*}` y `{marca.*}`. */
 export interface TenantMeta {

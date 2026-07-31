@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ClipboardPaste,
   FileText,
+  GitCompareArrows,
   Layers,
   Search,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import {
   listarValores,
   loadTenantMeta,
   taxonomiaDe,
+  tieneConflicto,
   type AreaGap,
 } from '@abraxa/vault/api';
 import { BovedaVacia, EstadoBoveda } from './_components/estado-boveda';
@@ -60,6 +62,9 @@ export default async function PanelDireccion() {
 
   const { valores, documentos, huecos, borradores, taxonomia, embeddings } = datos;
   const activos = valores.filter((v) => v.active).length;
+  // Distinto de un borrador y más urgente: aquí hay una cifra VIGENTE que un
+  // documento posterior desmiente, y se sigue propagando mientras nadie decida.
+  const conflictos = valores.filter(tieneConflicto).length;
   const totalHuecos = huecos.reduce((n, g) => n + g.missingDocs.length + g.missingValues.length, 0);
 
   if (valores.length === 0 && documentos.length === 0) return <BovedaVacia />;
@@ -90,6 +95,27 @@ export default async function PanelDireccion() {
           nota="De aquí salen los números de arriba."
         />
       </section>
+
+      {conflictos > 0 ? (
+        <Tarjeta className="border-rose-500/25 bg-rose-500/[0.04] p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <GitCompareArrows className="h-4 w-4 shrink-0 text-rose-400" />
+            <p className="flex-1 text-sm">
+              Un documento nuevo contradice <b>{conflictos}</b> número
+              {conflictos === 1 ? '' : 's'} que ya habías aprobado.{' '}
+              <span className="text-[hsl(var(--muted-foreground))]">
+                No cambié ninguno: sigue vigente el que tú aprobaste. Decide cuál se queda.
+              </span>
+            </p>
+            <Link
+              href="/direccion/valores?estado=conflicto"
+              className="shrink-0 rounded-md border border-rose-500/30 px-3 py-1.5 text-sm font-medium text-rose-300 hover:bg-rose-500/10"
+            >
+              Decidir ahora
+            </Link>
+          </div>
+        </Tarjeta>
+      ) : null}
 
       {borradores > 0 ? (
         <Tarjeta className="border-amber-500/25 bg-amber-500/[0.04] p-4">

@@ -21,6 +21,15 @@
 --     documento dejaría valores huérfanos apuntando a la nada y la
 --     trazabilidad —que es el corazón del diseño— se rompería en silencio.
 --
+--  4. LAS COLUMNAS `conflict_*` NO SON UN LUJO. Reingerir un documento no
+--     puede pisar un valor que una persona ya aprobó: si el documento nuevo
+--     dice $900 donde el aprobado dice $850, la ingesta NO decide. Deja el
+--     $850 vigente, guarda el $900 aquí y lo marca en conflicto para que lo
+--     resuelva quien responde por esa cifra. Un upsert a secas haría lo
+--     contrario —pisar el número y apagar la aprobación— en silencio, y el
+--     emprendedor se enteraría cuando un contrato saliera con el precio que
+--     nunca aprobó.
+--
 --  Alcances: sólo `tenant` y `area`. GARDEN tenía además `socio` y
 --  `propiedad`; son vocabulario de una inmobiliaria y no se heredan.
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -48,6 +57,21 @@ CREATE TABLE app.canonical_values (
   position      int  NOT NULL DEFAULT 0,
   approved_at   timestamptz,
   approved_by   text,
+
+  -- ── Conflicto pendiente de resolver ──────────────────────────────────────
+  -- Lo que un documento POSTERIOR propone para un valor que ya estaba
+  -- aprobado. Vive aquí, al lado, sin tocar la cifra vigente. `conflict_at`
+  -- es el marcador: si es NULL, no hay conflicto.
+  conflict_value      numeric,
+  conflict_value_text text,
+  conflict_currency   text,
+  conflict_note       text,
+  -- SET NULL y no CASCADE: si el documento que trajo la contradicción se
+  -- borra, el conflicto sigue abierto —alguien tiene que decidir— aunque ya
+  -- no se pueda enseñar de dónde salió.
+  conflict_doc_id     uuid REFERENCES app.documents(id) ON DELETE SET NULL,
+  conflict_at         timestamptz,
+
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
 
@@ -56,7 +80,19 @@ CREATE TABLE app.canonical_values (
   -- Un valor "por área" sin área es un valor que nunca gana nada.
   CONSTRAINT canonical_values_area_needs_id CHECK (scope_type <> 'area' OR scope_id <> ''),
   -- Y uno general no puede traer un scope_id colgando que confunda el ranking.
-  CONSTRAINT canonical_values_tenant_no_id CHECK (scope_type <> 'tenant' OR scope_id = '')
+  CONSTRAINT canonical_values_tenant_no_id CHECK (scope_type <> 'tenant' OR scope_id = ''),
+  -- La moneda del conflicto, si existe, va en el mismo formato que la vigente.
+  CONSTRAINT canonical_values_conflict_currency CHECK (
+    conflict_currency IS NULL OR conflict_currency ~ '^[A-Z]{3}$'
+  ),
+  -- Un conflicto sin fecha sería invisible para la UI y para el badge: la
+  -- contradicción existiría en la base y nadie se enteraría nunca.
+  CONSTRAINT canonical_values_conflict_needs_at CHECK (
+    conflict_at IS NOT NULL
+    OR (conflict_value IS NULL AND conflict_value_text IS NULL
+        AND conflict_currency IS NULL AND conflict_note IS NULL
+        AND conflict_doc_id IS NULL)
+  )
 );
 
 ALTER TABLE app.canonical_values ENABLE ROW LEVEL SECURITY;
@@ -85,6 +121,16 @@ CREATE INDEX canonical_values_source_doc_idx
 CREATE INDEX canonical_values_drafts_idx
   ON app.canonical_values (tenant_id) WHERE NOT active;
 
+-- "¿qué documento nuevo contradice algo que ya aprobé?" — el otro badge, y el
+-- que de verdad urge: mientras no se resuelva, la bóveda tiene una cifra
+-- vigente que un documento posterior desmiente.
+CREATE INDEX canonical_values_conflicts_idx
+  ON app.canonical_values (tenant_id) WHERE conflict_at IS NOT NULL;
+
+-- "¿qué conflictos trajo este documento?" — la vista de trazabilidad al revés.
+CREATE INDEX canonical_values_conflict_doc_idx
+  ON app.canonical_values (conflict_doc_id) WHERE conflict_doc_id IS NOT NULL;
+
 
 CREATE TRIGGER canonical_values_touch_updated_at
   BEFORE UPDATE ON app.canonical_values
@@ -94,6 +140,11 @@ CREATE TRIGGER canonical_values_touch_updated_at
 COMMENT ON TABLE app.canonical_values IS
   'Valores canónicos del negocio. active=false por defecto: todo valor extraído '
   'de un documento nace en BORRADOR y lo aprueba el emprendedor. Nada se activa solo.';
+
+COMMENT ON COLUMN app.canonical_values.conflict_at IS
+  'Marcador de conflicto: un documento posterior propone otra cifra para un '
+  'valor YA APROBADO. La vigente no se toca; la propuesta espera en conflict_*. '
+  'NULL = sin conflicto.';
 
 COMMENT ON COLUMN app.canonical_values.area_slug IS
   'Dónde se archiva el valor (agrupación en la UI). Para el alcance jerárquico '

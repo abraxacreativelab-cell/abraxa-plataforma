@@ -26,6 +26,9 @@ export {
   desactivarValor,
   borrarValor,
   contarBorradores,
+  contarConflictos,
+  resolverConflicto,
+  tieneConflicto,
 } from './values/service';
 
 export {
@@ -43,8 +46,13 @@ export {
 export { buscar, type ResultadoBusqueda } from './documents/search';
 export { embeddingsStatus } from './documents/embeddings';
 
-export { ingestDocument, type IngestResult, type ValorPropuesto } from './ingest/pipeline';
-export { parsePricingDoc } from './ingest/money';
+export {
+  ingestDocument,
+  type IngestResult,
+  type ValorPropuesto,
+  type ConflictoValor,
+} from './ingest/pipeline';
+export { parsePricingDoc, detectarMoneda, MONEDA_POR_DEFECTO } from './ingest/money';
 
 export { taxonomiaDe, listarGiros, type IndustryTemplate, type AreaTemplate } from './industry/catalog';
 export { detectGapsDetallado, contarHuecos, type AreaGap } from './industry/gaps';
@@ -57,6 +65,7 @@ export type {
   ScopeType,
   DocType,
   DocStatus,
+  DecisionConflicto,
   VaultRow,
   DocumentRow,
   DocumentSummary,

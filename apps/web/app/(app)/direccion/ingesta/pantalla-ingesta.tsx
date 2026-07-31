@@ -2,8 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, ClipboardPaste, FileText, Info, Sparkles } from 'lucide-react';
-import type { IngestResult } from '@abraxa/vault/api';
+import {
+  CheckCircle2,
+  ClipboardPaste,
+  FileText,
+  GitCompareArrows,
+  Info,
+  Sparkles,
+} from 'lucide-react';
+import type { IngestResult, VaultKind } from '@abraxa/vault/api';
 import { accionAprobar, accionIngerir } from '../_lib/actions';
 import {
   AreaTexto,
@@ -27,6 +34,28 @@ const EJEMPLO = `# Precios 2026
 |---------------|----------|-----------------|
 | renta_mensual | $18,000  | local principal |
 `;
+
+/**
+ * Una cifra, con SU moneda. Nunca con una asumida: el emprendedor está viendo
+ * esta pantalla justo para cachar lo que salió mal, y un monto en dólares
+ * pintado como pesos es exactamente lo que no podría cachar.
+ */
+function cifra(
+  kind: VaultKind,
+  value: number | null,
+  value_text: string | null,
+  currency: string,
+): string {
+  if (value == null) return value_text ?? '—';
+  if (kind === 'percent') return `${value}%`;
+  if (kind !== 'money') return String(value);
+  return new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: currency || 'MXN',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+}
 
 /**
  * React 18 exige que el callback de `startTransition` sea SÍNCRONO: pasarle una
@@ -219,6 +248,62 @@ export function PantallaIngesta({ areas }: { areas: Array<{ slug: string; label:
             ) : null}
           </Tarjeta>
 
+          {/*
+            Lo que este documento CONTRADICE. Va antes de las propuestas a
+            propósito: una cifra vigente que el documento nuevo desmiente es
+            más urgente que una cifra nueva que nadie ha usado todavía.
+          */}
+          {resultado.conflictos.length > 0 ? (
+            <section className="space-y-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                  <GitCompareArrows className="h-4 w-4 text-rose-400" />
+                  Este documento contradice {resultado.conflictos.length} número
+                  {resultado.conflictos.length === 1 ? '' : 's'} que ya habías aprobado
+                </h3>
+              </div>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                No cambié ninguno. Lo que aprobaste sigue vigente y se sigue usando en tus
+                contratos y agentes hasta que tú decidas.
+              </p>
+
+              <div className="space-y-2">
+                {resultado.conflictos.map((c) => (
+                  <Tarjeta
+                    key={c.id}
+                    className="flex flex-wrap items-center gap-3 border-rose-500/25 bg-rose-500/[0.04] p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <code className="text-[11px] text-[hsl(var(--primary))]">{c.key}</code>
+                      <span className="ml-2 truncate text-sm">{c.label}</span>
+                    </div>
+                    <span className="whitespace-nowrap text-xs text-[hsl(var(--muted-foreground))]">
+                      tú aprobaste{' '}
+                      <b className="tabular-nums text-[hsl(var(--foreground))]">
+                        {cifra(c.kind, c.vigente.value, c.vigente.value_text, c.vigente.currency)}
+                      </b>
+                      {' · '}el documento dice{' '}
+                      <b className="tabular-nums text-[hsl(var(--foreground))]">
+                        {cifra(c.kind, c.propuesto.value, c.propuesto.value_text, c.propuesto.currency)}
+                      </b>
+                    </span>
+                  </Tarjeta>
+                ))}
+              </div>
+
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                Decide cuál se queda en{' '}
+                <Link
+                  href="/direccion/valores?estado=conflicto"
+                  className="text-[hsl(var(--primary))] underline"
+                >
+                  la lista de números
+                </Link>
+                .
+              </p>
+            </section>
+          ) : null}
+
           {resultado.valores.length > 0 ? (
             <section className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -265,18 +350,7 @@ export function PantallaIngesta({ areas }: { areas: Array<{ slug: string; label:
                       </div>
 
                       <span className="whitespace-nowrap font-medium tabular-nums">
-                        {v.value != null
-                          ? v.kind === 'percent'
-                            ? `${v.value}%`
-                            : v.kind === 'money'
-                              ? new Intl.NumberFormat('es-MX', {
-                                  style: 'currency',
-                                  currency: 'MXN',
-                                  minimumFractionDigits: 0,
-                                  maximumFractionDigits: 2,
-                                }).format(Number(v.value))
-                              : String(v.value)
-                          : (v.value_text ?? '—')}
+                        {cifra(v.kind, v.value, v.value_text, v.currency)}
                       </span>
 
                       {listo ? (

@@ -45,7 +45,21 @@ const UNICOS: Record<string, string[][]> = {
 /** Valores por defecto que en la base pone el DDL. */
 const DEFAULTS: Record<string, Fila> = {
   documents: { status: 'draft', version: 1, source_kind: 'paste', tags: [], doc_type: 'otro', confidence: null },
-  canonical_values: { active: false, currency: 'MXN', scope_type: 'tenant', scope_id: '', position: 0 },
+  canonical_values: {
+    active: false,
+    currency: 'MXN',
+    scope_type: 'tenant',
+    scope_id: '',
+    position: 0,
+    // Las seis de la 031. Van explícitas para que `conflict_at != null` se
+    // comporte igual aquí que contra Postgres.
+    conflict_value: null,
+    conflict_value_text: null,
+    conflict_currency: null,
+    conflict_note: null,
+    conflict_doc_id: null,
+    conflict_at: null,
+  },
   knowledge_chunks: { embedding: null },
 };
 
@@ -293,8 +307,22 @@ export function createFakeDb(inicial: Record<string, Fila[]> = {}): FakeDb {
         const consulta = JSON.parse(String(args.p_embedding ?? '[]')) as number[];
         const min = Number(args.p_min_similarity ?? 0);
         const limite = Number(args.p_limit ?? 8);
+
+        // Espeja el LEFT JOIN de la 032: un documento archivado ya no contesta.
+        // Un trozo sin `document_id` sí: no tiene documento que archivar.
+        const archivados = new Set(
+          (store.get('documents') ?? [])
+            .filter((d) => d.status === 'archived')
+            .map((d) => String(d.id)),
+        );
+
         const filas = (store.get('knowledge_chunks') ?? [])
-          .filter((c) => c.tenant_id === args.p_tenant_id && c.embedding != null)
+          .filter(
+            (c) =>
+              c.tenant_id === args.p_tenant_id &&
+              c.embedding != null &&
+              !(c.document_id != null && archivados.has(String(c.document_id))),
+          )
           .map((c) => ({
             id: c.id,
             document_id: c.document_id,

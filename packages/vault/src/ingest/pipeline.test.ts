@@ -15,7 +15,15 @@ import { injectIntoPrompt } from '../agent-inject';
 import { listarDocumentos, obtenerDocumento } from '../documents/service';
 import { resolveVault } from '../resolver';
 import { ctxSoloLectura, montar, TENANT_A, type Harness } from '../testing/harness';
-import { aprobarValor, listarValores } from '../values/service';
+import {
+  aprobarValor,
+  contarConflictos,
+  desactivarValor,
+  editarValor,
+  listarValores,
+  obtenerValor,
+  resolverConflicto,
+} from '../values/service';
 import { noopClassifier, type DocClassifier } from './classifier';
 import { ingestDocument } from './pipeline';
 
@@ -155,6 +163,47 @@ describe('criterio #5 · aprobar propaga', () => {
   });
 });
 
+describe('la moneda viaja con la cifra', () => {
+  const DOC_USD = `# Tabulador para clientes en EE. UU.
+
+- setup_internacional: $1,200 USD — pago único
+- iguala_internacional: USD 800
+- iva_pct: 16%
+`;
+
+  it('un monto en dólares se guarda en dólares, no en pesos', async () => {
+    // El defecto que esto cierra: el pipeline escribía currency:'MXN' fijo, así
+    // que $1,200 USD entraba a la bóveda como $1,200 MXN. A ~18 pesos por
+    // dólar, el contrato salía con veinte mil pesos de menos y nadie lo veía.
+    await ingestDocument(h.a, { content: DOC_USD }, { classifier: noopClassifier });
+
+    const porClave = Object.fromEntries((await listarValores(h.a)).map((v) => [v.key, v]));
+    expect(porClave.setup_internacional?.currency).toBe('USD');
+    expect(porClave.iguala_internacional?.currency).toBe('USD');
+  });
+
+  it('lo que se propaga al aprobar dice la moneda correcta', async () => {
+    const r = await ingestDocument(h.a, { content: DOC_USD }, { classifier: noopClassifier });
+    const setup = r.valores.find((v) => v.key === 'setup_internacional');
+    expect(setup?.currency).toBe('USD');
+
+    const { propagado } = await aprobarValor(h.a, setup!.id);
+    // El marcador exacto lo pone el ICU de Node y varía entre versiones ("US$"
+    // o "USD"). Lo que no puede variar es que NO diga "$1,200" a secas, que es
+    // lo que el cliente leería como pesos.
+    expect(propagado).toMatch(/US\$|USD/);
+    expect(propagado).not.toMatch(/→ \$1,200$/);
+
+    expect((await resolveVault(h.a))?.values['valor.setup_internacional']).toMatch(/US\$|USD/);
+  });
+
+  it('un documento sin señal de moneda sigue siendo en pesos', async () => {
+    await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    const valores = await listarValores(h.a);
+    expect(valores.every((v) => v.currency === 'MXN')).toBe(true);
+  });
+});
+
 describe('reingerir el mismo documento', () => {
   it('actualiza la propuesta en vez de duplicarla', async () => {
     await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
@@ -167,6 +216,223 @@ describe('reingerir el mismo documento', () => {
     const consultas = (await listarValores(h.a)).filter((v) => v.key === 'consulta_inicial');
     expect(consultas).toHaveLength(1);
     expect(consultas[0]?.value).toBe(900);
+  });
+});
+
+/**
+ * El corolario de «nada se activa solo»: lo que una persona aprobó tampoco se
+ * apaga ni se pisa solo.
+ *
+ * El caso real: el emprendedor aprueba su lista de precios en enero. En junio
+ * pega la lista nueva. Antes de este arreglo, el upsert de la ingesta escribía
+ * el precio nuevo Y ponía active=false — así que el precio aprobado cambiaba y
+ * además dejaba de propagarse, sin que nadie lo decidiera ni se enterara.
+ */
+describe('un documento nuevo NO pisa lo que ya se aprobó', () => {
+  /** Aprueba `consulta_inicial` a $850 y devuelve su id. */
+  async function aprobarConsultaInicial(): Promise<string> {
+    const r = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    const propuesto = r.valores.find((v) => v.key === 'consulta_inicial')!;
+    await aprobarValor(h.a, propuesto.id);
+    return propuesto.id;
+  }
+
+  it('el valor aprobado sigue vigente, con su cifra, y lo nuevo queda en conflicto', async () => {
+    const id = await aprobarConsultaInicial();
+
+    const r = await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+
+    const vigente = await obtenerValor(h.a, id);
+    expect(vigente.value).toBe(850);
+    expect(vigente.active).toBe(true);
+    expect(vigente.approved_by).toBe(h.a.userEmail);
+
+    // Y la contradicción quedó anotada, no aplicada.
+    expect(vigente.conflict_value).toBe(900);
+    expect(vigente.conflict_at).toBeTruthy();
+    expect(vigente.conflict_doc_id).toBe(r.documentId);
+
+    expect(r.conflictos).toHaveLength(1);
+    expect(r.conflictos[0]).toMatchObject({
+      key: 'consulta_inicial',
+      vigente: { value: 850 },
+      propuesto: { value: 900 },
+    });
+  });
+
+  it('el agente sigue citando el precio aprobado mientras nadie decida', async () => {
+    // Lo que de verdad se está protegiendo. Sin esto, un agente empieza a
+    // cotizar $900 porque alguien pegó un PDF.
+    await aprobarConsultaInicial();
+    await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+
+    expect((await resolveVault(h.a))?.values['valor.consulta_inicial']).toBe('$850');
+    expect(await injectIntoPrompt(h.a, 'Eres el asistente.')).toContain('$850');
+  });
+
+  it('lo dice en los avisos en vez de callárselo', async () => {
+    await aprobarConsultaInicial();
+    const r = await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+    expect(r.avisos.join(' ')).toMatch(/contradice/i);
+    expect(r.avisos.join(' ')).toContain('{valor.consulta_inicial}');
+  });
+
+  it('cambiar SÓLO la moneda también es una contradicción', async () => {
+    // $850 y US$850 no son el mismo número aunque el dígito coincida.
+    const id = await aprobarConsultaInicial();
+    const r = await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$850 USD') },
+      { classifier: noopClassifier },
+    );
+
+    expect(r.conflictos.map((c) => c.key)).toContain('consulta_inicial');
+    const vigente = await obtenerValor(h.a, id);
+    expect(vigente.currency).toBe('MXN');
+    expect(vigente.conflict_currency).toBe('USD');
+  });
+
+  it('un documento que CONFIRMA lo aprobado no genera conflicto', async () => {
+    const id = await aprobarConsultaInicial();
+    const r = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+
+    expect(r.conflictos).toHaveLength(0);
+    const vigente = await obtenerValor(h.a, id);
+    expect(vigente.active).toBe(true);
+    expect(vigente.conflict_at).toBeNull();
+  });
+
+  it('reingerir el original después de una contradicción la retira', async () => {
+    const id = await aprobarConsultaInicial();
+    await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+    expect((await obtenerValor(h.a, id)).conflict_at).toBeTruthy();
+
+    await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    expect((await obtenerValor(h.a, id)).conflict_at).toBeNull();
+  });
+
+  it('los BORRADORES sí se sobrescriben: nadie respondió por ellos todavía', async () => {
+    // La regla protege lo aprobado, no lo propuesto. Si un borrador también se
+    // volviera conflicto, reingerir un documento en el que se trabaja dejaría
+    // una fila que resolver por cada guardado.
+    const r1 = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    const id = r1.valores.find((v) => v.key === 'consulta_inicial')!.id;
+
+    const r2 = await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+
+    expect(r2.conflictos).toHaveLength(0);
+    const fila = await obtenerValor(h.a, id);
+    expect(fila.value).toBe(900);
+    expect(fila.active).toBe(false);
+  });
+
+  it('un valor devuelto a borrador vuelve a comportarse como borrador', async () => {
+    const id = await aprobarConsultaInicial();
+    await desactivarValor(h.a, id);
+
+    const r = await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+
+    expect(r.conflictos).toHaveLength(0);
+    expect((await obtenerValor(h.a, id)).value).toBe(900);
+  });
+});
+
+describe('resolver la contradicción · la decide una persona', () => {
+  async function conConflicto(): Promise<string> {
+    const r1 = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    const id = r1.valores.find((v) => v.key === 'consulta_inicial')!.id;
+    await aprobarValor(h.a, id);
+    await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+    return id;
+  }
+
+  it('aceptar aplica la cifra nueva, la aprueba y apaga el conflicto', async () => {
+    const id = await conConflicto();
+    const { row, propagado } = await resolverConflicto(h.a, id, 'aceptar');
+
+    expect(row.value).toBe(900);
+    expect(row.active).toBe(true);
+    expect(row.approved_by).toBe(h.a.userEmail);
+    expect(row.conflict_at).toBeNull();
+    expect(propagado).toBe('{valor.consulta_inicial} → $900');
+
+    expect((await resolveVault(h.a))?.values['valor.consulta_inicial']).toBe('$900');
+  });
+
+  it('aceptar mueve la trazabilidad al documento que trajo la cifra', async () => {
+    const id = await conConflicto();
+    const previo = await obtenerValor(h.a, id);
+    const { row } = await resolverConflicto(h.a, id, 'aceptar');
+    expect(row.source_doc_id).toBe(previo.conflict_doc_id);
+  });
+
+  it('descartar deja todo como estaba y apaga el conflicto', async () => {
+    const id = await conConflicto();
+    const { row } = await resolverConflicto(h.a, id, 'descartar');
+
+    expect(row.value).toBe(850);
+    expect(row.active).toBe(true);
+    expect(row.conflict_at).toBeNull();
+    expect((await resolveVault(h.a))?.values['valor.consulta_inicial']).toBe('$850');
+  });
+
+  it('editar la cifra a mano también retira la contradicción', async () => {
+    // Ya decidió: escribió el número él mismo. Volver a preguntarle sería
+    // enseñarle a ignorar el aviso.
+    const id = await conConflicto();
+    const row = await editarValor(h.a, id, { value: 875 });
+    expect(row.value).toBe(875);
+    expect(row.conflict_at).toBeNull();
+  });
+
+  it('resolver algo que ya no está en conflicto lo dice, no finge', async () => {
+    const id = await conConflicto();
+    await resolverConflicto(h.a, id, 'descartar');
+    await expect(resolverConflicto(h.a, id, 'aceptar')).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+  });
+
+  it('quien sólo lee no puede resolver una contradicción', async () => {
+    const id = await conConflicto();
+    await expect(
+      resolverConflicto(ctxSoloLectura(TENANT_A), id, 'aceptar'),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('se pueden listar y contar los que esperan decisión', async () => {
+    await conConflicto();
+    expect(await contarConflictos(h.a)).toBe(1);
+    const enConflicto = await listarValores(h.a, { soloConflictos: true });
+    expect(enConflicto.map((v) => v.key)).toEqual(['consulta_inicial']);
   });
 });
 

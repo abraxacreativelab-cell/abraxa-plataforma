@@ -198,6 +198,96 @@ BEGIN
     '22222222-2222-4222-8222-222222222222',
     ('[' || 1 || repeat(',0', 1535) || ']')::extensions.vector, 5, 0.0);
   PERFORM pg_temp.debe(n = 0, 'match_knowledge_chunks NO filtra nada de otro tenant');
+
+  -- ── Un documento ARCHIVADO deja de contestar, por las DOS vías ───────────
+  -- Archivar es la única forma de retirar un documento (la UI no borra: los
+  -- valores aprobados apuntan a él). Si la búsqueda siguiera devolviéndolo, el
+  -- agente citaría la lista de precios del año pasado como si fuera la buena.
+  UPDATE app.documents SET status = 'archived' WHERE id = doc_id;
+
+  SELECT count(*) INTO n FROM app.match_knowledge_chunks(
+    '11111111-1111-4111-8111-111111111111',
+    ('[' || 1 || repeat(',0', 1535) || ']')::extensions.vector, 5, 0.0);
+  PERFORM pg_temp.debe(n = 0,
+    format('match_knowledge_chunks EXCLUYE los trozos de un documento archivado (devolvió %s)', n));
+
+  SELECT count(*) INTO n FROM app.search_documents(
+    '11111111-1111-4111-8111-111111111111', 'envios zona metropolitana', 5);
+  PERFORM pg_temp.debe(n = 0, 'search_documents también lo excluye: las dos vías dicen lo mismo');
+
+  -- Un trozo huérfano (sin documento) NO desaparece por no tener a quién
+  -- consultarle el estado: el LEFT JOIN existe justo para eso.
+  INSERT INTO app.knowledge_chunks (tenant_id, document_id, content, chunk_index, embedding)
+  VALUES ('11111111-1111-4111-8111-111111111111', NULL, 'Trozo sin documento.', 0,
+          ('[' || 1 || repeat(',0', 1535) || ']')::extensions.vector);
+
+  SELECT count(*) INTO n FROM app.match_knowledge_chunks(
+    '11111111-1111-4111-8111-111111111111',
+    ('[' || 1 || repeat(',0', 1535) || ']')::extensions.vector, 5, 0.0);
+  PERFORM pg_temp.debe(n = 1, format('un trozo sin document_id sigue siendo buscable (%s)', n));
+
+  -- Y al desarchivarlo vuelve, sin reindexar nada.
+  UPDATE app.documents SET status = 'active' WHERE id = doc_id;
+  SELECT count(*) INTO n FROM app.match_knowledge_chunks(
+    '11111111-1111-4111-8111-111111111111',
+    ('[' || 1 || repeat(',0', 1535) || ']')::extensions.vector, 5, 0.0);
+  PERFORM pg_temp.debe(n = 2, format('desarchivarlo lo devuelve a la búsqueda (%s)', n));
+END $$;
+
+\echo ''
+\echo '── El conflicto: lo aprobado no se pisa ───────────────────────────────'
+
+DO $$
+DECLARE doc_id uuid; ok boolean; v record;
+BEGIN
+  INSERT INTO app.documents (tenant_id, title, content, doc_type, status)
+  VALUES ('11111111-1111-4111-8111-111111111111', 'Precios junio', '- consulta: $900', 'precios', 'active')
+  RETURNING id INTO doc_id;
+
+  -- Media contradicción escrita es una contradicción invisible: sin
+  -- `conflict_at` no la vería ni la UI ni el badge, y viviría ahí para siempre.
+  ok := false;
+  BEGIN
+    INSERT INTO app.canonical_values (tenant_id, key, label, kind, value, conflict_value)
+    VALUES ('11111111-1111-4111-8111-111111111111', 'medio_conflicto', 'X', 'money', 100, 900);
+  EXCEPTION WHEN check_violation THEN ok := true;
+  END;
+  PERFORM pg_temp.debe(ok, 'el CHECK rechaza un conflicto sin conflict_at');
+
+  ok := false;
+  BEGIN
+    INSERT INTO app.canonical_values (tenant_id, key, label, kind, value, conflict_at, conflict_currency)
+    VALUES ('11111111-1111-4111-8111-111111111111', 'moneda_rara', 'X', 'money', 100, now(), 'dolares');
+  EXCEPTION WHEN check_violation THEN ok := true;
+  END;
+  PERFORM pg_temp.debe(ok, 'el CHECK rechaza una moneda de conflicto que no es ISO de 3 letras');
+
+  -- El camino bueno: la cifra vigente intacta y la contradicción al lado.
+  INSERT INTO app.canonical_values
+    (tenant_id, key, label, kind, value, currency, active, approved_at, approved_by,
+     conflict_value, conflict_currency, conflict_doc_id, conflict_at)
+  VALUES ('11111111-1111-4111-8111-111111111111', 'consulta_inicial', 'Consulta', 'money',
+          850, 'MXN', true, now(), 'ana@empresa.mx', 900, 'MXN', doc_id, now());
+
+  SELECT * INTO v FROM app.canonical_values
+   WHERE tenant_id = '11111111-1111-4111-8111-111111111111' AND key = 'consulta_inicial';
+  PERFORM pg_temp.debe(v.value = 850 AND v.active,
+    'la cifra aprobada sigue vigente con la contradicción anotada al lado');
+
+  PERFORM pg_temp.debe(
+    (SELECT count(*) FROM pg_indexes
+      WHERE schemaname = 'app' AND indexname = 'canonical_values_conflicts_idx'
+        AND indexdef ILIKE '%conflict_at IS NOT NULL%') = 1,
+    'el índice parcial de conflictos existe: el badge no hace scan completo');
+
+  -- Si el documento que trajo la contradicción se borra, el conflicto SIGUE
+  -- abierto: alguien tiene que decidir, aunque ya no se pueda enseñar de dónde
+  -- salió.
+  DELETE FROM app.documents WHERE id = doc_id;
+  SELECT * INTO v FROM app.canonical_values
+   WHERE tenant_id = '11111111-1111-4111-8111-111111111111' AND key = 'consulta_inicial';
+  PERFORM pg_temp.debe(v.conflict_doc_id IS NULL AND v.conflict_at IS NOT NULL,
+    'borrar el documento deja conflict_doc_id en NULL sin cerrar el conflicto');
 END $$;
 
 \echo ''
