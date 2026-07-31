@@ -9,9 +9,8 @@
  *    POST /billing/alta-gratis  el plan free, contra una sesión verificada
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { timingSafeEqual } from 'node:crypto';
-import { env, HEADER, isProduction } from '@abraxa/config';
-import { PlatformError } from '@abraxa/db';
+import { env } from '@abraxa/config';
+import { correoVerificadoDe, PlatformError } from '@abraxa/db';
 import { z } from 'zod';
 import { PLAN_CATALOG, PLAN_DE_PAGO, PLAN_POR_DEFECTO, MONEDA, MONTO } from './catalog';
 import { gateway, type EventoDeStripe } from './gateway';
@@ -230,49 +229,26 @@ router.post(
  * `x-user-email` sólo se acepta si viene acompañada del secreto compartido, y
  * en producción, sin secreto configurado, se rechaza todo. Fail-closed.
  *
+ * ── Y por qué ya no lo resuelve este archivo ───────────────────────────────
+ *
+ * Aquí vivían `correoDeSesionVerificada()` y `secretoValido()`: cuarenta
+ * líneas que hacían exactamente esto mismo, escritas a mano. Eran correctas
+ * —comprobaban el secreto ANTES de mirar `x-user-email` y comparaban en tiempo
+ * constante—, pero ser correcto no era suficiente: entre el 30 y el 31 de
+ * julio CUATRO carriles escribieron su propio resolvedor y TRES dejaron
+ * abierta la suplantación de identidad por cabecera. El repo respondió con una
+ * pieza única (`packages/db/src/http/`) y una regla de ESLint que prohíbe leer
+ * cabeceras de identidad a mano. Este archivo era el último que faltaba.
+ *
+ * `correoVerificadoDe(req)` es la variante para lo que ocurre ANTES de
+ * pertenecer a una empresa —crear la tuya, que es justo este caso—: verifica el
+ * proxy y devuelve el correo, sin resolver tenant. Mismo fail-closed, misma
+ * comparación en tiempo constante, una sola copia en el repo.
+ *
  * El login con Google es de H18. Hasta que aterrice, esta ruta está cableada y
  * probada pero nadie la puede llamar desde el navegador — que es exactamente
  * como debe estar.
  */
-function correoDeSesionVerificada(req: Request): string {
-  const e = env();
-  const secreto = e.PROXY_SECRET;
-
-  if (!secreto) {
-    if (isProduction()) {
-      throw new PlatformError(
-        'UNAUTHENTICATED',
-        'PROXY_SECRET no está configurado. En producción la vía de cabeceras se ' +
-          'rechaza: sin secreto, cualquiera puede afirmar ser cualquiera.',
-      );
-    }
-    // En desarrollo se deja pasar para poder probar el flujo sin montar el
-    // BFF. Se avisa, porque el día que esto corra en un servidor expuesto con
-    // NODE_ENV mal puesto, el aviso en los logs es la única pista.
-    console.warn('[billing] PROXY_SECRET ausente: se confía en x-user-email (sólo desarrollo).');
-  } else if (!secretoValido(req.header(HEADER.proxySecret), secreto)) {
-    throw new PlatformError('UNAUTHENTICATED', 'Secreto de proxy inválido.');
-  }
-
-  const correo = (req.header(HEADER.userEmail) ?? '').trim().toLowerCase();
-  if (!correo) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      'Falta la sesión. Inicia sesión antes de crear tu espacio.',
-    );
-  }
-  return correo;
-}
-
-/** Comparación en tiempo constante. `===` sobre un secreto filtra su longitud
- *  y, con suficientes intentos, su contenido. */
-function secretoValido(recibido: string | undefined, esperado: string): boolean {
-  if (!recibido) return false;
-  const a = Buffer.from(recibido);
-  const b = Buffer.from(esperado);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
 
 const AltaGratisBody = z.object({
   businessName: z.string().trim().min(2, 'Escribe el nombre de tu negocio.').max(120),
@@ -281,7 +257,7 @@ const AltaGratisBody = z.object({
 router.post(
   '/alta-gratis',
   asyncH(async (req, res) => {
-    const ownerEmail = correoDeSesionVerificada(req);
+    const ownerEmail = correoVerificadoDe(req);
 
     const parsed = AltaGratisBody.safeParse(req.body);
     if (!parsed.success) {
