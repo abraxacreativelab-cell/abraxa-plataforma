@@ -18,8 +18,8 @@ al que pertenece.
 
 | # | Directorios exclusivos | Migraciones | Rama |
 |---|---|---|---|
-| **H0** | *ninguno* — sólo `docs/` y `deploy/` | *aplica*, no crea | — |
-| **H1** | raíz, `packages/config`, `packages/db`, `.github/`, `scripts/`, stubs | `001`–`009` | `h1-fundacion` |
+| **H0** | `docs/`, `deploy/`, `scripts/`, `.ownership.json`, `eslint.config.mjs`, `CONTRIBUTING.md`, `packages/db/src/http/**` | *aplica*, no crea | `h0-integracion` |
+| **H1** | raíz, `packages/config`, `packages/db` **excepto** `src/http/`, `.github/`, stubs | `001`–`009` | `h1-fundacion` |
 | **H2** | `packages/tenancy/**` | `010`–`019` | `h2-tenancy` |
 | **H3** | `packages/agents/**` | `020`–`029` | `h3-agents` |
 | **H4** | `packages/vault/**`, `app/(app)/direccion/**` | `030`–`039` | `h4-vault` |
@@ -33,9 +33,19 @@ al que pertenece.
 | **H12** | `packages/inbox/src/drivers/meta/**` | `100`–`104` | `h12-meta` |
 | **H13** | `packages/inbox/src/drivers/{email,sms}/**` | `105`–`109` | `h13-email-sms` |
 | **H14** | `apps/web/app/(admin)/**` | `110`–`119` | `h14-admin` |
+| **H15** | `packages/crm/**`, `app/(app)/contactos/**` | `120`–`129` | `h15-crm` |
+| **H16** | `packages/tenancy/{,src/}entitlements/**`, `app/(app)/ajustes/plan/**` | `130`–`139` | `h16-entitlements` |
+| **H17** | `packages/integrations/**`, `app/(app)/ajustes/integraciones/**` | `140`–`149` | `h17-integraciones` |
+| **H18** | `packages/auth/**`, `app/api/**`, `app/(app)/ajustes/**` **excepto** `plan` e `integraciones` | `150`–`159` | `h18-identidad` |
 
 > **La rama tiene que llamarse exactamente igual que la clave de
 > `.ownership.json`.** El gate deriva de ahí quién eres.
+>
+> La única excepción es H0, que abre varios PRs a la vez y por eso su entrada
+> trae una lista `ramas` con sus alias. Un alias dice sólo *"esta rama es este
+> carril"*: **no reparte propiedad**, y sólo el orquestador la tiene. Un carril
+> de construcción con dos entradas pondría dos dueños sobre los mismos archivos
+> y dejaría `--check-overlap` en rojo para **todos** los PRs abiertos.
 
 ### 2. Numera migraciones sólo en tu rango
 
@@ -44,7 +54,9 @@ Jamás salgas de tu bloque de diez. Ver [`migrations/README.md`](migrations/READ
 ### 3. No toques el cableado central
 
 `apps/api/src/packages.ts`, `packages/db/**`, `package.json` raíz, los
-`tsconfig`, el `eslint.config.mjs`. **H1 los dejó terminados.**
+`tsconfig`. **H1 los dejó terminados.** `eslint.config.mjs` y
+`packages/db/src/http/**` son de **H0** desde el 2026-07-31, y la regla es la
+misma: no se editan desde un carril de construcción.
 
 Este archivo era el punto de colisión número uno del repo: cuatro
 conversaciones iban a crear cada una su propio `packages/db/ports.ts`. Por eso

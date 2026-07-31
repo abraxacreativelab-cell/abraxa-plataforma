@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -57,34 +57,110 @@ describe('perteneceA — exclusiones', () => {
     expect(perteneceA('packages/inbox/src/drivers/registry.ts', h6)).toBe(true);
     expect(perteneceA('packages/inbox/src/drivers/whatsapp/index.ts', h6)).toBe(true);
   });
+
+  /**
+   * El mismo patrón, tres carriles después. H16 (entitlements) vive DENTRO del
+   * paquete de H2 —lo que construye es la capa que quedó entre "el modelo, no
+   * el cobro" de H2 y "el cobro" de H10— y H2 le cede su subárbol igual que H6
+   * les cedió los drivers a H12 y H13.
+   *
+   * Sin estas dos exclusiones, H16 no puede escribir un solo archivo sin que el
+   * gate lo atribuya a h2-tenancy, y H2 podría pisar el carril de H16 sin que
+   * nada lo detenga.
+   */
+  it('H2 cede el subárbol de entitlements a H16, y sólo ése', () => {
+    const h2 = ownership['h2-tenancy'].paths;
+    const h16 = ownership['h16-entitlements'].paths;
+
+    expect(perteneceA('packages/tenancy/src/services/plans.ts', h2)).toBe(true);
+    expect(perteneceA('packages/tenancy/src/entitlements/can.ts', h2)).toBe(false);
+    expect(perteneceA('packages/tenancy/entitlements/sql/seed.sql', h2)).toBe(false);
+
+    expect(perteneceA('packages/tenancy/src/entitlements/can.ts', h16)).toBe(true);
+    expect(perteneceA('packages/tenancy/entitlements/sql/seed.sql', h16)).toBe(true);
+    // Y H16 no alcanza el resto del paquete de H2.
+    expect(perteneceA('packages/tenancy/src/services/plans.ts', h16)).toBe(false);
+    expect(perteneceA('packages/tenancy/src/middleware/tenant.ts', h16)).toBe(false);
+  });
+
+  /**
+   * `/ajustes` se reparte entre tres carriles: la sección es de H18 (la hace
+   * junto con la sesión), pero H16 necesita `plan` y H17 necesita
+   * `integraciones` — la pantalla de conexión que H12-meta.md §2.4 le promete
+   * al emprendedor ("vincula su cuenta desde Ajustes").
+   */
+  it('/ajustes se reparte: la sección es de H18, plan de H16 e integraciones de H17', () => {
+    const h18 = ownership['h18-identidad'].paths;
+
+    expect(perteneceA('apps/web/app/(app)/ajustes/page.tsx', h18)).toBe(true);
+    expect(perteneceA('apps/web/app/(app)/ajustes/layout.tsx', h18)).toBe(true);
+    expect(perteneceA('apps/web/app/(app)/ajustes/plan/page.tsx', h18)).toBe(false);
+    expect(perteneceA('apps/web/app/(app)/ajustes/integraciones/page.tsx', h18)).toBe(false);
+
+    expect(
+      perteneceA('apps/web/app/(app)/ajustes/plan/page.tsx', ownership['h16-entitlements'].paths),
+    ).toBe(true);
+    expect(
+      perteneceA(
+        'apps/web/app/(app)/ajustes/integraciones/page.tsx',
+        ownership['h17-integraciones'].paths,
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * `apps/web/app/api/**` no era de nadie hasta que se emitió H18, y su
+   * ausencia estaba anotada por H4 en
+   * apps/web/app/(app)/direccion/_lib/session.ts. Un archivo sin dueño falla
+   * `--check-overlap` y bloquea el PR de quien lo cree.
+   */
+  it('las rutas de servidor del front tienen dueño', () => {
+    expect(duenosDe('apps/web/app/api/auth/[...nextauth]/route.ts', ownership)).toContain(
+      'h18-identidad',
+    );
+    expect(duenosDe('apps/web/app/api/bff/[...path]/route.ts', ownership)).toContain(
+      'h18-identidad',
+    );
+  });
 });
 
 describe('el mapa de propiedad', () => {
   /**
-   * 14 carriles del plan original + H0 (el orquestador, alta del PR #15) + H15
-   * (CRM), que se abrió después: el CRM se había dado por incluido dentro de H6
-   * y H8, y ninguno de los dos lo construye — H6 declara `contact_id` SIN
-   * `REFERENCES` (H6-inbox.md:110) y H8 dice textualmente "no construyas el
-   * CRM" (H8-flows.md:38).
+   * 14 carriles del plan original + H0 (el orquestador, alta del PR #15) + los
+   * CUATRO emitidos el 2026-07-31 al encontrarse huecos que ninguno de los 14
+   * podía cerrar desde su columna:
+   *
+   *   H15 (CRM) — el CRM se había dado por incluido dentro de H6 y H8, y
+   *     ninguno de los dos lo construye: H6 declara `contact_id` SIN
+   *     `REFERENCES` (H6-inbox.md:110) y H8 dice textualmente "no construyas
+   *     el CRM" (H8-flows.md:38). Alta desde main, PR #15.
+   *   H16 (entitlements) · H17 (integraciones por tenant) · H18 (identidad) —
+   *     alta en este PR.
    *
    * Que sea un número escrito a mano es a propósito: abrir un carril nuevo
-   * tiene que ser una decisión visible en un diff, no algo que pase solo.
+   * tiene que ser una decisión visible en un diff, no algo que pase solo. Se
+   * actualiza al ALTA de un carril, y sólo entonces.
    */
-  it('tiene las 14 entradas de construcción, más la de H0, más la de H15', () => {
-    expect(Object.keys(ownership)).toHaveLength(16);
+  it('tiene las 14 entradas de construcción, más la de H0, más las cuatro emitidas después', () => {
+    expect(Object.keys(ownership)).toHaveLength(19);
     expect(ownership[CARRIL_ORQUESTADOR]).toBeDefined();
-    expect(ownership['h15-crm']).toBeDefined();
+    for (const carril of ['h15-crm', 'h16-entitlements', 'h17-integraciones', 'h18-identidad']) {
+      expect(ownership[carril], carril).toBeDefined();
+    }
   });
 
   it('H0 no tiene bloque de migraciones: no las escribe, las ordena', () => {
     expect(ownership[CARRIL_ORQUESTADOR].migrations).toBeNull();
   });
 
-  it('H0 no se solapa con ningún carril de construcción', () => {
-    // Con h1-fundacion sí, a propósito: ya mergeó y está dormido.
-    const construccion = Object.keys(ownership).filter(
-      (n) => n !== CARRIL_ORQUESTADOR && n !== 'h1-fundacion',
-    );
+  it('H0 no se solapa con ningún carril de construcción — h1-fundacion incluido', () => {
+    // Hasta el 2026-07-31 este filtro excluía a h1-fundacion a mano, porque
+    // `.ownership.json`, `scripts/**`, `eslint.config.mjs` y `CONTRIBUTING.md`
+    // estaban en los dos lados. Ya no: salieron de H1 y `packages/db/**` trae
+    // su exclusión de `src/http/**`. La nota de `.ownership.json` afirma que
+    // el mapa es consistente SIN excepción; esto es lo que lo comprueba, y si
+    // alguien reintroduce el solape, falla aquí en vez de en prosa.
+    const construccion = Object.keys(ownership).filter((n) => n !== CARRIL_ORQUESTADOR);
     for (const glob of ownership[CARRIL_ORQUESTADOR].paths) {
       const muestra = glob.replace(/\*\*/g, 'x/y').replace(/\*/g, 'x');
       for (const carril of construccion) {
@@ -119,18 +195,56 @@ describe('el mapa de propiedad', () => {
    * un permiso general justamente para que agregarse a ella sea un cambio
    * visible que alguien tiene que aprobar.
    *
-   * H15 está aquí por una razón mecánica: es el único carril que crea un
-   * WORKSPACE nuevo (`packages/crm`), y `npm ci` se niega a instalar si el
-   * lockfile no lo conoce ("Missing: @abraxa/crm@0.1.0 from lock file"). Sin
-   * esa entrada, CI no llega ni a compilar.
+   * H15, H17 y H18 están aquí por una razón mecánica, no por conveniencia:
+   * cada uno crea un WORKSPACE nuevo —`packages/crm`, `packages/integrations`,
+   * `packages/auth`— y `npm ci` se niega a instalar si el lockfile no lo
+   * conoce ("Missing: @abraxa/crm@0.1.0 from lock file"). Sin esa entrada, su
+   * CI no llega ni a compilar: `npm ci` revienta antes del typecheck, y si
+   * actualizan el lockfile para arreglarlo, el gate les rechaza el PR.
    *
-   * QUITAR `"lockfile": true` de h15-crm en cuanto el carril mergee.
+   * H16 NO está, y la diferencia es exactamente ésta: vive DENTRO de
+   * `packages/tenancy`, que ya es un workspace. Crear una carpeta dentro de un
+   * paquete existente no toca el lockfile.
+   *
+   * QUITAR `"lockfile": true` de cada uno en cuanto su carril mergee.
    */
   it('el lockfile sólo lo mueven H1 y quien crea un workspace nuevo', () => {
     const conLockfile = Object.entries(ownership)
       .filter(([, c]) => c.lockfile === true)
       .map(([n]) => n);
-    expect(conLockfile.sort()).toEqual(['h1-fundacion', 'h15-crm']);
+    expect(conLockfile.sort()).toEqual([
+      'h1-fundacion',
+      'h15-crm',
+      'h17-integraciones',
+      'h18-identidad',
+    ]);
+  });
+
+  /**
+   * Y la misma regla, deducida del árbol en vez de enumerada a mano — que es
+   * lo que la vuelve una prueba y no una lista.
+   *
+   * Un carril que reclama `packages/<algo>/**` cuando ese paquete TODAVÍA no
+   * existe va a crear un workspace nuevo. `npm ci` falla con "Missing:
+   * @abraxa/<algo>@0.1.0 from lock file" en el job `verify`, ANTES del
+   * typecheck, y el carril se queda sin poder abrir un PR verde: si toca el
+   * lockfile para arreglarlo, `ownership-gate` se lo rechaza.
+   *
+   * Le pasó a H15 y costó descubrirlo. Al emitir H16, H17 y H18 volvió a
+   * pasar con dos de ellos, porque la lista de arriba se copia y la condición
+   * que la justifica no se vuelve a evaluar. Ahora se evalúa sola.
+   */
+  it('todo carril que estrena paquete tiene permiso de lockfile', () => {
+    const sinPermiso = [];
+    for (const [nombre, cfg] of Object.entries(ownership)) {
+      for (const glob of cfg.paths) {
+        const nuevo = /^packages\/([a-z0-9-]+)\/\*\*$/.exec(glob);
+        if (!nuevo) continue;
+        const yaExiste = existsSync(join(RAIZ, 'packages', nuevo[1], 'package.json'));
+        if (!yaExiste && cfg.lockfile !== true) sinPermiso.push(`${nombre} → packages/${nuevo[1]}`);
+      }
+    }
+    expect(sinPermiso).toEqual([]);
   });
 
   /**

@@ -6,7 +6,8 @@
   "description": "Tareas y proyectos. Handoff H9.",
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
-    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" }
+    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" },
+    "./domain": { "types": "./src/domain/index.ts", "default": "./src/domain/index.ts" }
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
