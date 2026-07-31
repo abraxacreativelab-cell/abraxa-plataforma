@@ -16,10 +16,18 @@ import { proxyVerified } from './proxy-verified';
 
 const req = (headers: Record<string, string> = {}) => ({ headers });
 
-const entornoOriginal = { ...process.env };
+// Se restauran las dos variables una por una y no se reemplaza `process.env`
+// entero: hacerlo deja un objeto que ya no es el del proceso, y eso rompió una
+// prueba vecina de forma dificilísima de diagnosticar (ver routes.test.ts).
+const PROXY_ORIGINAL = process.env.PROXY_SECRET;
+const NODE_ENV_ORIGINAL = process.env.NODE_ENV;
 
 afterEach(() => {
-  process.env = { ...entornoOriginal };
+  if (PROXY_ORIGINAL === undefined) delete process.env.PROXY_SECRET;
+  else process.env.PROXY_SECRET = PROXY_ORIGINAL;
+
+  if (NODE_ENV_ORIGINAL === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = NODE_ENV_ORIGINAL;
 });
 
 describe('proxyVerified — sin secreto configurado', () => {
