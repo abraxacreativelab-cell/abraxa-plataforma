@@ -27,7 +27,7 @@ import {
 } from '../channels/service';
 import { listDrivers } from '../drivers/registry';
 import { contarNoLeidos, listarHilos, verHilo } from '../inbox/queries';
-import { createInboxService, enviarEnHilo } from '../inbox/service';
+import { createInboxService, enviarEnHilo, pausarIA } from '../inbox/service';
 import { webhooksRouter } from './webhooks';
 
 export const router: Router = Router();
@@ -132,11 +132,20 @@ router.post(
 router.patch(
   '/threads/:id',
   conContexto(async (ctx, req) => {
-    const b = (req.body ?? {}) as { aiEnabled?: boolean; assignedTo?: string | null };
+    const b = (req.body ?? {}) as {
+      aiEnabled?: boolean;
+      assignedTo?: string | null;
+      pauseMinutes?: number;
+    };
     const threadId = String(req.params.id);
 
     if (b.aiEnabled !== undefined) {
       await inbox.setAiEnabled(ctx, { threadId, enabled: Boolean(b.aiEnabled) });
+    }
+    // Después de `setAiEnabled`, que limpia la pausa al encender: mandar los dos
+    // juntos ("enciéndela pero pausada una hora") tiene que dejar la pausa.
+    if (b.pauseMinutes !== undefined) {
+      await pausarIA(ctx, { threadId, minutos: Number(b.pauseMinutes) });
     }
     if (b.assignedTo !== undefined) {
       await inbox.assign(ctx, { threadId, userEmail: b.assignedTo });

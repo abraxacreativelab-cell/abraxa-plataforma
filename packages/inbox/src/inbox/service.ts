@@ -62,6 +62,32 @@ export function createInboxService(): InboxPort {
   };
 }
 
+/**
+ * "Cállate una hora, yo me encargo."
+ *
+ * Distinto de `setAiEnabled(false)`, y la diferencia importa: una pausa vence
+ * sola. Apagar la IA a mano deja al agente callado hasta que alguien se acuerde
+ * de encenderlo, y nadie se acuerda — el hilo se queda muerto y el emprendedor
+ * concluye que el producto no sirve.
+ *
+ * No está en `InboxPort` (ese contrato es de H1 y no se edita desde aquí); se
+ * expone como función del paquete y por `PATCH /inbox/threads/:id`.
+ */
+export async function pausarIA(
+  ctx: TenantContext,
+  i: { threadId: string; minutos: number },
+): Promise<{ hasta: string | null }> {
+  const minutos = Number(i.minutos);
+  if (!Number.isFinite(minutos) || minutos < 0) {
+    throw new PlatformError('VALIDATION', 'Los minutos de pausa tienen que ser un número ≥ 0.');
+  }
+
+  // 0 = quitar la pausa. Es lo que hace obvio "reanudar" sin otro endpoint.
+  const hasta = minutos === 0 ? null : new Date(Date.now() + minutos * 60_000).toISOString();
+  await parchearHilo(ctx, i.threadId, { ai_paused_until: hasta });
+  return { hasta };
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // El envío, con su anti-duplicado
 // ════════════════════════════════════════════════════════════════════════════

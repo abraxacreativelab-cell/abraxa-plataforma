@@ -32,6 +32,8 @@ export async function PATCH(req: Request, { params }: Ctx): Promise<NextResponse
   const cuerpo = (await req.json().catch(() => ({}))) as {
     aiEnabled?: boolean;
     assignedTo?: string | null;
+    /** Pausa que vence sola. `0` la quita. */
+    pauseMinutes?: number;
   };
 
   const s = await sesion();

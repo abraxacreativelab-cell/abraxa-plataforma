@@ -78,6 +78,9 @@ export async function crearCanal(ctx: TenantContext, entrada: EntradaCanal): Pro
     // bandeja que se ve bien y no funciona.
     driverFor(entrada.type);
   }
+  // Se valida ANTES del INSERT, igual que en `ajustarCanal`: un horario mal
+  // formado no debe llegar a existir ni un instante.
+  const horario = entrada.businessHours ? validarHorario(entrada.businessHours) : {};
 
   const { data: creado, error } = await db
     .from('channels')
@@ -88,7 +91,7 @@ export async function crearCanal(ctx: TenantContext, entrada: EntradaCanal): Pro
       config: entrada.config ?? {},
       status: 'pending',
       agent_role: entrada.agentRole ?? 'sales',
-      business_hours: entrada.businessHours ?? {},
+      business_hours: horario,
       ai_outside_hours: entrada.aiOutsideHours !== false,
     })
     .select()
@@ -112,7 +115,8 @@ export async function crearCanal(ctx: TenantContext, entrada: EntradaCanal): Pro
     const r = await driver.provisionChannel({ tenantId: ctx.tenantId, name: fila.name, config });
     const patch = {
       config,
-      external_id: r.externalId ?? null,
+      // Vacío = todavía sin dirección propia (nadie ha escaneado el QR).
+      external_id: r.externalId || null,
       status: estadoValido(r.status),
       updated_at: new Date().toISOString(),
     };

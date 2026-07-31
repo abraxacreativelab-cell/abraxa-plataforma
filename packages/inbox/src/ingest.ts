@@ -198,7 +198,10 @@ export async function ingerirMensaje(
     },
   );
 
-  await marcarResultadoIA(ctx, mensaje.id, ai.outcome, ai.reason);
+  // `ai_outcome` es una columna de los ENTRANTES: dice qué hizo la IA con lo
+  // que le escribió el cliente. Marcar el eco de un saliente nuestro sería
+  // ruido en la burbuja equivocada.
+  if (!m.fromMe) await marcarResultadoIA(ctx, mensaje.id, ai.outcome, ai.reason);
 
   return {
     externalId: m.externalId,

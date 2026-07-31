@@ -119,6 +119,17 @@ describe('validarHorario', () => {
     expect(validarHorario({})).toEqual({});
     expect(validarHorario({ semana: {} })).toEqual({ semana: {} });
   });
+
+  it('crearCanal lo valida ANTES del INSERT — no deja la fila mal formada', async () => {
+    await expect(
+      crearCanal(ctx, {
+        type: 'sms',
+        name: 'Línea',
+        businessHours: { semana: { lun: [['09:00', '18:00']] } },
+      }),
+    ).rejects.toThrow(/zona horaria/i);
+    expect(db.tabla('channels')).toHaveLength(0);
+  });
 });
 
 describe('sanearCanal', () => {

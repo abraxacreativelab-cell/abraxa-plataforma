@@ -59,7 +59,13 @@ registerDriver(createWhatsAppDriver());
 
 // ── Superficie pública ──────────────────────────────────────────────────────
 
-export { createInboxService, enviarEnHilo, asegurarHilo, canalParaTipo } from './inbox/service';
+export {
+  createInboxService,
+  enviarEnHilo,
+  asegurarHilo,
+  canalParaTipo,
+  pausarIA,
+} from './inbox/service';
 export { listarHilos, verHilo, contarNoLeidos, type FiltroHilos } from './inbox/queries';
 
 // Canales

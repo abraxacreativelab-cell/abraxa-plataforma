@@ -227,18 +227,28 @@ function FilaHilo({
 
         <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <Badge variant="outline">{ETIQUETA_CANAL[hilo.channelType] ?? hilo.channelType}</Badge>
-          {hilo.assignedTo ? (
-            <Badge variant="info">Lo llevas tú</Badge>
-          ) : hilo.aiEnabled ? (
-            <Badge variant="success">IA activa</Badge>
-          ) : (
-            <Badge variant="warning">IA en pausa</Badge>
-          )}
+          <EstadoIA hilo={hilo} />
           {hilo.unread > 0 && <Badge variant="default">{hilo.unread}</Badge>}
         </span>
       </span>
     </button>
   );
+}
+
+/**
+ * De un vistazo: quién está atendiendo este hilo.
+ *
+ * Los tres estados son distintos y el emprendedor tiene que poder
+ * distinguirlos: **lo llevas tú** (la IA no se mete), **en pausa** (vuelve
+ * sola) y **apagada** (no vuelve hasta que la enciendas).
+ */
+function EstadoIA({ hilo }: { hilo: Hilo }) {
+  if (hilo.assignedTo) return <Badge variant="info">Lo llevas tú</Badge>;
+  if (!hilo.aiEnabled) return <Badge variant="secondary">IA apagada</Badge>;
+  if (hilo.aiPausedUntil && Date.parse(hilo.aiPausedUntil) > Date.now()) {
+    return <Badge variant="warning">IA en pausa</Badge>;
+  }
+  return <Badge variant="success">IA activa</Badge>;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -261,6 +271,8 @@ function Panel({
   const [mandando, setMandando] = React.useState(false);
   const [cambiandoIA, setCambiandoIA] = React.useState(false);
   const finRef = React.useRef<HTMLDivElement>(null);
+
+  const enPausa = Boolean(thread.aiPausedUntil && Date.parse(thread.aiPausedUntil) > Date.now());
 
   const mensajes = React.useMemo(
     () => [...conversacion.messages, ...optimistas],
@@ -351,6 +363,25 @@ function Panel({
     }
   }
 
+  /**
+   * Una pausa que vence sola. Es distinto de apagar la IA: apagarla la deja
+   * callada hasta que alguien se acuerde, y nadie se acuerda.
+   */
+  async function pausarUnaHora() {
+    setCambiandoIA(true);
+    try {
+      const c = await pedir<Conversacion>(`/hilos/${encodeURIComponent(thread.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ pauseMinutes: enPausa ? 0 : 60 }),
+      });
+      onCambio(c);
+    } catch {
+      /* idem */
+    } finally {
+      setCambiandoIA(false);
+    }
+  }
+
   return (
     <>
       <header className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
@@ -374,18 +405,30 @@ function Panel({
               Devolver a la IA
             </Button>
           )}
+          {thread.aiEnabled && (
+            <Button variant="ghost" size="sm" onClick={() => void pausarUnaHora()} disabled={cambiandoIA}>
+              <Icon name="calendar" className="h-4 w-4" />
+              {enPausa ? 'Reanudar ahora' : 'Pausar 1 h'}
+            </Button>
+          )}
           <Button
-            variant={thread.aiEnabled ? 'default' : 'glass'}
+            variant={thread.aiEnabled && !enPausa ? 'default' : 'glass'}
             size="sm"
             onClick={() => void alternarIA()}
             disabled={cambiandoIA}
-            aria-pressed={thread.aiEnabled}
+            aria-pressed={thread.aiEnabled && !enPausa}
           >
-            <Icon name={thread.aiEnabled ? 'bot' : 'lock'} className="h-4 w-4" />
-            {thread.aiEnabled ? 'IA activa' : 'IA en pausa'}
+            <Icon name={thread.aiEnabled && !enPausa ? 'bot' : 'lock'} className="h-4 w-4" />
+            {!thread.aiEnabled ? 'IA apagada' : enPausa ? 'IA en pausa' : 'IA activa'}
           </Button>
         </div>
       </header>
+
+      {enPausa && thread.aiEnabled && (
+        <p className="border-b border-border bg-[hsl(var(--color-warning-bg))] px-4 py-2 text-xs text-[hsl(var(--color-warning-fg))]">
+          Tu agente está en pausa hasta las {hora(thread.aiPausedUntil)}. Después vuelve solo.
+        </p>
+      )}
 
       {thread.assignedTo && (
         <p className="border-b border-border bg-[hsl(var(--color-info-bg))] px-4 py-2 text-xs text-[hsl(var(--color-info-fg))]">

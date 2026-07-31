@@ -14,7 +14,7 @@ import { __clearDrivers, registerDriver } from '../drivers/registry';
 import { createFakeDb, type FakeDb } from '../testing/fake-db';
 import { createFakeDriver, type DriverFalso } from '../testing/fake-driver';
 import type { MessageRow } from '../types';
-import { asegurarHilo, canalParaTipo, createInboxService, enviarEnHilo } from './service';
+import { asegurarHilo, canalParaTipo, createInboxService, enviarEnHilo, pausarIA } from './service';
 
 const TENANT = '11111111-1111-1111-1111-111111111111';
 
@@ -238,6 +238,40 @@ describe('InboxPort', () => {
     });
     const { messageId } = await inbox.send(ctx, { threadId, body: 'hola' });
     expect(msgs().find((m) => m.id === messageId)).toBeTruthy();
+  });
+
+  it('pausarIA pone una fecha futura y el 0 la quita', async () => {
+    const threadId = await hiloDePrueba();
+
+    const { hasta } = await pausarIA(ctx, { threadId, minutos: 60 });
+    expect(Date.parse(hasta!)).toBeGreaterThan(Date.now());
+    expect(db.tabla('threads')[0]?.ai_paused_until).toBe(hasta);
+
+    await pausarIA(ctx, { threadId, minutos: 0 });
+    expect(db.tabla('threads')[0]?.ai_paused_until).toBeNull();
+  });
+
+  it('pausarIA rechaza minutos que no son un número', async () => {
+    const threadId = await hiloDePrueba();
+    await expect(pausarIA(ctx, { threadId, minutos: -5 })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+    await expect(
+      pausarIA(ctx, { threadId, minutos: Number.NaN }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('encender la IA limpia la pausa; apagarla no la toca', async () => {
+    const inbox = createInboxService();
+    const threadId = await hiloDePrueba();
+
+    await pausarIA(ctx, { threadId, minutos: 60 });
+    await inbox.setAiEnabled(ctx, { threadId, enabled: false });
+    // Apagar no borra la pausa: son dos controles distintos.
+    expect(db.tabla('threads')[0]?.ai_paused_until).not.toBeNull();
+
+    await inbox.setAiEnabled(ctx, { threadId, enabled: true });
+    expect(db.tabla('threads')[0]?.ai_paused_until).toBeNull();
   });
 
   it('assign(null) suelta el hilo', async () => {

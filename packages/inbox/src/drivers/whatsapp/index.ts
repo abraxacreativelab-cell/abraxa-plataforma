@@ -115,7 +115,11 @@ export function createWhatsAppDriver(opts: OpcionesDriverWhatsApp = {}): DriverC
       await cliente.crearInstancia(instancia, url);
       log.info(`canal de WhatsApp aprovisionado: ${name} (instancia ${instancia})`);
 
-      return { externalId: instancia, status: 'pending' };
+      // `externalId` vacío a propósito: esa columna guarda la DIRECCIÓN de la
+      // línea —el número conectado—, y todavía no hay número: nadie ha
+      // escaneado el QR. La instancia vive en `config.instance`, que es donde
+      // le corresponde. Lo llena `channelStatus()` al vincular.
+      return { externalId: '', status: 'pending' };
     },
 
     async channelStatus({ config }) {

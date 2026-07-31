@@ -167,13 +167,19 @@ export function enviar(threadId: string, body: string): Mensaje | null {
 
 export function ajustar(
   threadId: string,
-  cambios: { aiEnabled?: boolean; assignedTo?: string | null },
+  cambios: { aiEnabled?: boolean; assignedTo?: string | null; pauseMinutes?: number },
 ): Conversacion | null {
   const thread = HILOS.find((h) => h.id === threadId);
   if (!thread) return null;
   if (cambios.aiEnabled !== undefined) {
     thread.aiEnabled = cambios.aiEnabled;
     if (cambios.aiEnabled) thread.aiPausedUntil = null;
+  }
+  if (cambios.pauseMinutes !== undefined) {
+    thread.aiPausedUntil =
+      cambios.pauseMinutes === 0
+        ? null
+        : new Date(Date.now() + cambios.pauseMinutes * 60_000).toISOString();
   }
   if (cambios.assignedTo !== undefined) thread.assignedTo = cambios.assignedTo;
   return ver(threadId);
