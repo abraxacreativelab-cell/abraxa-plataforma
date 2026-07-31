@@ -1,0 +1,584 @@
+/* ══════════════════════════════════════════════════════════════════════════
+ *  @abraxa/ui — el sistema visual completo
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ *  LA LEY (de GARDEN/docs/VAULT-II-DISENO.md, y sigue vigente):
+ *
+ *      Blanco luminoso primario · negro FRÍO · acento CONTEXTUAL.
+ *
+ *  · La base es ACROMÁTICA: blanco sobre negro azulado. El color existe sólo
+ *    como acento contextual.
+ *  · `--primary`, `--accent`, `--ring` y `--glow` son UN MISMO token. Cambiar
+ *    uno recolorea todo. Los sobrescribe `accentVars()` en el contenedor del
+ *    área, y cada `text-primary` / `bg-primary` / resplandor hereda solo.
+ *  · Los ESTADOS SEMÁNTICOS son FIJOS. No siguen el acento, jamás: "activo" no
+ *    puede volverse rojo dentro de un área roja.
+ *  · CERO HEX EN LOS COMPONENTES. Todo por token. `accent.test.ts` lo verifica
+ *    leyendo el código fuente.
+ *
+ *  ── Por qué este archivo es CSS plano ──────────────────────────────────────
+ *
+ *  Sin `@apply` y sin `@layer` de Tailwind, a propósito: así el design system
+ *  no depende del framework, `color.test.ts` puede leer los tokens y verificar
+ *  que la garantía de contraste sigue cuadrando, y cualquier consumidor futuro
+ *  (un correo, un panel aparte) puede importarlo tal cual.
+ *
+ *  Las utilidades de Tailwind se emiten DESPUÉS de este archivo en
+ *  `apps/web/app/globals.css`, así que una utilidad del consumidor siempre le
+ *  gana a un patrón de aquí. Es el comportamiento que GARDEN buscaba con
+ *  `@layer components`.
+ */
+
+:root {
+  /* ── Base acromática ──────────────────────────────────────────────────── */
+  --background: 222 28% 3.8%; /* negro frío azulado, no negro puro */
+  --foreground: 210 24% 97%; /* blanco luminoso */
+  --card: 221 22% 6.5%;
+  --card-foreground: 210 24% 97%;
+  --popover: 221 24% 7%;
+  --popover-foreground: 210 24% 97%;
+  --secondary: 220 16% 10.5%;
+  --secondary-foreground: 210 24% 97%;
+  --muted: 220 15% 10.5%;
+  --muted-foreground: 218 11% 64%;
+  --border: 220 18% 14%;
+  --input: 220 18% 14%;
+  --radius: 0.5rem;
+
+  /* ── El acento contextual ─────────────────────────────────────────────────
+   * Los cuatro son EL MISMO valor. El default es acromático a propósito: sin
+   * área y sin marca no hay color. `accentVars()` los sobrescribe juntos.
+   */
+  --primary: 214.3 18.4% 85.1%;
+  --primary-foreground: 222 47% 5%;
+  --accent: 214.3 18.4% 85.1%;
+  --accent-foreground: 222 47% 5%;
+  --ring: 214.3 18.4% 85.1%;
+  --glow: 214.3 18.4% 85.1%;
+  --accent-raw: #d2d8e0;
+
+  /* ── Luz y vidrio — neutros fríos; el color viene del acento ───────────── */
+  --white: 210 30% 98%;
+  --glass-bg: 221 24% 8%;
+  --glass-border: 218 20% 24%;
+  --hud-line: 216 16% 58%;
+
+  --destructive: 0 70% 50%;
+  --destructive-foreground: 0 0% 96%;
+
+  /* ── Estados semánticos — FIJOS, no siguen el acento ───────────────────────
+   * Los dieciséis. GARDEN los definió y luego usó `amber-500` y `sky-500`
+   * crudos en su `badge.tsx`; aquí los cuatro estados pasan por token.
+   */
+  --color-success: 158 64% 45%;
+  --color-success-fg: 158 64% 58%;
+  --color-success-bg: 158 64% 45% / 0.1;
+  --color-success-border: 158 64% 45% / 0.35;
+
+  --color-warning: 38 92% 50%;
+  --color-warning-fg: 38 92% 62%;
+  --color-warning-bg: 38 92% 50% / 0.1;
+  --color-warning-border: 38 92% 50% / 0.35;
+
+  --color-error: 0 70% 55%;
+  --color-error-fg: 0 80% 70%;
+  --color-error-bg: 0 70% 55% / 0.1;
+  --color-error-border: 0 70% 55% / 0.35;
+
+  --color-info: 200 80% 54%;
+  --color-info-fg: 200 80% 68%;
+  --color-info-bg: 200 80% 54% / 0.1;
+  --color-info-border: 200 80% 54% / 0.35;
+
+  /* ── Tipografía ───────────────────────────────────────────────────────── */
+  /* `--font-*-src` las publica `next/font` desde el layout raíz. El resto de la
+     pila es el respaldo del sistema, por si la fuente no llega. */
+  --font-sans: var(--font-sans-src), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-mono-src), ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ── Medidas del shell ────────────────────────────────────────────────── */
+  --shell-sidebar: 17rem;
+  --shell-topbar: 3.5rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  El lienzo
+ * ══════════════════════════════════════════════════════════════════════════
+ *  El fondo vive en <html> para que cualquier capa fija quede por encima de él
+ *  y por debajo del contenido. El body queda transparente.
+ */
+
+html {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  background-image:
+    radial-gradient(1100px 600px at 50% -12%, hsl(219 50% 50% / 0.07), transparent 62%),
+    radial-gradient(800px 480px at 10% 0%, hsl(202 55% 55% / 0.035), transparent 50%),
+    radial-gradient(1000px 620px at 90% 104%, hsl(224 45% 42% / 0.05), transparent 55%),
+    linear-gradient(hsl(216 40% 80% / 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(216 40% 80% / 0.018) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+  background-attachment: fixed;
+}
+
+body {
+  min-height: 100vh;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* En móvil, un input con menos de 16px hace que iOS haga zoom solo. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Foco visible siempre — la navegación por teclado no es opcional. */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.75);
+  outline-offset: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  Tipografía
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: hsl(var(--muted-foreground));
+}
+
+.eyebrow-primary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  color: hsl(var(--primary) / 0.85);
+}
+
+.section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.font-display {
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  CRISTAL — un solo modelo de luz para toda la interfaz
+ * ══════════════════════════════════════════════════════════════════════════
+ *  Luz cenital (inset superior) + vidrio esmerilado + sombra de profundidad.
+ *  El color NO vive en el vidrio: vive en el acento (resplandores, fugas).
+ */
+
+.glass,
+.holo {
+  background: linear-gradient(180deg, hsl(var(--white) / 0.055), hsl(var(--white) / 0.015));
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border: 1px solid hsl(var(--white) / 0.09);
+  box-shadow:
+    inset 0 1px 0 hsl(var(--white) / 0.09),
+    0 24px 60px -40px hsl(222 60% 2% / 0.95);
+}
+
+.glass-hover,
+.holo-hover {
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    transform 0.2s;
+}
+
+.glass-hover:hover,
+.holo-hover:hover {
+  border-color: hsl(var(--white) / 0.18);
+  box-shadow:
+    inset 0 1px 0 hsl(var(--white) / 0.12),
+    0 0 0 1px hsl(var(--glow) / 0.12),
+    0 24px 60px -40px hsl(var(--glow) / 0.35);
+}
+
+/* Botón de cristal: vidrio + luz filtrándose por el borde inferior. Neutro;
+ * el acento se añade en la variante del componente Button. */
+.glass-btn {
+  position: relative;
+  background: linear-gradient(180deg, hsl(var(--white) / 0.07), hsl(var(--white) / 0.02));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--white) / 0.12);
+  box-shadow:
+    inset 0 1px 0 hsl(var(--white) / 0.14),
+    0 10px 30px -18px hsl(222 60% 2% / 0.9);
+}
+
+.glass-btn::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--white) / 0.55), transparent);
+  pointer-events: none;
+}
+
+.glass-btn:hover {
+  border-color: hsl(var(--white) / 0.22);
+  box-shadow:
+    inset 0 1px 0 hsl(var(--white) / 0.2),
+    0 0 22px -6px hsl(var(--glow) / 0.45),
+    0 10px 30px -18px hsl(222 60% 2% / 0.9);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  Luz y profundidad
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/* Fuga de luz inferior. Blanca por defecto; `.light-leak-accent` la tiñe. */
+.light-leak {
+  position: relative;
+}
+
+.light-leak::after {
+  content: '';
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(var(--white) / 0.5), transparent);
+  box-shadow: 0 2px 12px 1px hsl(var(--white) / 0.18);
+  pointer-events: none;
+}
+
+.light-leak-accent::after {
+  background: linear-gradient(90deg, transparent, hsl(var(--glow) / 0.75), transparent);
+  box-shadow: 0 2px 14px 1px hsl(var(--glow) / 0.3);
+}
+
+/* Velo de neblina de profundidad. */
+.fog {
+  position: relative;
+}
+
+.fog::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% 120%, hsl(var(--glow) / 0.07), transparent 60%),
+    linear-gradient(180deg, transparent 45%, hsl(var(--background) / 0.8));
+}
+
+.text-glow {
+  text-shadow: 0 0 18px hsl(var(--glow) / 0.45);
+}
+
+.glow-ring {
+  box-shadow:
+    0 0 0 1px hsl(var(--glow) / 0.3),
+    0 0 16px hsl(var(--glow) / 0.35);
+}
+
+/* Esquinas tipo HUD, con líneas neutras. */
+.hud-frame {
+  position: relative;
+}
+
+.hud-frame::before,
+.hud-frame::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  border-color: hsl(var(--hud-line) / 0.5);
+}
+
+.hud-frame::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1.5px solid;
+  border-left: 1.5px solid;
+  border-top-left-radius: 4px;
+}
+
+.hud-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1.5px solid;
+  border-right: 1.5px solid;
+  border-bottom-right-radius: 4px;
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(hsl(216 40% 80% / 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(216 40% 80% / 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.hairline {
+  border-color: hsl(220 14% 14%);
+}
+
+/* Jerarquía por foco: lo activo nítido y con halo, lo inactivo difuminado. */
+[data-focus] {
+  filter: none;
+  box-shadow:
+    0 0 0 1px hsl(var(--glow) / 0.35),
+    0 0 40px -8px hsl(var(--glow) / 0.45);
+}
+
+[data-dim] {
+  filter: blur(2.5px) saturate(0.8) brightness(0.8);
+  opacity: 0.6;
+  transition:
+    filter 0.35s,
+    opacity 0.35s;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  Movimiento
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+.scanline {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 40%;
+  background: linear-gradient(180deg, hsl(var(--white) / 0.04), transparent);
+  animation: abraxa-scan 6s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes abraxa-scan {
+  0% {
+    transform: translateY(-120%);
+  }
+  100% {
+    transform: translateY(320%);
+  }
+}
+
+/* Punto de estado en vivo. */
+.status-dot-live {
+  position: relative;
+  display: inline-flex;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+
+.status-dot-live::before {
+  content: '';
+  position: absolute;
+  display: inline-flex;
+  height: 100%;
+  width: 100%;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  opacity: 0.6;
+  animation: abraxa-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.status-dot-live::after {
+  content: '';
+  position: relative;
+  display: inline-flex;
+  height: 0.5rem;
+  width: 0.5rem;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+}
+
+@keyframes abraxa-ping {
+  75%,
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes abraxa-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  Barras de desplazamiento
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(220 16% 18%) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: hsl(220 16% 18%);
+  border-radius: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: hsl(218 18% 26%);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  Terceros — H8 los necesita y no puede escribirlos
+ * ══════════════════════════════════════════════════════════════════════════
+ *  `apps/web/app/globals.css` es de H5, así que H8 (flows) no puede meter aquí
+ *  los overrides que `@xyflow/react` exige para su builder. Se los damos ya
+ *  hechos y en tokens. Mismo criterio para cualquier otro CSS de terceros: se
+ *  pide, no se duplica.
+ */
+
+.react-flow {
+  background: transparent;
+}
+
+.react-flow__background {
+  opacity: 0.5;
+}
+
+.react-flow__edge-path {
+  stroke: hsl(var(--border));
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: hsl(var(--primary) / 0.8);
+}
+
+.react-flow__edge-textbg {
+  fill: hsl(var(--background));
+}
+
+.react-flow__edge-text {
+  fill: hsl(var(--muted-foreground));
+  font-size: 10px;
+}
+
+.react-flow__connection-path {
+  stroke: hsl(var(--primary) / 0.6);
+  stroke-dasharray: 4 3;
+}
+
+.react-flow__controls {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 8px 24px hsl(220 40% 2% / 0.5);
+}
+
+.react-flow__controls-button {
+  background: hsl(var(--card) / 0.8);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.react-flow__controls-button:hover {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+}
+
+.react-flow__attribution a {
+  color: hsl(var(--muted-foreground));
+}
+
+.react-flow__node {
+  cursor: grab;
+}
+
+.react-flow__node.dragging {
+  cursor: grabbing;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ *  prefers-reduced-motion — criterio 8
+ * ══════════════════════════════════════════════════════════════════════════
+ *  Red global primero, y después los casos que necesitan algo más que apagar
+ *  la animación: un desenfoque o una opacidad que dependían del movimiento
+ *  para leerse tienen que quedar legibles al detenerse.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .scanline::after,
+  .status-dot-live::before {
+    animation: none !important;
+  }
+
+  /* El punto en vivo deja de latir pero tiene que seguir viéndose. */
+  .status-dot-live::before {
+    opacity: 0.35;
+  }
+
+  /* Sin transición, el desenfoque se vuelve un salto brusco: se suaviza. */
+  [data-dim] {
+    filter: none;
+    opacity: 0.75;
+  }
+
+  .react-flow__edge-path {
+    transition: none;
+  }
+}
