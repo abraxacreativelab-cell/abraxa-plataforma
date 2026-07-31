@@ -1,4 +1,38 @@
 {
+  "h0-integracion": {
+    "label": "H0 · Orquestación e integración",
+    "migrations": null,
+    "nota": [
+      "H0 no construye producto: mergea, ordena migraciones, despliega y verifica",
+      "(docs/handoffs/H0-orquestador.md §8). Hasta el 2026-07-31 no tenía fila aquí, y como",
+      "`resolverHandoff` exige que la rama tenga entrada propia, el orquestador no podía",
+      "commitear NI SIQUIERA documentación: su PR moría en el gate antes de compilar.",
+      "Sus `paths` son los de su rol —el plan, el deploy, los guiones y las dos leyes del",
+      "repo— y se solapan a propósito con h1-fundacion, que ya mergeó y está dormido.",
+      "",
+      "`excepcionTransversal` es la ÚNICA puerta por la que H0 toca código de producto: una",
+      "corrección de SEGURIDAD que cruza carriles y que no puede esperar a que despierte su",
+      "dueño. Es acotada (rutas explícitas, no globs de paquete), fechada, con su PR anotado,",
+      "y el gate sólo la honra para h0-integracion — un carril de construcción no puede",
+      "concederse una. No cuenta para `--check-overlap`: el archivo SIGUE siendo de su",
+      "handoff, y por eso se vacía en cuanto el PR mergea.",
+      "",
+      "Si la corrección no es de seguridad, o puede esperar, la regla es la de siempre: se",
+      "emite un handoff nuevo, no se escribe en el árbol ajeno."
+    ],
+    "paths": ["docs/**", "deploy/**", "scripts/**", ".ownership.json", "eslint.config.mjs"],
+    "excepcionTransversal": {
+      "fecha": "2026-07-31",
+      "pr": "h0-integracion — cierre del hueco de x-user-email",
+      "razon": "packages/agents/src/routes.ts:34-48 armaba el TenantContext con el header x-user-email crudo. Inofensivo mientras usePort('tenancy') lanza 501; el día que mergee el PR #6 (H2) se convierte en escalada de privilegios entre clientes. Se cierra antes de que se active, no después.",
+      "paths": [
+        "packages/agents/src/routes.ts",
+        "packages/agents/src/routes.test.ts",
+        "packages/agents/src/http/**"
+      ]
+    }
+  },
+
   "h1-fundacion": {
     "label": "H1 · Fundación del monorepo",
     "migrations": [1, 9],
