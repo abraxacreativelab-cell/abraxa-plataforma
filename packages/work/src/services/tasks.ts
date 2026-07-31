@@ -113,13 +113,49 @@ async function anotar(
   if (error) console.warn('[work] no se pudo anotar el historial:', error.message);
 }
 
+/**
+ * La posición de una tarea recién creada: una más que la última del tenant.
+ *
+ * Sin esto, toda tarea nace con el default de la 070 (`sort_order numeric NOT
+ * NULL DEFAULT 0`) y una columna recién estrenada está entera empatada. Un
+ * empate no es sólo un orden ambiguo: es el estado en el que soltar una tarjeta
+ * ENTRE otras dos no puede escribir nada, porque el punto medio entre 0 y 0 es
+ * 0 (ver `planDrop`). El default de la base sigue siendo un piso razonable para
+ * cualquier fila que llegue por otro camino; la POSICIÓN se reparte aquí.
+ *
+ * Es del tenant y no de la columna a propósito: las columnas se arman en
+ * memoria según la agrupación que el usuario tenga puesta, así que "la última
+ * de la columna" no existe todavía en el momento de crear.
+ *
+ * Dos creaciones simultáneas pueden leer el mismo máximo y volver a empatar. Es
+ * el peor caso y es benigno: son dos tarjetas nuevas al final, con desempate
+ * determinista por `created_at`, y el primer arrastre sobre ese empate lo
+ * deshace renumerando. Serializar la creación de tareas para evitarlo costaría
+ * mucho más de lo que arregla.
+ */
+async function siguienteSortOrder(ctx: TenantContext): Promise<number> {
+  const { data, error } = await tenantDb(ctx)
+    .from('tasks')
+    .select('sort_order')
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  assertOk(error, 'la posición de la nueva tarea');
+  const ultimo = (data as { sort_order?: unknown } | null)?.sort_order;
+  return typeof ultimo === 'number' && Number.isFinite(ultimo) ? ultimo + 1 : 0;
+}
+
 export async function createTask(ctx: TenantContext, input: unknown): Promise<Task> {
   const datos = parseOrThrow(taskCreateSchema, input);
+  // Nacer sin posición es nacer empatada con todas las demás.
+  const sort_order = datos.sort_order ?? (await siguienteSortOrder(ctx));
 
   const { data, error } = await tenantDb(ctx)
     .from('tasks')
     .insert({
       ...datos,
+      sort_order,
       // Quien crea es quien pidió, no una constante. En GARDEN el default
       // `'santiago'` convertía toda tarea creada por un agente en tarea suya.
       assigned_by: ctx.userEmail,

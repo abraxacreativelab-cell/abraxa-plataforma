@@ -10,7 +10,6 @@ import {
   shiftMonth,
   type Member,
   type Task,
-  type TaskWithSubtasks,
 } from '@abraxa/work/domain';
 import { Avatar } from './primitives';
 
@@ -37,7 +36,15 @@ export function Calendar({
   onCrearEn,
   now,
 }: {
-  tasks: TaskWithSubtasks[];
+  /**
+   * PLANAS, no el árbol. Un padre que vence el 10 y su subtarea que vence el 20
+   * son dos cosas en dos días distintos: si llegan colgadas una de otra, la
+   * subtarea no aparece en ningún lado de esta pantalla —ni en su día, ni en
+   * vencidas, ni en sin fecha— y las tres promesas de arriba dejan de ser
+   * ciertas para la mitad de las tareas. Quien decide la forma es
+   * `buildSurfaces` (`@abraxa/work/domain`), y `surfaces.test.ts` lo sostiene.
+   */
+  tasks: Task[];
   members: Member[];
   onAbrir: (id: string) => void;
   onFechar: (id: string, due: string | null) => void;

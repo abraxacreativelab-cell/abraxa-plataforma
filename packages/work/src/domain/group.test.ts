@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { miembro, proyecto, tarea } from '../testing/factories';
-import { SIN_VALOR, buildGroups, dropPatch, groupKeyOf, groupLabelOf, progressOf, sortOrderFor } from './group';
+import { SIN_VALOR, buildGroups, dropPatch, groupKeyOf, groupLabelOf, planDrop, progressOf } from './group';
+import type { Task } from './types';
 
 describe('buildGroups', () => {
   it('muestra las columnas de estado aunque estén vacías', () => {
@@ -127,30 +128,106 @@ describe('progressOf', () => {
   });
 });
 
-describe('sortOrderFor', () => {
+describe('planDrop', () => {
   const vecinos = [tarea({ sort_order: 10 }), tarea({ sort_order: 20 }), tarea({ sort_order: 30 })];
 
+  /**
+   * Aplica el plan y devuelve la columna COMO SE VERÍA DESPUÉS DE RECARGAR:
+   * ordenada por `sort_order`, que es lo que hace `listTasks`.
+   *
+   * Las pruebas de abajo afirman sobre eso y no sobre los números, porque el
+   * número es un detalle y "la tarjeta se queda donde la solté" es el criterio
+   * observable 4. Con la implementación anterior, esta función devolvía el
+   * mismo orden con el que entraba.
+   */
+  const despuesDeSoltar = (columna: Task[], index: number, arrastrada: Task): string[] => {
+    const plan = planDrop(columna, index);
+    const nuevos = new Map<string, number>(plan.renumber.map((r) => [r.id, r.sort_order]));
+    return [
+      ...columna.map((t) => ({ ...t, sort_order: nuevos.get(t.id) ?? t.sort_order })),
+      { ...arrastrada, sort_order: plan.sort_order },
+    ]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((t) => t.id);
+  };
+
   it('en medio toma el punto medio entre sus dos nuevos vecinos', () => {
-    expect(sortOrderFor(vecinos, 1)).toBe(15);
-    expect(sortOrderFor(vecinos, 2)).toBe(25);
+    expect(planDrop(vecinos, 1)).toEqual({ sort_order: 15, renumber: [] });
+    expect(planDrop(vecinos, 2)).toEqual({ sort_order: 25, renumber: [] });
   });
 
   it('al principio y al final se sale del rango', () => {
-    expect(sortOrderFor(vecinos, 0)).toBe(9);
-    expect(sortOrderFor(vecinos, 3)).toBe(31);
+    expect(planDrop(vecinos, 0)).toEqual({ sort_order: 9, renumber: [] });
+    expect(planDrop(vecinos, 3)).toEqual({ sort_order: 31, renumber: [] });
   });
 
   it('en una columna vacía es cero', () => {
-    expect(sortOrderFor([], 0)).toBe(0);
+    expect(planDrop([], 0)).toEqual({ sort_order: 0, renumber: [] });
   });
 
-  it('el resultado siempre cae entre los vecinos, que es lo único que importa', () => {
+  it('con hueco de sobra no mueve a nadie más', () => {
     for (let i = 0; i <= vecinos.length; i++) {
-      const valor = sortOrderFor(vecinos, i);
+      const { sort_order, renumber } = planDrop(vecinos, i);
+      expect(renumber).toEqual([]);
       const antes = vecinos[i - 1]?.sort_order;
       const despues = vecinos[i]?.sort_order;
-      if (antes !== undefined) expect(valor).toBeGreaterThan(antes);
-      if (despues !== undefined) expect(valor).toBeLessThan(despues);
+      if (antes !== undefined) expect(sort_order).toBeGreaterThan(antes);
+      if (despues !== undefined) expect(sort_order).toBeLessThan(despues);
     }
+  });
+
+  // ── El defecto que typecheck, lint y 454 pruebas no podían ver ────────────
+
+  it('entre dos vecinos EMPATADOS la tarjeta se queda donde la soltaron', () => {
+    // Era el estado por defecto de la base: `sort_order numeric DEFAULT 0`.
+    // El punto medio entre 0 y 0 es 0, así que el reorder escribía el valor que
+    // la fila ya tenía y el servidor contestaba `{ moved: 1 }` — un no-op
+    // reportado como éxito, y la tarjeta regresándose sola a su sitio.
+    const empatados = [tarea({ id: 'C', sort_order: 0 }), tarea({ id: 'B', sort_order: 0 })];
+    expect(despuesDeSoltar(empatados, 1, tarea({ id: 'A', sort_order: 0 }))).toEqual(['C', 'A', 'B']);
+  });
+
+  it('una columna entera empatada se endereza en UNA sola escritura', () => {
+    const columna = [
+      tarea({ id: 'x1', sort_order: 0 }),
+      tarea({ id: 'x2', sort_order: 0 }),
+      tarea({ id: 'x3', sort_order: 0 }),
+    ];
+    const plan = planDrop(columna, 2);
+    // Sólo viajan las que de verdad cambian de número: `x1` ya valía 0.
+    expect(plan.renumber).toEqual([
+      { id: 'x2', sort_order: 1 },
+      { id: 'x3', sort_order: 3 },
+    ]);
+    expect(despuesDeSoltar(columna, 2, tarea({ id: 'A' }))).toEqual(['x1', 'x2', 'A', 'x3']);
+  });
+
+  it('soltar en el mismo hueco doscientas veces seguidas nunca deja de funcionar', () => {
+    // El promedio agota la precisión del doble en ~52 iteraciones sobre un
+    // hueco de tamaño 1: a partir de ahí `(a + b) / 2` devuelve `a` y ese hueco
+    // queda muerto para siempre. Con la renumeración, no.
+    let columna: Task[] = [tarea({ id: 'ini', sort_order: 1 }), tarea({ id: 'fin', sort_order: 2 })];
+
+    for (let k = 0; k < 200; k += 1) {
+      const arrastrada = tarea({ id: `n${k}`, sort_order: 0 });
+      const plan = planDrop(columna, 1);
+      const nuevos = new Map<string, number>(plan.renumber.map((r) => [r.id, r.sort_order]));
+      columna = [
+        ...columna.map((t) => ({ ...t, sort_order: nuevos.get(t.id) ?? t.sort_order })),
+        { ...arrastrada, sort_order: plan.sort_order },
+      ].sort((a, b) => a.sort_order - b.sort_order);
+
+      // La recién soltada queda SIEMPRE en la posición 1, que es donde se soltó.
+      expect(columna[1]?.id).toBe(`n${k}`);
+    }
+    // Y no quedó ni un empate detrás.
+    expect(new Set(columna.map((t) => t.sort_order)).size).toBe(columna.length);
+  });
+
+  it('si la columna no está ordenada por sort_order, renumera en vez de mentir', () => {
+    // Es lo que pasará el día que la barra pueda ordenar por otra propiedad:
+    // el orden que se ve deja de coincidir con el `sort_order` guardado.
+    const desordenada = [tarea({ id: 'x', sort_order: 5 }), tarea({ id: 'y', sort_order: 1 })];
+    expect(despuesDeSoltar(desordenada, 1, tarea({ id: 'A' }))).toEqual(['x', 'A', 'y']);
   });
 });

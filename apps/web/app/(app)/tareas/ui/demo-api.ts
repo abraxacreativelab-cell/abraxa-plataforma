@@ -132,7 +132,14 @@ export function crearApiDemo(semilla: SemillaDemo): WorkApi {
         due_date: (input.due_date as string | null) ?? null,
         estimate_hours: (input.estimate_hours as number | null) ?? null,
         tags: Array.isArray(input.tags) ? (input.tags as string[]) : [],
-        sort_order: typeof input.sort_order === 'number' ? input.sort_order : 0,
+        // Igual que `taskService.createTask`: una más que la última. Si el
+        // modo demostración dejara nacer todo en 0, arrastrar aquí se
+        // comportaría distinto que en producción, que es justo lo que este
+        // respaldo no puede hacer.
+        sort_order:
+          typeof input.sort_order === 'number'
+            ? input.sort_order
+            : tasks.reduce((max, t) => Math.max(max, t.sort_order), -1) + 1,
         completed_at: null,
         created_at: ahora(),
         updated_at: ahora(),

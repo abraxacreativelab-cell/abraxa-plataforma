@@ -1,14 +1,27 @@
 /**
  * Rutas HTTP de tareas y proyectos. `apps/api` ya las monta en `/work`.
  *
- * ── Sobre el contexto ───────────────────────────────────────────────────────
+ * ── Sobre el contexto: el quinto carril (auditoría del PR #13) ─────────────
  *
- * `TenantContext` se arma con `TenancyPort.contextFor()` desde una sesión
- * verificada server-side. Ese port es de H2; mientras no aterrice, `usePort`
- * lanza `PORT_NOT_IMPLEMENTED` diciendo a quién se espera, y estas rutas
- * responden 501. Eso es lo correcto: leer el tenant de un header que mandó el
- * navegador y seguir adelante es exactamente cómo se cuela un agujero de
- * aislamiento a producción.
+ * Aquí vivía un `contextoDe` propio que leía `x-user-email` y `x-tenant-slug`
+ * y se los pasaba a `usePort('tenancy')` SIN comprobar antes el secreto
+ * compartido del BFF. Es el mismo agujero que H0 encontró en otros cuatro
+ * carriles el 2026-07-31 (H3, H6, H7 y H4, éste último ya en `main`), escrito
+ * por quinta vez desde cero — que es exactamente el defecto de diseño que la
+ * pieza canónica vino a cerrar.
+ *
+ * Y aquí no era teórico ni estaba esperando nada: `apps/api/src/packages.ts`
+ * monta este router en `/work`, y H2 (PR #6) YA mergeó, así que
+ * `registerPort('tenancy')` ya corre. Dos cabeceras inventadas con `curl`
+ * bastaban para leer, mover, reasignar y borrar las tareas de cualquier
+ * empresa. El tablero de tareas es donde se escriben los pendientes del
+ * negocio, con nombres de clientes y de personas.
+ *
+ * Ahora se importa la pieza: `contextoDePeticion(req)` de `@abraxa/db` hace las
+ * tres puertas en orden —proxy verificado ANTES de mirar identidad, identidad
+ * presente, membresía validada por H2— y falla cerrada en producción sin
+ * `PROXY_SECRET`. Ningún router de dominio escribe el suyo. Ver
+ * `packages/db/src/http/tenant-context.ts` y `routes.test.ts`.
  *
  * ── Y sobre por qué la pantalla NO pasa por aquí ────────────────────────────
  *
@@ -18,9 +31,8 @@
  * más que `createTask`— y para poder probar el contrato de la API sin navegador.
  */
 import { Router } from 'express';
-import type { NextFunction, Request, Response } from 'express';
-import { HEADER } from '@abraxa/config';
-import { PlatformError, usePort } from '@abraxa/db';
+import type { Request, Response } from 'express';
+import { PlatformError, contextoDePeticion, responderError } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { meta } from './meta';
 import * as projects from './services/projects';
@@ -30,20 +42,6 @@ import { listMembers } from './services/members';
 import { loadWorkspace } from './services/workspace';
 
 export const router: Router = Router();
-
-async function contextoDe(req: Request): Promise<TenantContext> {
-  const userEmail = req.header(HEADER.userEmail);
-  const tenantSlug = req.header(HEADER.tenantSlug);
-
-  if (!userEmail || !tenantSlug) {
-    throw new PlatformError(
-      'UNAUTHENTICATED',
-      `Faltan las cabeceras ${HEADER.userEmail} y ${HEADER.tenantSlug}. ` +
-        'Las pone el BFF desde la sesión verificada, no el navegador.',
-    );
-  }
-  return usePort('tenancy').contextFor({ userEmail, tenantSlug });
-}
 
 /**
  * Un parámetro de ruta que de verdad llegó.
@@ -67,19 +65,23 @@ function param(req: Request, nombre: string): string {
  * Express 4 no captura el rechazo de una promesa: un `async` que lanza deja la
  * petición colgada hasta el timeout. Por eso ninguna ruta de abajo es `async`
  * directamente — todas pasan por aquí.
+ *
+ * Responde con `responderError` en vez de delegar en `next(err)`: el router
+ * niega en el sitio y no depende de que quien lo monte tenga bien cableado su
+ * manejador central. `toResponse()` es el mismo del de `apps/api`, así que el
+ * cuerpo que ve el cliente no cambia — y nunca filtra `details`.
  */
 const ruta =
   (handler: (ctx: TenantContext, req: Request, res: Response) => Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction): void => {
+  (req: Request, res: Response): void => {
     void (async () => {
       try {
-        const ctx = await contextoDe(req);
+        // Las tres puertas. Nada de este archivo mira una cabecera.
+        const ctx = await contextoDePeticion(req);
         const salida = await handler(ctx, req, res);
         if (!res.headersSent) res.json(salida);
       } catch (err) {
-        // El manejador de errores de `apps/api` traduce `PlatformError` a su
-        // código HTTP y nunca filtra `details` hacia afuera.
-        next(err);
+        if (!res.headersSent) responderError(res, err);
       }
     })();
   };

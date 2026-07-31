@@ -128,4 +128,12 @@ export const viewPatchSchema = viewCreateSchema
 
 export type ViewPatchInput = z.infer<typeof viewPatchSchema>;
 
-export const reorderSchema = z.object({ moves: z.array(z.unknown()).min(1).max(500) }).strict();
+/**
+ * El tope es `LIMITE_TAREAS` (2000, el mismo de `listTasks`) y no un número
+ * menor porque un solo arrastre puede tener que renumerar una columna entera:
+ * cuando entre dos vecinos ya no cabe ningún número, `planDrop` manda la
+ * columna con posiciones enteras en el MISMO lote, para que la corrección sea
+ * una transacción y no N escrituras sueltas. Un tope por debajo del máximo que
+ * la pantalla puede llegar a mostrar convertiría ese arreglo en un 400.
+ */
+export const reorderSchema = z.object({ moves: z.array(z.unknown()).min(1).max(2_000) }).strict();

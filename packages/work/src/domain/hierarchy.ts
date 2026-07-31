@@ -8,7 +8,9 @@
  * Todo puro para que el guard de las subtareas abiertas —el comportamiento que
  * el handoff pide conservar textualmente— se pueda probar sin una base viva.
  */
+import { groupKeyOf } from './group';
 import { isOpen, type Task, type TaskWithSubtasks } from './types';
+import type { GroupBy } from './view';
 
 /** Las subtareas de `parentId` que siguen abiertas. Es la lista exacta que
  *  viaja en el cuerpo del 409 y la que llena el modal "Completar todas". */
@@ -72,9 +74,39 @@ export function buildTree(tasks: readonly Task[]): TaskWithSubtasks[] {
  * cuelgan del conjunto completo.
  *
  * `visible` sigue mandando en el orden: viene de `applyView`, que ya ordenó.
+ *
+ * ── Y una subtarea sólo se cuelga si CAE EN LA MISMA COLUMNA ────────────────
+ *
+ * Colgar es esconder: una subtarea colgada del padre deja de ser una tarjeta y
+ * pasa a ser un renglón dentro de la tarjeta del padre, en la columna DEL
+ * PADRE. Mientras las columnas son estados y padre e hija comparten estado, eso
+ * no se nota. En la vista **por responsable** sí: la subtarea que Lupita le
+ * asignó a Beto se colgaba de la tarjeta de Lupita, así que la columna de Beto
+ * salía vacía y su trabajo, invisible. Lo mismo con una subtarea "en curso"
+ * bajo un padre "pendiente": no aparecía en la columna donde estaba pasando, no
+ * se podía arrastrar, y el contador de la columna mentía.
+ *
+ * Por eso `splitBy` —la propiedad por la que la pantalla arma columnas—: si la
+ * subtarea y su padre no comparten columna, la subtarea sale a flote como su
+ * propia tarjeta, en la suya. Nunca aparece dos veces en la misma columna,
+ * porque justo aparece cuando las columnas son distintas.
+ *
+ * El padre CONSERVA la subtarea en su lista aunque haya salido a flote: el
+ * contador "1/3" cuenta el trabajo del padre, no el que cabe en su columna, y
+ * volver a descontarlo repetiría el defecto que este archivo ya corrigió.
+ *
+ * Sin `splitBy` (la lista, el calendario, cualquier vista de una sola columna)
+ * se comporta exactamente como antes: `groupKeyOf(t, null)` es `'todas'` para
+ * todos, así que padre e hija siempre comparten "columna".
  */
-export function buildVisibleTree(all: readonly Task[], visible: readonly Task[]): TaskWithSubtasks[] {
+export function buildVisibleTree(
+  all: readonly Task[],
+  visible: readonly Task[],
+  opciones: { splitBy?: GroupBy } = {},
+): TaskWithSubtasks[] {
+  const splitBy = opciones.splitBy ?? null;
   const visibleIds = new Set(visible.map((t) => t.id));
+  const porId = new Map(all.map((t) => [t.id, t]));
 
   const porPadre = new Map<string, Task[]>();
   for (const t of all) {
@@ -84,10 +116,19 @@ export function buildVisibleTree(all: readonly Task[], visible: readonly Task[])
     else porPadre.set(t.parent_id, [t]);
   }
 
-  return visible
+  /** ¿Esta tarea se dibuja DENTRO de la tarjeta de su padre? */
+  const cuelgaDeSuPadre = (t: Task): boolean => {
+    if (!t.parent_id) return false;
     // Una subtarea que pasa el filtro y cuyo padre no, se muestra como raíz:
     // esconderla la haría desaparecer de la pantalla sin explicación.
-    .filter((t) => !t.parent_id || !visibleIds.has(t.parent_id))
+    if (!visibleIds.has(t.parent_id)) return false;
+    const padre = porId.get(t.parent_id);
+    if (!padre) return false;
+    return groupKeyOf(t, splitBy) === groupKeyOf(padre, splitBy);
+  };
+
+  return visible
+    .filter((t) => !cuelgaDeSuPadre(t))
     .map((t) => ({
       ...t,
       subtasks: (porPadre.get(t.id) ?? [])

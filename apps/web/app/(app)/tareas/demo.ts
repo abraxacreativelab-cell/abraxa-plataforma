@@ -71,9 +71,34 @@ export function semillaDemo(ahora = new Date()): SemillaDemoServidor {
       due_date: dia(6, ahora),
       sort_order: 1,
     }),
+    // Las tres subtareas de `t2` (que es de Beto) traen a propósito responsable
+    // y fecha PROPIOS. Antes ninguna se veía: el calendario recibía el árbol,
+    // así que no salían ni en su día ni en vencidas ni en sin fecha; y la
+    // columna de Sofía en "por responsable" salía vacía aunque el permiso de
+    // gas fuera suyo. La semilla las tenía sin fecha y sin dueño, y por eso la
+    // demostración no enseñaba ninguno de los dos huecos.
     t('t2a', { title: 'Comprar el horno de convección', parent_id: 't2', project_id: 'p1', status: 'completed', sort_order: 0 }),
-    t('t2b', { title: 'Instalar la campana', parent_id: 't2', project_id: 'p1', status: 'pending', priority: 'alta', sort_order: 1 }),
-    t('t2c', { title: 'Tramitar el permiso de gas', parent_id: 't2', project_id: 'p1', status: 'blocked', sort_order: 2 }),
+    t('t2b', {
+      title: 'Instalar la campana',
+      parent_id: 't2',
+      project_id: 'p1',
+      status: 'pending',
+      priority: 'alta',
+      assigned_to: 'beto@ejemplo.mx',
+      due_date: dia(4, ahora),
+      sort_order: 1,
+    }),
+    t('t2c', {
+      title: 'Tramitar el permiso de gas',
+      parent_id: 't2',
+      project_id: 'p1',
+      status: 'blocked',
+      // De Sofía, no de Beto: es la subtarea que se caía de la vista por
+      // responsable.
+      assigned_to: 'sofia@ejemplo.mx',
+      due_date: dia(-1, ahora), // vencida, y antes invisible en el calendario
+      sort_order: 2,
+    }),
 
     t('t3', {
       title: 'Contratar a dos personas de mostrador',
@@ -118,6 +143,13 @@ export function semillaDemo(ahora = new Date()): SemillaDemoServidor {
       sort_order: 1,
     }),
     t('t8', { title: 'Cambiar el letrero de la entrada', status: 'pending', priority: 'baja', sort_order: 2 }),
+    // A PROPÓSITO sin `sort_order`: nace en 0 y empata con `t6`. Reproduce el
+    // estado por defecto de la 070 (`DEFAULT 0`), que era el caso en el que
+    // soltar una tarjeta ENTRE otras dos no escribía nada y el servidor lo
+    // reportaba como éxito. Que la semilla repartiera 0/1/2 a mano es una de
+    // las dos razones por las que ese defecto llegó hasta la revisión; hoy
+    // `planDrop` renumera la columna y la tarjeta se queda donde se soltó.
+    t('t9', { title: 'Pedir bolsas de papel con el logo', status: 'pending', priority: 'media' }),
   ];
 
   return {

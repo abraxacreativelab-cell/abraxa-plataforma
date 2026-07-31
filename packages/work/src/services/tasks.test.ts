@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PlatformError, __setClientForTests } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
+import { planDrop } from '../domain/group';
+import type { Task } from '../domain/types';
 import { createFakeDb, type FakeDb, type Fila } from '../testing/fake-db';
 import { addComment, completeAll, createTask, deleteTask, getTask, listTasks, reorder, updateTask } from './tasks';
 
@@ -140,6 +142,35 @@ describe('createTask', () => {
     expect(db.tabla('task_events')).toContainEqual(
       expect.objectContaining({ task_id: t.id, field: 'created', to_value: 'Comprar levadura' }),
     );
+  });
+
+  it('reparte posición: dos tareas creadas seguidas no nacen empatadas', async () => {
+    // El default de la 070 es `sort_order = 0`. Si nadie reparte posiciones,
+    // toda la columna empata y soltar una tarjeta entre otras dos no puede
+    // escribir nada (el punto medio entre 0 y 0 es 0).
+    const a = await createTask(ctxA, { title: 'A' });
+    const b = await createTask(ctxA, { title: 'B' });
+    expect(b.sort_order).toBeGreaterThan(a.sort_order);
+  });
+
+  it('la nueva se va al final y no encima de las que ya estaban', async () => {
+    // La semilla trae 1 y 2.
+    const t = await createTask(ctxA, { title: 'Comprar levadura' });
+    expect(t.sort_order).toBe(3);
+  });
+
+  it('respeta el sort_order que venga en el input', async () => {
+    expect((await createTask(ctxA, { title: 'x', sort_order: 0.5 })).sort_order).toBe(0.5);
+  });
+
+  it('en un tenant vacío la primera nace en 0', async () => {
+    db.sembrar('tasks', []);
+    expect((await createTask(ctxA, { title: 'La primera' })).sort_order).toBe(0);
+  });
+
+  it('la posición se calcula DENTRO del tenant, no sobre la tabla entera', async () => {
+    db.sembrar('tasks', [fila({ id: 'gigante', tenant_id: B, title: 'De otro cliente', sort_order: 9_000 })]);
+    expect((await createTask(ctxA, { title: 'La primera' })).sort_order).toBe(0);
   });
 });
 
@@ -325,6 +356,92 @@ describe('reorder — criterio 4', () => {
 
   it('rechaza un lote vacío', async () => {
     expect((await esperarError(() => reorder(ctxA, { moves: [] }))).code).toBe('VALIDATION');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+/**
+ * El criterio 4 del handoff —*"reordenar en el tablero persiste y sobrevive a
+ * recargar"*— con las tres piezas juntas: crear como crea el producto, calcular
+ * la posición como la calcula la pantalla y persistir por el RPC.
+ *
+ * Estaba roto en el caso más común que existe —una cuenta nueva— y las 454
+ * pruebas anteriores no lo veían porque cada una probaba su pieza con números
+ * puestos a mano que nunca empataban.
+ */
+describe('criterio 4 de punta a punta — soltar ENTRE dos tarjetas', () => {
+  /** Índice con aserción: `noUncheckedIndexedAccess` obliga a decir en voz alta
+   *  que ahí hay algo, y una prueba que se cae con "undefined no tiene id" es
+   *  una prueba que no dice qué pasó. */
+  const en = (columna: readonly Task[], i: number): Task => {
+    const t = columna[i];
+    if (!t) throw new Error(`la columna no tiene una tarea en la posición ${i}`);
+    return t;
+  };
+
+  /** Lo que hace `alSoltar` en `workspace.tsx`: quitarse de la columna, pedir
+   *  el plan y mandar el lote entero en una sola llamada. */
+  const soltar = async (columna: Task[], arrastrada: Task, index: number): Promise<void> => {
+    const plan = planDrop(
+      columna.filter((t) => t.id !== arrastrada.id),
+      index,
+    );
+    await reorder(ctxA, { moves: [{ id: arrastrada.id, sort_order: plan.sort_order }, ...plan.renumber] });
+  };
+
+  it('tres tareas creadas desde el producto y una arrastrada al medio', async () => {
+    db.sembrar('tasks', []);
+    await createTask(ctxA, { title: 'A' });
+    await createTask(ctxA, { title: 'B' });
+    await createTask(ctxA, { title: 'C' });
+
+    const columna = (await listTasks(ctxA)).tasks;
+    const [primera, segunda, tercera] = [en(columna, 0), en(columna, 1), en(columna, 2)];
+
+    // Arrastra la tercera y la suelta ENTRE la primera y la segunda.
+    await soltar(columna, tercera, 1);
+
+    // Y sigue ahí después de recargar.
+    expect((await listTasks(ctxA)).tasks.map((t) => t.id)).toEqual([primera.id, tercera.id, segunda.id]);
+  });
+
+  it('una columna heredada con todo empatado en 0 se endereza al primer arrastre', async () => {
+    // Cualquier fila escrita antes de que `createTask` repartiera posiciones, o
+    // por un camino que no pase por él, vale 0.
+    db.sembrar('tasks', [
+      fila({ id: 'e1', tenant_id: A, title: 'Uno', sort_order: 0 }),
+      fila({ id: 'e2', tenant_id: A, title: 'Dos', sort_order: 0 }),
+      fila({ id: 'e3', tenant_id: A, title: 'Tres', sort_order: 0 }),
+    ]);
+
+    const columna = (await listTasks(ctxA)).tasks;
+    const [primera, segunda, tercera] = [en(columna, 0), en(columna, 1), en(columna, 2)];
+    await soltar(columna, tercera, 1);
+
+    expect((await listTasks(ctxA)).tasks.map((t) => t.id)).toEqual([primera.id, tercera.id, segunda.id]);
+    // Y el empate se fue: nadie vuelve a caer en el hueco muerto.
+    const ordenes = db.tabla('tasks').map((t) => t.sort_order);
+    expect(new Set(ordenes).size).toBe(ordenes.length);
+  });
+
+  it('el lote de la renumeración es UNA transacción: si algo del lote falla, no se aplica nada', async () => {
+    db.sembrar('tasks', [
+      fila({ id: 'e1', tenant_id: A, title: 'Uno', sort_order: 0 }),
+      fila({ id: 'e2', tenant_id: A, title: 'Dos', sort_order: 0 }),
+      fila({ id: 'ajena', tenant_id: B, title: 'De otro cliente', sort_order: 0 }),
+    ]);
+
+    const err = await esperarError(() =>
+      reorder(ctxA, {
+        moves: [
+          { id: 'e1', sort_order: 1 },
+          { id: 'ajena', sort_order: 2 },
+        ],
+      }),
+    );
+
+    expect(err.code).toBe('NOT_FOUND');
+    expect(db.tabla('tasks').find((t) => t.id === 'e1')?.sort_order).toBe(0);
   });
 });
 

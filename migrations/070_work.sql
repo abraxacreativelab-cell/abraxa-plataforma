@@ -494,3 +494,12 @@ COMMENT ON TABLE app.tasks IS
   'Tareas del tenant. Jerarquía Proyecto → Tarea → Subtarea, un solo nivel, '
   'impuesta por el trigger tasks_guard_hierarchy. Toda escritura pasa por '
   'tenantDb(ctx) desde packages/work (H9).';
+
+COMMENT ON COLUMN app.tasks.sort_order IS
+  'Posición dentro de la columna, numérica para que reordenar entre dos '
+  'vecinos sea un promedio y no un UPDATE de toda la lista. El DEFAULT 0 es un '
+  'piso, NO una posición: si dos filas empatan no hay ningún número entre '
+  'ellas y el promedio devuelve el valor que la fila ya tenía — un reorder que '
+  'no mueve nada y se reporta como éxito. Quien reparte la posición es '
+  'taskService.createTask (max + 1 del tenant), y planDrop renumera la columna '
+  'cuando el hueco se agota. Ver packages/work/src/domain/group.ts.';

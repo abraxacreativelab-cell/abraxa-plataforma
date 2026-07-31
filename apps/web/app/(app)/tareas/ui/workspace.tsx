@@ -6,17 +6,15 @@ import { Icon } from '@abraxa/ui';
 import {
   GROUP_META,
   SIN_VALOR,
-  applyView,
-  buildGroups,
-  buildVisibleTree,
+  buildSurfaces,
   configOf,
   dropPatch,
   initWorkspace,
   locationOf,
   locationToParams,
   normalizeViewConfig,
+  planDrop,
   progressOf,
-  sortOrderFor,
   visibleViewKinds,
   workspaceReducer,
   type Member,
@@ -130,26 +128,19 @@ export function Workspace({
 
   // ── Derivados ─────────────────────────────────────────────────────────────
 
-  /** Lo que pasa el filtro. Decide QUÉ TARJETAS se ven. */
-  const filtradas = React.useMemo(
-    () => applyView(datos.tasks, config, now),
-    [datos.tasks, config, now],
-  );
-
   /**
-   * El árbol de lo visible. Las subtareas de cada tarjeta salen del conjunto
-   * COMPLETO, no del filtrado: con el filtro "abiertas" puesto, contarlas
-   * después de filtrar haría que una tarea con una subtarea hecha y otra
-   * pendiente dijera "0/1" en vez de "1/2".
+   * Qué le toca a cada vista, en una sola pasada y en el dominio.
+   *
+   * Está junto a propósito: las columnas quieren el árbol (subtareas colgadas
+   * de su padre, contadores contando TODO aunque el filtro esconda partes) y el
+   * calendario quiere tarjetas planas (un padre y su subtarea pueden vencer
+   * días distintos). Cuando cada vista se servía sola, el calendario acabó
+   * recibiendo el árbol y NINGUNA subtarea aparecía en él. Ver
+   * `domain/surfaces.ts`.
    */
-  const arbol = React.useMemo(
-    () => buildVisibleTree(datos.tasks, filtradas),
-    [datos.tasks, filtradas],
-  );
-
-  const grupos = React.useMemo(
-    () => buildGroups(arbol, config.groupBy, { projects: datos.projects, members: datos.members }),
-    [arbol, config.groupBy, datos.projects, datos.members],
+  const { visible: filtradas, groups: grupos, calendar: delCalendario } = React.useMemo(
+    () => buildSurfaces(datos.tasks, config, { projects: datos.projects, members: datos.members }, now),
+    [datos.tasks, config, datos.projects, datos.members, now],
   );
 
   const kindsVisibles = visibleViewKinds(state, datos.members.length);
@@ -236,16 +227,27 @@ export function Workspace({
     // índices posteriores: sin esto, arrastrar una tarjeta un lugar hacia
     // abajo la deja donde estaba.
     const destino = posicionActual >= 0 && posicionActual < index ? index - 1 : index;
-    const sort_order = sortOrderFor(vecinos, Math.max(0, Math.min(destino, vecinos.length)));
+    // `renumber` viene vacío salvo cuando entre los dos vecinos ya no cabía
+    // ningún número —una columna heredada empatada en 0, o un hueco agotado a
+    // fuerza de promedios—. Entonces trae la columna con posiciones enteras y
+    // viaja en el MISMO lote: el RPC de la 070 lo aplica en una transacción, así
+    // que renumerar N tarjetas sigue siendo una escritura y no N oportunidades
+    // de pisarse.
+    const { sort_order, renumber } = planDrop(vecinos, destino);
+    const reposicionados = new Map<string, number>(renumber.map((r) => [r.id, r.sort_order]));
 
     const antes = datos.tasks;
     setDatos((d) => ({
       ...d,
-      tasks: d.tasks.map((t) => (t.id === taskId ? ({ ...t, ...patch, sort_order } as Task) : t)),
+      tasks: d.tasks.map((t) => {
+        if (t.id === taskId) return { ...t, ...patch, sort_order } as Task;
+        const nuevo = reposicionados.get(t.id);
+        return nuevo === undefined ? t : { ...t, sort_order: nuevo };
+      }),
     }));
 
     await correr(
-      () => api.reordenar([{ id: taskId, sort_order, ...patch }]),
+      () => api.reordenar([{ id: taskId, sort_order, ...patch }, ...renumber]),
       undefined,
       (f) => {
         setDatos((d) => ({ ...d, tasks: antes }));
@@ -387,7 +389,7 @@ export function Workspace({
         <TableroVacio onCrear={() => setNueva({})} />
       ) : state.kind === 'calendario' ? (
         <Calendar
-          tasks={arbol}
+          tasks={delCalendario}
           members={datos.members}
           now={now}
           onAbrir={abrirTarea}

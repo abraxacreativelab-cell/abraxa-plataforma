@@ -128,6 +128,38 @@ describe('buildVisibleTree', () => {
     expect('subtasks' in p).toBe(false);
     expect(entrada.map((t) => t.id)).toEqual(['p', 's1', 's2']);
   });
+
+  // ── `splitBy`: colgar es esconder ─────────────────────────────────────────
+
+  describe('una subtarea sólo se cuelga si cae en la MISMA columna', () => {
+    const jefa = tarea({ id: 'p', assigned_to: 'lupita@ejemplo.mx' });
+    const suya = tarea({ id: 'mia', parent_id: 'p', assigned_to: 'lupita@ejemplo.mx' });
+    const ajena = tarea({ id: 'suya', parent_id: 'p', assigned_to: 'beto@ejemplo.mx' });
+    const conjunto = [jefa, suya, ajena];
+
+    it('sin splitBy, todo se cuelga como antes', () => {
+      expect(buildVisibleTree(conjunto, conjunto).map((t) => t.id)).toEqual(['p']);
+    });
+
+    it('con splitBy, la de otro responsable sale a flote y la del mismo no', () => {
+      const arbol = buildVisibleTree(conjunto, conjunto, { splitBy: 'assigned_to' });
+      expect(arbol.map((t) => t.id)).toEqual(['p', 'suya']);
+    });
+
+    it('la que salió a flote SIGUE contando para el padre', () => {
+      const arbol = buildVisibleTree(conjunto, conjunto, { splitBy: 'assigned_to' });
+      expect(arbol[0]?.subtasks.map((t) => t.id)).toEqual(['mia', 'suya']);
+    });
+
+    it('sale a flote sin subtareas propias: no puede tenerlas', () => {
+      const arbol = buildVisibleTree(conjunto, conjunto, { splitBy: 'assigned_to' });
+      expect(arbol[1]?.subtasks).toEqual([]);
+    });
+
+    it('splitBy por una propiedad que padre e hija comparten no saca a nadie', () => {
+      expect(buildVisibleTree(conjunto, conjunto, { splitBy: 'priority' }).map((t) => t.id)).toEqual(['p']);
+    });
+  });
 });
 
 describe('subtaskSummary', () => {

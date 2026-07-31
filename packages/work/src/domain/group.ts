@@ -186,20 +186,96 @@ export function progressOf(tasks: readonly Task[]): Progress {
 // Posición al soltar — el número que después persiste el reorder
 // ════════════════════════════════════════════════════════════════════════════
 
-/**
- * El `sort_order` que le toca a una tarjeta soltada en la posición `index` de
- * una columna: el punto medio entre sus dos nuevos vecinos.
- *
- * Es un promedio y no una renumeración porque una renumeración son N
- * escrituras por cada arrastre, y con dos personas moviendo el mismo tablero,
- * N escrituras es N oportunidades de pisarse.
- */
-export function sortOrderFor(vecinos: readonly Task[], index: number): number {
-  const antes = index > 0 ? vecinos[index - 1] : undefined;
-  const despues = index < vecinos.length ? vecinos[index] : undefined;
+/** Dónde queda la tarjeta soltada, y a quién más hubo que correr para que
+ *  quepa. */
+export interface DropPlacement {
+  /** El `sort_order` que le toca a la tarjeta arrastrada. */
+  sort_order: number;
+  /**
+   * Las reposiciones de los VECINOS. Vacío en el caso normal —el de una columna
+   * sana—; sólo trae algo cuando entre los dos vecinos ya no cabía ningún
+   * número y hubo que renumerar la columna.
+   */
+  renumber: Array<{ id: string; sort_order: number }>;
+}
 
+/** El número que le tocaría a la tarjeta soltada si el hueco diera.
+ *  `a + (b - a) / 2` y no `(a + b) / 2`: con dos valores grandes del mismo
+ *  signo, la suma se desborda a `Infinity` antes de dividirse. */
+function candidato(antes: Task | undefined, despues: Task | undefined): number {
   if (!antes && !despues) return 0;
   if (!antes) return (despues as Task).sort_order - 1;
   if (!despues) return antes.sort_order + 1;
-  return (antes.sort_order + despues.sort_order) / 2;
+  return antes.sort_order + (despues.sort_order - antes.sort_order) / 2;
+}
+
+/** ¿La columna resultante queda estrictamente creciente? Es la única condición
+ *  bajo la cual el número que se escribe significa lo que el usuario vio. */
+function estrictamenteCreciente(valores: readonly number[]): boolean {
+  let previo: number | undefined;
+  for (const valor of valores) {
+    if (previo !== undefined && !(valor > previo)) return false;
+    previo = valor;
+  }
+  return true;
+}
+
+/** La columna entera con enteros `0..n` y el hueco abierto en `i`. Sólo viajan
+ *  las tarjetas cuyo número CAMBIA: renumerar no es excusa para reescribir
+ *  filas que ya estaban bien. */
+function renumerar(vecinos: readonly Task[], i: number): DropPlacement {
+  const renumber: Array<{ id: string; sort_order: number }> = [];
+  vecinos.forEach((t, k) => {
+    const nuevo = k < i ? k : k + 1;
+    if (t.sort_order !== nuevo) renumber.push({ id: t.id, sort_order: nuevo });
+  });
+  return { sort_order: i, renumber };
+}
+
+/**
+ * Dónde cae una tarjeta soltada en la posición `index` de una columna, dados
+ * sus futuros vecinos **en el orden en que se ven**.
+ *
+ * ── Por qué esto no puede ser sólo un promedio ──────────────────────────────
+ *
+ * El punto medio entre los dos vecinos es correcto mientras EXISTA un número
+ * entre ellos, y hay dos maneras rutinarias de que no exista:
+ *
+ *  1. **Los dos vecinos valen lo mismo.** Era el estado por defecto de la base:
+ *     la 070 declara `sort_order numeric NOT NULL DEFAULT 0`, así que hasta que
+ *     `createTask` empezó a repartir posiciones, TODA tarea nacía en 0 y una
+ *     columna recién creada estaba entera empatada.
+ *  2. **El hueco se agotó.** Unas cincuenta sueltas seguidas en el mismo hueco
+ *     acaban con la precisión del doble y el punto medio cae encima de un
+ *     vecino. A partir de ahí ese hueco queda muerto para siempre.
+ *
+ * En los dos casos el promedio devuelve el valor que la fila YA tenía: el
+ * `UPDATE` no cambia nada, el RPC contesta `{ moved: 1 }` y la tarjeta se
+ * regresa a su sitio sin decir una palabra. Un no-op reportado como éxito, que
+ * es la peor clase de error que puede tener una interfaz optimista.
+ *
+ * Por eso esto devuelve un plan y no un número: cuando el candidato no deja la
+ * columna estrictamente creciente, renumera con enteros y devuelve también esas
+ * reposiciones. Siguen siendo UNA escritura —`app.reorder_tasks` es
+ * transaccional y el lote entero se revierte junto— y no N oportunidades de
+ * pisarse, que era la razón por la que se había elegido el promedio.
+ *
+ * La comprobación es sobre la columna COMPLETA y no sólo sobre los dos vecinos
+ * a propósito: así el arrastre queda bien definido también el día que la barra
+ * pueda ordenar por otra propiedad y el orden que se ve deje de coincidir con
+ * el `sort_order` guardado.
+ */
+export function planDrop(vecinos: readonly Task[], index: number): DropPlacement {
+  const i = Math.max(0, Math.min(index, vecinos.length));
+  const propuesto = candidato(
+    i > 0 ? vecinos[i - 1] : undefined,
+    i < vecinos.length ? vecinos[i] : undefined,
+  );
+
+  const resultante = vecinos.map((t) => t.sort_order);
+  resultante.splice(i, 0, propuesto);
+
+  return Number.isFinite(propuesto) && estrictamenteCreciente(resultante)
+    ? { sort_order: propuesto, renumber: [] }
+    : renumerar(vecinos, i);
 }

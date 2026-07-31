@@ -18,6 +18,7 @@ export * from './view';
 export * from './group';
 export * from './calendar';
 export * from './hierarchy';
+export * from './surfaces';
 export * from './reorder';
 export * from './workspace-state';
 export * from './format';
