@@ -53,11 +53,16 @@ ya está hecho antes de que empiece nadie.
 Si crees que necesitas editar el cableado, casi seguro no lo necesitas:
 cuelga tus rutas del `router` que tu paquete ya exporta y aparecen solas.
 
-### 4. No instales dependencias
+### 4. No **agregues** dependencias
 
 H1 instaló **todas**. Si falta una, **anótala en tu PR y no la instales**: el
 gate falla si `package-lock.json` cambia desde cualquier rama que no sea la de
 H1. Dos ramas tocando el lockfile es un conflicto garantizado.
+
+> **`npm ci` sí, y es obligatorio.** Tu worktree es un directorio aparte y llega
+> sin `node_modules`. `npm ci` instala exactamente lo que dice el lockfile y
+> **no lo modifica**, así que no rompe nada. Lo prohibido es `npm install <algo>`
+> y `npm update`, que sí lo reescriben.
 
 ### 5. Programa contra interfaces, nunca contra implementaciones
 
@@ -93,15 +98,25 @@ registerPort('inbox', inboxService);
 
 ---
 
-## Antes de empezar: verifica que tu ola esté habilitada
+## Antes de empezar
+
+**1. Verifica que tu ola esté habilitada.** Desde tu worktree:
 
 ```bash
 test -f packages/db/ports.ts && echo "H1 listo, puedes construir" || echo "ESPERA: H1 no ha mergeado"
 ```
 
-Si no existe, **no crees estructura, no instales nada, no escribas
+Si no existe, **no crees estructura, no agregues dependencias, no escribas
 migraciones**. Usa el tiempo para leer tu handoff y estudiar el código de
 GARDEN que vas a portar.
+
+**2. Instala.** Tu worktree llega sin `node_modules`:
+
+```bash
+nvm use && npm ci
+```
+
+Tarda unos minutos la primera vez. `npm ci` no toca el lockfile — ver regla 4.
 
 ---
 
