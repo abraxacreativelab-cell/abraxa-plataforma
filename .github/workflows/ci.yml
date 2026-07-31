@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # El contrato de no colisión. Corre primero y sin instalar nada: si una rama
+  # se salió de su carril, no tiene caso gastar cinco minutos compilando.
+  # ───────────────────────────────────────────────────────────────────────────
+  ownership-gate:
+    name: ownership-gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Traer la base
+        run: git fetch --no-tags origin +refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Propiedad, migraciones, lockfile, secretos y RLS
+        run: node scripts/ownership-gate.mjs --handoff "${{ github.head_ref }}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  verify:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Mapa de propiedad consistente
+        run: node scripts/ownership-gate.mjs --check-overlap
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm test
+
+      # El build no debe necesitar un solo secreto. Si algún día lo necesita,
+      # es que alguien validó el entorno al importar un módulo — y entonces CI
+      # deja de poder compilar el repo. Aquí se detecta.
+      - run: npm run build

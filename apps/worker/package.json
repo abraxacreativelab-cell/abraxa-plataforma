@@ -1,0 +1,23 @@
+{
+  "name": "@abraxa/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cola de trabajos (pg-boss): automatizaciones, ingesta y tareas diferidas. Handoff H1 (el andamio).",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.mjs",
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@abraxa/agents": "*",
+    "@abraxa/config": "*",
+    "@abraxa/db": "*",
+    "@abraxa/flows": "*",
+    "@abraxa/inbox": "*",
+    "@abraxa/vault": "*",
+    "pg-boss": "^10.1.6",
+    "pino": "^9.6.0"
+  }
+}

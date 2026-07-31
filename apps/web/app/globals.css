@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Andamio de H1 — H5 lo reemplaza entero.
+ *
+ * La ley visual (GARDEN/docs/VAULT-II-DISENO.md, sigue vigente):
+ *   Blanco luminoso primario · negro FRÍO · acento CONTEXTUAL.
+ *   --primary, --accent, --ring y --glow son UN MISMO token: cambiar uno
+ *   recolorea todo. Los estados semánticos NO siguen al acento.
+ *
+ * Aquí sólo van los mínimos para que las 8 rutas rendericen legibles hoy.
+ */
+@layer base {
+  :root {
+    --background: 222 28% 3.8%;
+    --foreground: 210 24% 97%;
+    --muted: 222 20% 12%;
+    --muted-foreground: 214 12% 62%;
+    --border: 222 18% 16%;
+
+    /* Un mismo token. H5 lo vuelve contextual por área. */
+    --primary: 38 92% 58%;
+    --primary-foreground: 222 28% 6%;
+    --ring: 38 92% 58%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  }
+
+  /* Nunca una animación que le pegue a quien pidió no verlas. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@abraxa/billing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stripe, alta self-service y suscripciones. Handoff H10.",
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
+    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@abraxa/config": "*",
+    "@abraxa/db": "*",
+    "express": "^4.21.2",
+    "stripe": "^17.5.0", "resend": "^4.0.1", "zod": "^3.24.1"
+  }
+}
