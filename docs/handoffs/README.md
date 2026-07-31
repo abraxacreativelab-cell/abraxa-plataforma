@@ -16,6 +16,22 @@ Plan maestro: `~/.claude/plans/ok-este-producto-debe-dynamic-kazoo.md`
 4. Al terminar, abre PR desde su rama. El gate de CI verifica que no se salió.
 5. El orquestador (H0) mergea, aplica migraciones y despliega.
 
+### ⚠️ Regla de arranque — no la saltes
+
+**Antes de escribir un solo archivo, toda conversación verifica que su ola esté habilitada:**
+
+```bash
+test -f packages/db/ports.ts && echo "H1 listo, puedes construir" || echo "ESPERA: H1 no ha mergeado"
+```
+
+Si `packages/db/ports.ts` no existe, **H1 todavía no termina**. No crees estructura, no
+instales dependencias, no escribas migraciones. Usa el tiempo para leer tu handoff y estudiar
+el código de GARDEN que vas a portar, y prepara tu plan.
+
+> Esto pasó de verdad el 2026-07-30: se lanzaron H1 a H5 al mismo tiempo. Cuatro conversaciones
+> iban a crear cada una su propio `packages/db/ports.ts` y su propio `package.json` raíz — un
+> conflicto a cuatro bandas sobre los archivos más importantes del repo. Se detectó a tiempo.
+
 ---
 
 ## Olas — nunca más de 5 conversaciones a la vez

@@ -219,6 +219,11 @@ verdad; los valores son una proyección. Nada se activa solo."*
 ## 10. Prompt de arranque
 
 ```
+ANTES DE ESCRIBIR NADA: verifica que H1 haya mergeado.
+  test -f packages/db/ports.ts && echo LISTO || echo "ESPERA — H1 no ha terminado"
+Si no existe, NO crees estructura ni instales dependencias. Lee tu handoff, estudia el
+código de GARDEN que vas a portar, prepara tu plan, y espera la señal del orquestador.
+
 Vas a construir H4 — la Bóveda de ABRAXA Plataforma: valores canónicos, documentos y biblioteca.
 
 Lee primero, completo:

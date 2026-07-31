@@ -190,6 +190,11 @@ sólido — máx 10 iteraciones, rate limiter, eventos, timeout por tool).
 ## 9. Prompt de arranque
 
 ```
+ANTES DE ESCRIBIR NADA: verifica que H1 haya mergeado.
+  test -f packages/db/ports.ts && echo LISTO || echo "ESPERA — H1 no ha terminado"
+Si no existe, NO crees estructura ni instales dependencias. Lee tu handoff, estudia el
+código de GARDEN que vas a portar, prepara tu plan, y espera la señal del orquestador.
+
 Vas a construir H3 — la capa de Agents de ABRAXA Plataforma. Estás en la ruta crítica:
 H6 (inbox) y H7 (el onboarding conversacional) te esperan.
 
