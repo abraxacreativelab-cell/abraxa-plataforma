@@ -215,9 +215,16 @@ export function parsePricingDoc(content: string): CifraExtraida[] {
       // segunda es la que acaba en una cotización con un cero de más.
       currency: detectarMoneda(valor, monedaDelDoc),
       label: etiquetaCruda?.trim() || null,
-      // Un rango o un pendiente pierden el número, así que el texto original
-      // se conserva: es la única pista que le queda al emprendedor.
-      note: notaCruda?.trim() || (value === null ? valor : null),
+      // Un rango o un pendiente pierden el número, así que el texto original se
+      // conserva — TAMBIÉN cuando el bullet traía nota propia, que es donde
+      // esto fallaba. `de $800 a $900 — según el caso` se guardaba como «según
+      // el caso» a secas: el rango desaparecía y con él la única pista que le
+      // queda al emprendedor para saber qué número escribir. La regla 2 de
+      // arriba promete «la nota completa»; esto es cumplirla.
+      note:
+        value === null
+          ? [valor, notaCruda?.trim()].filter(Boolean).join(' — ')
+          : notaCruda?.trim() || null,
       pendiente,
     });
   };
@@ -243,8 +250,12 @@ export function parsePricingDoc(content: string): CifraExtraida[] {
  * Un rango declarado: dos cifras unidas por "a", "entre…y", "hasta" o guion.
  * Se comprueba que haya DOS cifras de verdad; si no, `de 1 a 3 días` con una
  * sola cifra no debería descalificar al valor.
+ *
+ * Se exporta porque `values/service.ts` la reusa para explicarle al emprendedor
+ * POR QUÉ no se puede aceptar una propuesta sin cifra: «que es un rango, no un
+ * precio» se entiende; «propuesta inválida» no.
  */
-function esRango(valor: string): boolean {
+export function esRango(valor: string): boolean {
   const cifras = valor.match(/\$?\s*\d[\d,\s.]*/g) ?? [];
   if (cifras.length < 2) return false;
   return /\b(a|entre|hasta|y)\b|[-–—]/i.test(valor);

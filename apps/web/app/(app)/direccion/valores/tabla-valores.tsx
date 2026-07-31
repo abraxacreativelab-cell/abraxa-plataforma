@@ -93,6 +93,21 @@ function loPropuesto(v: VaultRow): Pintable {
   };
 }
 
+/**
+ * `true` si la propuesta no trae NADA que aplicar.
+ *
+ * Espejo en el cliente de `propuestaSinCifra()` del servicio — el mismo espejo
+ * que `mostrar()` es de `formatVault()`, y por la misma razón: este archivo no
+ * puede importar de `@abraxa/vault/api` en el navegador.
+ *
+ * Sin esto, la fila decía «Un documento nuevo dice —» y ofrecía «Aceptar»
+ * igual. Pulsarlo dejaba el precio vigente y VACÍO. El servicio ya lo rechaza;
+ * esto evita que el botón lo ofrezca siquiera, que es lo que el emprendedor ve.
+ */
+function propuestaSinCifra(v: VaultRow): boolean {
+  return mostrar(loPropuesto(v)) === '—';
+}
+
 const NOMBRE_TIPO: Record<string, string> = {
   money: 'Monto',
   percent: 'Porcentaje',
@@ -434,15 +449,31 @@ export function TablaValores({
                           <td colSpan={puedeEditar ? 7 : 6} className="px-4 pb-3 pt-0">
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
                               <span className="text-[hsl(var(--muted-foreground))]">
-                                Un documento nuevo dice{' '}
-                                <b className="tabular-nums text-[hsl(var(--foreground))]">
-                                  {mostrar(loPropuesto(v))}
-                                </b>{' '}
-                                donde tú aprobaste{' '}
-                                <b className="tabular-nums text-[hsl(var(--foreground))]">
-                                  {mostrar(v)}
-                                </b>
-                                . Se sigue usando el tuyo.
+                                {propuestaSinCifra(v) ? (
+                                  <>
+                                    Un documento nuevo habla de este número pero{' '}
+                                    <b className="text-[hsl(var(--foreground))]">
+                                      no dice una cifra
+                                    </b>
+                                    , y tú aprobaste{' '}
+                                    <b className="tabular-nums text-[hsl(var(--foreground))]">
+                                      {mostrar(v)}
+                                    </b>
+                                    . Se sigue usando el tuyo.
+                                  </>
+                                ) : (
+                                  <>
+                                    Un documento nuevo dice{' '}
+                                    <b className="tabular-nums text-[hsl(var(--foreground))]">
+                                      {mostrar(loPropuesto(v))}
+                                    </b>{' '}
+                                    donde tú aprobaste{' '}
+                                    <b className="tabular-nums text-[hsl(var(--foreground))]">
+                                      {mostrar(v)}
+                                    </b>
+                                    . Se sigue usando el tuyo.
+                                  </>
+                                )}
                               </span>
                               {v.conflict_note ? (
                                 <span className="text-[hsl(var(--muted-foreground))]/70">
@@ -451,18 +482,36 @@ export function TablaValores({
                               ) : null}
                               {puedeEditar ? (
                                 <div className="flex items-center gap-1">
-                                  <Boton
-                                    variante="contorno"
-                                    className="h-7 px-2 text-xs"
-                                    disabled={pendiente}
-                                    title="Usar la cifra del documento nuevo a partir de ahora"
-                                    onClick={() =>
-                                      correr(() => accionResolverConflicto(v.id, 'aceptar'))
-                                    }
-                                  >
-                                    <CheckCircle2 className="h-3.5 w-3.5" /> Usar{' '}
-                                    {mostrar(loPropuesto(v))}
-                                  </Boton>
+                                  {/*
+                                    Sin cifra que aplicar no hay nada que
+                                    aceptar: hacerlo dejaría el valor vigente y
+                                    VACÍO. En vez del botón se ofrece la salida
+                                    que sí resuelve — escribir el número.
+                                  */}
+                                  {propuestaSinCifra(v) ? (
+                                    <Boton
+                                      variante="contorno"
+                                      className="h-7 px-2 text-xs"
+                                      disabled={pendiente}
+                                      title="El documento no trae un número. Escríbelo tú y la contradicción se retira."
+                                      onClick={() => setEditando(v)}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" /> Escribir el número
+                                    </Boton>
+                                  ) : (
+                                    <Boton
+                                      variante="contorno"
+                                      className="h-7 px-2 text-xs"
+                                      disabled={pendiente}
+                                      title="Usar la cifra del documento nuevo a partir de ahora"
+                                      onClick={() =>
+                                        correr(() => accionResolverConflicto(v.id, 'aceptar'))
+                                      }
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5" /> Usar{' '}
+                                      {mostrar(loPropuesto(v))}
+                                    </Boton>
+                                  )}
                                   <Boton
                                     variante="silencioso"
                                     className="h-7 px-2 text-xs"

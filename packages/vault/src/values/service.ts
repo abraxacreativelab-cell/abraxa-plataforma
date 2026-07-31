@@ -11,8 +11,9 @@ import { PlatformError, notFound, tenantDb } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { notifyVaultChanged } from '../cache';
 import { formatVault } from '../format';
+import { esRango } from '../ingest/money';
 import { requireVaultEdit, requireVaultRead } from '../rbac';
-import type { DecisionConflicto, VaultRow } from '../types';
+import type { DecisionConflicto, VaultKind, VaultRow } from '../types';
 import { crearValorSchema, editarValorSchema } from './schema';
 import { fila as filaDe, filas as filasDe } from '../rows';
 
@@ -42,6 +43,24 @@ const CONFLICTO_LIMPIO = {
 /** `true` si un documento posterior contradice esta cifra y nadie ha decidido. */
 export function tieneConflicto(row: VaultRow): boolean {
   return row.conflict_at != null;
+}
+
+/**
+ * `true` si la contradicción pendiente NO trae con qué reemplazar la cifra:
+ * ni número (`conflict_value`) ni texto (`conflict_value_text`).
+ *
+ * Pasa cuando el documento decía un rango («de $800 a $900») o un pendiente
+ * («por definir»): `money.ts` hace lo correcto y no inventa un número, pero lo
+ * que queda anotado al lado del valor es una propuesta VACÍA.
+ *
+ * Aceptar una de éstas escribiría `value: null` **y** `active: true`, y como
+ * los valores no tienen versiones —sólo los documentos las tienen— la cifra
+ * aprobada desaparecería sin dejar rastro. La UI usa el mismo criterio para
+ * apagar el botón; ésta es la que de verdad lo impide, porque el botón no es
+ * la única puerta (están también las rutas HTTP de `http/routes.ts`).
+ */
+export function propuestaSinCifra(row: VaultRow): boolean {
+  return row.conflict_value == null && !row.conflict_value_text;
 }
 
 export interface ListarValoresOpts {
@@ -253,6 +272,20 @@ export async function resolverConflicto(
     );
   }
 
+  // ── Aceptar una propuesta VACÍA dejaría el valor vigente y sin cifra ──
+  //
+  // El documento dijo algo («de $800 a $900»), pero no dijo un número. Aplicar
+  // eso borraría la cifra aprobada Y la dejaría activa: el agente dejaría de
+  // saber el precio y la cotización saldría con un hueco donde iba. Y nadie
+  // vería un error, porque la acción respondería que todo salió bien.
+  //
+  // `crearValorSchema` ya prohíbe guardar un `money` sin número a mano. Que
+  // esta ruta pudiera escribir exactamente eso era la asimetría que delataba
+  // el defecto: la misma base de datos, la misma regla, dos respuestas.
+  if (decision === 'aceptar' && propuestaSinCifra(actual)) {
+    throw new PlatformError('VALIDATION', porQueNoSePuedeAceptar(actual));
+  }
+
   const parche: Record<string, unknown> =
     decision === 'aceptar'
       ? {
@@ -325,6 +358,50 @@ export async function contarBorradores(ctx: TenantContext): Promise<number> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Cómo se llama, en cristiano, lo que le falta a cada tipo. */
+const LO_QUE_FALTA: Record<VaultKind, string> = {
+  money: 'un precio',
+  percent: 'un porcentaje',
+  number: 'un número',
+  text: 'un texto',
+  date: 'una fecha',
+  bool: 'un sí o un no',
+  list: 'una lista',
+};
+
+/**
+ * Por qué no se puede aceptar, en los términos del emprendedor.
+ *
+ * Cita LO QUE EL DOCUMENTO SÍ TRAJO. Un «no se puede» a secas lo deja sin saber
+ * qué número escribir, y con el documento abierto enfrente pensando que el
+ * producto se equivoca. Y ofrece las dos salidas que de verdad existen, porque
+ * un error sin salida es un callejón.
+ */
+function porQueNoSePuedeAceptar(v: VaultRow): string {
+  const dijo = v.conflict_note?.trim();
+  const falta = LO_QUE_FALTA[v.kind] ?? 'un valor';
+
+  const queDice = !dijo
+    ? `El documento no trajo ${falta} para «${v.label}».`
+    : esRango(dijo)
+      ? `El documento dice «${dijo}», que es un rango, no ${falta}.`
+      : `El documento dice «${dijo}», que no es ${falta}.`;
+
+  const vigente = formatVault(v);
+  const queSePierde = vigente
+    ? `Aceptarlo dejaría «${v.label}» vigente y vacío: ${vigente} desaparecería ` +
+      'sin quedar guardado en ningún lado, y tus contratos, mensajes y agentes ' +
+      'dejarían de saberlo.'
+    : `Aceptarlo dejaría «${v.label}» vigente y vacío.`;
+
+  const escribelo =
+    v.kind === 'money' || v.kind === 'percent' || v.kind === 'number'
+      ? 'Escribe tú el número al editarlo'
+      : 'Escríbelo tú al editarlo';
+
+  return `${queDice} ${queSePierde} ${escribelo}, o descarta la propuesta.`;
+}
 
 /** Un error de validación tiene que decir QUÉ campo y POR QUÉ, no "inválido". */
 function parse<S extends z.ZodTypeAny>(schema: S, input: unknown): z.infer<S> {

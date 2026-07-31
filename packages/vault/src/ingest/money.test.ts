@@ -79,6 +79,19 @@ describe('parsePricingDoc · rangos', () => {
     expect(c?.value).toBeNull();
   });
 
+  it('el texto del rango se conserva AUNQUE el bullet traiga su propia nota', () => {
+    // La regla 2 promete «se registra con value = null y la nota completa», y
+    // cuando había nota propia no se cumplía: `de $800 a $900 — según el caso`
+    // llegaba a la bóveda como «según el caso» a secas. El rango se perdía, y
+    // con él lo único que le queda al emprendedor para saber qué escribir —y
+    // lo único que el error de «Aceptar» puede citarle de vuelta.
+    const c = buscar('- consulta_inicial: de $800 a $900 — según el caso', 'consulta_inicial');
+    expect(c?.value).toBeNull();
+    expect(c?.note).toContain('$800');
+    expect(c?.note).toContain('$900');
+    expect(c?.note).toContain('según el caso');
+  });
+
   it('"de 1 a 3" con una sola cifra sí se guarda', () => {
     // No todo lo que trae la palabra "a" es un rango de dos cifras.
     expect(buscar('- anticipo: $500 a la firma', 'anticipo')?.value).toBe(500);
