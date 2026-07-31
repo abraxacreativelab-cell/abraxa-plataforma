@@ -8,6 +8,8 @@ import {
   duenosDe,
   revisarMigracion,
   pathsEfectivos,
+  excepcionVigente,
+  carrilDeRama,
   CARRIL_ORQUESTADOR,
 } from './ownership-gate.mjs';
 
@@ -58,9 +60,20 @@ describe('perteneceA — exclusiones', () => {
 });
 
 describe('el mapa de propiedad', () => {
-  it('tiene las 14 entradas de construcción más la de H0', () => {
-    expect(Object.keys(ownership)).toHaveLength(15);
+  /**
+   * 14 carriles del plan original + H0 (el orquestador, alta del PR #15) + H15
+   * (CRM), que se abrió después: el CRM se había dado por incluido dentro de H6
+   * y H8, y ninguno de los dos lo construye — H6 declara `contact_id` SIN
+   * `REFERENCES` (H6-inbox.md:110) y H8 dice textualmente "no construyas el
+   * CRM" (H8-flows.md:38).
+   *
+   * Que sea un número escrito a mano es a propósito: abrir un carril nuevo
+   * tiene que ser una decisión visible en un diff, no algo que pase solo.
+   */
+  it('tiene las 14 entradas de construcción, más la de H0, más la de H15', () => {
+    expect(Object.keys(ownership)).toHaveLength(16);
     expect(ownership[CARRIL_ORQUESTADOR]).toBeDefined();
+    expect(ownership['h15-crm']).toBeDefined();
   });
 
   it('H0 no tiene bloque de migraciones: no las escribe, las ordena', () => {
@@ -101,9 +114,53 @@ describe('el mapa de propiedad', () => {
     }
   });
 
-  it('sólo H1 puede mover el lockfile', () => {
-    const conLockfile = Object.entries(ownership).filter(([, c]) => c.lockfile === true);
-    expect(conLockfile.map(([n]) => n)).toEqual(['h1-fundacion']);
+  /**
+   * La regla sigue siendo "el lockfile no se toca". La lista es enumerada y no
+   * un permiso general justamente para que agregarse a ella sea un cambio
+   * visible que alguien tiene que aprobar.
+   *
+   * H15 está aquí por una razón mecánica: es el único carril que crea un
+   * WORKSPACE nuevo (`packages/crm`), y `npm ci` se niega a instalar si el
+   * lockfile no lo conoce ("Missing: @abraxa/crm@0.1.0 from lock file"). Sin
+   * esa entrada, CI no llega ni a compilar.
+   *
+   * QUITAR `"lockfile": true` de h15-crm en cuanto el carril mergee.
+   */
+  it('el lockfile sólo lo mueven H1 y quien crea un workspace nuevo', () => {
+    const conLockfile = Object.entries(ownership)
+      .filter(([, c]) => c.lockfile === true)
+      .map(([n]) => n);
+    expect(conLockfile.sort()).toEqual(['h1-fundacion', 'h15-crm']);
+  });
+
+  /**
+   * Las leyes del repo y el borde HTTP compartido tienen dueño ÚNICO — sin
+   * apoyarse en que `verificarSolapamiento` excluye a h1-fundacion a mano.
+   *
+   * Un mapa que necesita una excepción para ser consistente no es un mapa
+   * consistente: es uno que todavía no ha fallado.
+   */
+  it('las leyes del repo son de H0 y de nadie más', () => {
+    for (const archivo of [
+      '.ownership.json',
+      'CONTRIBUTING.md',
+      'eslint.config.mjs',
+      'scripts/ownership-gate.mjs',
+      'scripts/ownership-gate.test.mjs',
+    ]) {
+      expect(duenosDe(archivo, ownership), archivo).toEqual([CARRIL_ORQUESTADOR]);
+    }
+  });
+
+  it('el borde HTTP compartido es de H0; el resto de packages/db sigue siendo de H1', () => {
+    expect(duenosDe('packages/db/src/http/tenant-context.ts', ownership)).toEqual([
+      CARRIL_ORQUESTADOR,
+    ]);
+    expect(duenosDe('packages/db/src/http/proxy-verified.ts', ownership)).toEqual([
+      CARRIL_ORQUESTADOR,
+    ]);
+    expect(duenosDe('packages/db/src/tenant-db.ts', ownership)).toEqual(['h1-fundacion']);
+    expect(duenosDe('packages/db/ports.ts', ownership)).toEqual(['h1-fundacion']);
   });
 
   it('un archivo ajeno se atribuye a su dueño real', () => {
@@ -122,12 +179,20 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
     expect(conExcepcion).toEqual([CARRIL_ORQUESTADOR]);
   });
 
-  it('viene con fecha, PR y razón escrita, no sólo con rutas', () => {
+  it('viene con fecha, vencimiento, PR y razón escrita, no sólo con rutas', () => {
     const e = h0.excepcionTransversal;
     expect(e.fecha).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(e.venceEn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(e.venceEn > e.fecha, 'vence después de que se concede').toBe(true);
     expect(e.pr).toBeTypeOf('string');
     expect(e.razon.length).toBeGreaterThan(40);
     expect(e.paths.length).toBeGreaterThan(0);
+  });
+
+  it('la que está escrita hoy en el mapa sigue vigente', () => {
+    // Si esto se pone rojo, la excepción caducó: retírala de .ownership.json.
+    // No es una prueba frágil, es el recordatorio con dientes.
+    expect(excepcionVigente(h0.excepcionTransversal).vigente).toBe(true);
   });
 
   it('es acotada: rutas explícitas, nunca el paquete entero de otro', () => {
@@ -141,9 +206,12 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
     const globs = pathsEfectivos(CARRIL_ORQUESTADOR, h0);
     expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(true);
     expect(perteneceA('packages/agents/src/http/proxy-verified.ts', globs)).toBe(true);
-    // El resto del árbol de H3 sigue cerrado para H0.
+    expect(perteneceA('packages/vault/src/http/context.ts', globs)).toBe(true);
+    expect(perteneceA('packages/tenancy/src/middleware/proxy.ts', globs)).toBe(true);
+    // El resto de los árboles ajenos sigue cerrado para H0.
     expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
     expect(perteneceA('packages/vault/src/resolver.ts', globs)).toBe(false);
+    expect(perteneceA('packages/tenancy/src/middleware/tenant.ts', globs)).toBe(false);
   });
 
   it('un carril de construcción NO puede concederse una', () => {
@@ -160,6 +228,66 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
   it('la excepción NO transfiere propiedad: el dueño real no cambia', () => {
     // Es lo que hace que `--check-overlap` siga siendo verdad.
     expect(duenosDe('packages/agents/src/routes.ts', ownership)).toEqual(['h3-agents']);
+    expect(duenosDe('packages/vault/src/http/context.ts', ownership)).toEqual(['h4-vault']);
+    expect(duenosDe('packages/tenancy/src/middleware/proxy.ts', ownership)).toEqual(['h2-tenancy']);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// El candado #6: la excepción caduca sola.
+//
+// El PR #12 se concedió una excepción, la usó, mergeó — y la dejó escrita. Un
+// permiso temporal que nadie retira es un permiso permanente, y "acuérdate de
+// borrarlo" no es un mecanismo. Ahora lo es.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('excepcionVigente — el permiso que se retira solo', () => {
+  const HOY = new Date('2026-08-01T12:00:00Z');
+  const viva = { venceEn: '2026-08-14', paths: ['packages/x/y.ts'] };
+
+  it('vigente mientras no llegue su fecha', () => {
+    expect(excepcionVigente(viva, HOY).vigente).toBe(true);
+  });
+
+  it('el último día todavía vale (vence AL final del día)', () => {
+    expect(excepcionVigente({ ...viva, venceEn: '2026-08-01' }, HOY).vigente).toBe(true);
+  });
+
+  it('al día siguiente ya no', () => {
+    const r = excepcionVigente({ ...viva, venceEn: '2026-07-31' }, HOY);
+    expect(r.vigente).toBe(false);
+    expect(r.motivo).toContain('venció');
+  });
+
+  it('sin `venceEn` no vale: falla CERRADO', () => {
+    // El caso exacto del PR #12. Un permiso sin caducidad no se honra.
+    const r = excepcionVigente({ paths: ['packages/x/y.ts'] }, HOY);
+    expect(r.vigente).toBe(false);
+    expect(r.motivo).toContain('venceEn');
+  });
+
+  it('sin excepción tampoco, y sin reventar', () => {
+    expect(excepcionVigente(undefined, HOY).vigente).toBe(false);
+    expect(excepcionVigente(null, HOY).vigente).toBe(false);
+  });
+
+  it('una excepción vencida NO amplía los paths de H0', () => {
+    const cfg = {
+      paths: ['docs/**'],
+      excepcionTransversal: { venceEn: '2026-07-01', paths: ['packages/agents/src/routes.ts'] },
+    };
+    const globs = pathsEfectivos(CARRIL_ORQUESTADOR, cfg, HOY);
+    expect(globs).toEqual(['docs/**']);
+    expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(false);
+  });
+
+  it('una vigente sí, y sólo sobre sus rutas', () => {
+    const cfg = {
+      paths: ['docs/**'],
+      excepcionTransversal: { venceEn: '2026-08-14', paths: ['packages/agents/src/routes.ts'] },
+    };
+    const globs = pathsEfectivos(CARRIL_ORQUESTADOR, cfg, HOY);
+    expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(true);
+    expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
   });
 });
 
@@ -211,5 +339,53 @@ ALTER TABLE app.billing_events ENABLE ROW LEVEL SECURITY;`;
   it('la migración 001 pasa su propia regla', () => {
     const sql = readFileSync(join(RAIZ, 'migrations/001_foundation.sql'), 'utf8');
     expect(revisarMigracion(sql, '001_foundation.sql')).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Alias de rama. El gate exigía que la rama se llamara EXACTAMENTE igual que su
+// entrada, y eso mata al segundo PR de cualquier carril que abra más de uno.
+// H0 abre muchos: mergea, aplica migraciones, corrige handoffs y despliega.
+// ═════════════════════════════════════════════════════════════════════════════
+describe('carrilDeRama — alias de rama', () => {
+  it('la rama que se llama igual que su entrada resuelve a sí misma', () => {
+    for (const nombre of Object.keys(ownership)) {
+      expect(carrilDeRama(nombre, ownership)).toBe(nombre);
+    }
+  });
+
+  it('una rama declarada en `ramas` resuelve a su carril', () => {
+    expect(carrilDeRama('h0-docs-ola2', ownership)).toBe(CARRIL_ORQUESTADOR);
+  });
+
+  it('una rama inventada no resuelve a nada', () => {
+    expect(carrilDeRama('arreglito-rapido', ownership)).toBeNull();
+    expect(carrilDeRama('h0', ownership)).toBeNull();
+    expect(carrilDeRama('', ownership)).toBeNull();
+  });
+
+  it('todo alias declarado incluye el nombre de su propio carril', () => {
+    for (const [nombre, cfg] of Object.entries(ownership)) {
+      if (!cfg.ramas) continue;
+      expect(Array.isArray(cfg.ramas), nombre).toBe(true);
+      expect(cfg.ramas, nombre).toContain(nombre);
+    }
+  });
+
+  it('ningún alias es reclamado por dos carriles', () => {
+    const visto = new Map();
+    for (const [nombre, cfg] of Object.entries(ownership)) {
+      for (const r of cfg.ramas ?? []) {
+        expect(visto.has(r) ? `${r} ya es de ${visto.get(r)}` : r, r).toBe(r);
+        visto.set(r, nombre);
+      }
+    }
+  });
+
+  it('un alias NO reparte propiedad: los paths siguen siendo los del carril', () => {
+    // La prueba de que el alias es inocuo para `--check-overlap`: el mapa de
+    // dueños se calcula sobre `paths`, y `ramas` no aparece ahí.
+    expect(duenosDe('docs/handoffs/H6-inbox.md', ownership)).toEqual([CARRIL_ORQUESTADOR]);
+    expect(duenosDe('packages/vault/src/resolver.ts', ownership)).not.toContain(CARRIL_ORQUESTADOR);
   });
 });
