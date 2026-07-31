@@ -160,7 +160,15 @@ function verificarCon(
 // El gateway real
 // ────────────────────────────────────────────────────────────────────────────
 
-class GatewayStripe implements StripeGateway {
+/**
+ * Se exporta para poder probarlo con un doble de `Stripe`.
+ *
+ * Lo que hay que probar aquí no es que Stripe funcione —eso es su trabajo—,
+ * sino que NO se cree un `Price` nuevo por cada visita a la landing. Ese es un
+ * fallo que no se nota: el checkout funciona perfecto y la cuenta de Stripe se
+ * llena de precios huérfanos hasta que alguien abre el panel meses después.
+ */
+export class GatewayStripe implements StripeGateway {
   readonly modo = 'stripe' as const;
 
   constructor(
@@ -168,36 +176,81 @@ class GatewayStripe implements StripeGateway {
     private readonly signingSecret: string | undefined,
   ) {}
 
-  async crearCheckout(i: CrearCheckoutInput): Promise<SesionDeCheckout> {
-    const plan = getPlan(i.planId);
+  /**
+   * El precio de monto libre de cada plan, memorizado por proceso.
+   *
+   * No es un caché de rendimiento: es lo que evita crear un `Price` nuevo en
+   * la cuenta de Stripe por cada visita a la landing.
+   */
+  private readonly precios = new Map<PlanId, string>();
+
+  /**
+   * ── Dónde vive de verdad el "monto libre" ─────────────────────────────────
+   *
+   * `custom_unit_amount` NO existe en el `price_data` que se escribe en línea
+   * dentro de `line_items`: es de la API de **Prices**. Escribirlo en el
+   * checkout compila con `as any` y después falla en la llamada real, que es
+   * la peor forma de descubrirlo — con un cliente enfrente. Así que el precio
+   * se crea aparte y el checkout sólo lo referencia.
+   *
+   * Se busca por `lookup_key` antes de crear. Sin eso, cada reinicio del
+   * proceso dejaría un `Price` huérfano más en la cuenta, y a los seis meses
+   * nadie sabe cuál es el bueno.
+   */
+  private async precioDeMontoLibre(planId: PlanId): Promise<string> {
+    const memorizado = this.precios.get(planId);
+    if (memorizado) return memorizado;
+
+    const plan = getPlan(planId);
     if (!plan) {
+      throw new PlatformError('VALIDATION', `El plan '${planId}' no está en el catálogo.`);
+    }
+
+    // La llave incluye la moneda y los topes: si mañana cambian, se crea un
+    // precio nuevo en vez de reusar uno que ya no dice lo mismo.
+    const lookupKey =
+      `abraxa_${planId}_libre_${MONEDA}_` +
+      `${MONTO.MINIMO_CENTAVOS}_${MONTO.MAXIMO_CENTAVOS}_${MONTO.PRESET_CENTAVOS}`;
+
+    const existentes = await this.stripe.prices.list({ lookup_keys: [lookupKey], limit: 1 });
+    const yaEsta = existentes.data[0];
+    if (yaEsta) {
+      this.precios.set(planId, yaEsta.id);
+      return yaEsta.id;
+    }
+
+    const precio = await this.stripe.prices.create({
+      currency: MONEDA,
+      product_data: { name: `ABRAXA ${plan.name}` },
+      // Esto ES el monto libre: Stripe le pinta un campo para que escriba
+      // cuánto quiere dar, con el preset ya puesto.
+      custom_unit_amount: {
+        enabled: true,
+        minimum: MONTO.MINIMO_CENTAVOS,
+        maximum: MONTO.MAXIMO_CENTAVOS,
+        preset: MONTO.PRESET_CENTAVOS,
+      },
+      lookup_key: lookupKey,
+      metadata: { planId },
+    });
+
+    this.precios.set(planId, precio.id);
+    return precio.id;
+  }
+
+  async crearCheckout(i: CrearCheckoutInput): Promise<SesionDeCheckout> {
+    if (!getPlan(i.planId)) {
       throw new PlatformError('VALIDATION', `El plan '${i.planId}' no está en el catálogo.`);
     }
 
+    const price = await this.precioDeMontoLibre(i.planId);
+
     const s = await this.stripe.checkout.sessions.create({
+      // `custom_unit_amount` sólo funciona en pagos de una vez. El día que
+      // esto sea suscripción recurrente no basta con cambiar el `mode`: hay
+      // que cambiar de enfoque (precios fijos o por tramos).
       mode: 'payment',
-      // `custom_unit_amount` ES el monto libre: Stripe le muestra un campo
-      // para que escriba cuánto quiere dar. Sólo existe en mode 'payment';
-      // el día que esto sea suscripción recurrente hay que cambiar de
-      // enfoque (precios fijos o quantity), no sólo el `mode`.
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: MONEDA,
-            product_data: {
-              name: `ABRAXA ${plan.name}`,
-              description: plan.pitch,
-            },
-            custom_unit_amount: {
-              enabled: true,
-              minimum: MONTO.MINIMO_CENTAVOS,
-              maximum: MONTO.MAXIMO_CENTAVOS,
-              preset: MONTO.PRESET_CENTAVOS,
-            },
-          },
-        },
-      ],
+      line_items: [{ price, quantity: 1 }],
       success_url: i.successUrl,
       cancel_url: i.cancelUrl,
       ...(i.ownerEmail ? { customer_email: i.ownerEmail } : {}),

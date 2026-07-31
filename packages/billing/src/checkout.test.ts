@@ -7,7 +7,9 @@
  */
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import express, { type NextFunction, type Request, type Response } from 'express';
+// `Response` se deja libre a propósito para el de `fetch`: express también
+// exporta uno y, sin el alias, `leerJson(r)` pediría un Response de express.
+import express, { type NextFunction, type Request, type Response as ResponseExpress } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlatformError, __clearPorts, __setClientForTests, registerPort } from '@abraxa/db';
 import { HEADER, resetEnvCache } from '@abraxa/config';
@@ -59,7 +61,7 @@ beforeEach(async () => {
   const app = express();
   app.use(express.json());
   app.use('/billing', router);
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, _req: Request, res: ResponseExpress, _next: NextFunction) => {
     if (PlatformError.is(err)) {
       res.status(err.status).json(err.toResponse());
       return;
@@ -87,15 +89,23 @@ const postJson = (ruta: string, cuerpo: unknown, headers: Record<string, string>
     body: JSON.stringify(cuerpo),
   });
 
+/** `Response.json()` devuelve `unknown` con los tipos de Node 22. Cada prueba
+ *  declara la forma que espera, que además documenta el contrato de la ruta. */
+const leerJson = async <T>(r: Response): Promise<T> => (await r.json()) as T;
+
 // ════════════════════════════════════════════════════════════════════════════
 
 describe('GET /billing/plans', () => {
   it('publica el catálogo y los topes del monto libre', async () => {
     const r = await fetch(`${base}/billing/plans`);
-    const cuerpo = await r.json();
+    const cuerpo = await leerJson<{
+      plans: Array<{ id: string }>;
+      monto: { minimoCentavos: number };
+      planDePago: string;
+    }>(r);
 
     expect(r.status).toBe(200);
-    expect(cuerpo.plans.map((p: { id: string }) => p.id)).toEqual(['free', 'pro']);
+    expect(cuerpo.plans.map((p) => p.id)).toEqual(['free', 'pro']);
     expect(cuerpo.monto.minimoCentavos).toBeGreaterThanOrEqual(50);
     expect(cuerpo.planDePago).toBe('pro');
   });
@@ -111,7 +121,7 @@ describe('GET /billing/plans', () => {
 describe('POST /billing/checkout', () => {
   it('crea la sesión y devuelve a dónde mandar al navegador', async () => {
     const r = await postJson('/billing/checkout', { businessName: 'Panadería Lupita' });
-    const cuerpo = await r.json();
+    const cuerpo = await leerJson<{ sessionId: string; url: string; modo: string }>(r);
 
     expect(r.status).toBe(200);
     expect(cuerpo.sessionId).toBeTruthy();
@@ -125,7 +135,7 @@ describe('POST /billing/checkout', () => {
     quitarGateway = __setGatewayForTests(doble);
 
     const r = await postJson('/billing/checkout', { businessName: 'Tacos El Gordo' });
-    const { sessionId } = await r.json();
+    const { sessionId } = await leerJson<{ sessionId: string }>(r);
 
     const sesion = await doble.recuperarSesion(sessionId);
     expect(sesion.businessName).toBe('Tacos El Gordo');
