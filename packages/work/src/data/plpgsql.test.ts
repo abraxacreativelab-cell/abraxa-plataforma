@@ -566,6 +566,23 @@ describe.skipIf(!HAY_BASE)('la 070 contra Postgres', () => {
   // app.complete_task_cascade — la salida del 409
   // ══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * Lo que devuelve son TAREAS CERRADAS, no subtareas cerradas.
+   *
+   * Vale la pena decirlo aquí porque estas dos pruebas nacieron esperando 2 y 0
+   * —contando sólo las subtareas— y la base contestó 3 y 1. No era un defecto de
+   * la 070: `v_count` se incrementa en el bucle de las subtareas Y otra vez en el
+   * `IF v_status <> 'completed'` de la propia tarea, y las otras dos
+   * implementaciones que existen cuentan igual (`rpcCompleteCascade` de
+   * `testing/fake-db.ts` y `completarTodas` de `ui/demo-api.ts`). Tres a cero: la
+   * equivocada era la expectativa.
+   *
+   * Se corrige la expectativa y se deja escrito el contrato, que es lo que
+   * faltaba. El número viaja hasta `completeAll(): { closed: number }` y de ahí
+   * a la acción del servidor, pero **hoy no se pinta en ninguna pantalla**: si
+   * alguien lo pone en el modal de "Completar todas", el texto tiene que decir
+   * "se cerraron N tareas" y no "N subtareas", o dirá una de más.
+   */
   describe('app.complete_task_cascade', () => {
     const cascada = (t: string, id: string, actor: string | null = 'lupita@ejemplo.mx') =>
       q<{ complete_task_cascade: number }>(
@@ -573,7 +590,7 @@ describe.skipIf(!HAY_BASE)('la 070 contra Postgres', () => {
         [t, id, actor],
       );
 
-    it('cierra las subtareas abiertas y el padre, y cuenta las subtareas', async () => {
+    it('cierra las subtareas abiertas y el padre, y cuenta TODAS las que cerró', async () => {
       const padre = await tarea(A);
       const a = await tarea(A, { parent_id: padre, status: 'pending' });
       const b = await tarea(A, { parent_id: padre, status: 'blocked' });
@@ -581,7 +598,9 @@ describe.skipIf(!HAY_BASE)('la 070 contra Postgres', () => {
 
       const [fila] = await cascada(A, padre);
 
-      expect(fila?.complete_task_cascade).toBe(2);
+      // 3 = las dos subtareas abiertas + el padre. La que ya estaba completada
+      // no se vuelve a tocar y por eso no se cuenta.
+      expect(fila?.complete_task_cascade).toBe(3);
       for (const id of [padre, a, b, ya]) expect((await leer(id))?.status).toBe('completed');
       // Y `completed_at` lo puso el trigger, no la función.
       expect((await leer(a))?.completed_at).not.toBeNull();
@@ -618,11 +637,13 @@ describe.skipIf(!HAY_BASE)('la 070 contra Postgres', () => {
       expect((await leer(ajena))?.status).toBe('pending');
     });
 
-    it('sobre una subtarea cierra sólo esa', async () => {
+    it('sobre una subtarea cierra sólo esa, y el padre no se entera', async () => {
       const padre = await tarea(A);
       const hija = await tarea(A, { parent_id: padre });
       const [fila] = await cascada(A, hija);
-      expect(fila?.complete_task_cascade).toBe(0);
+      // 1 = ella misma. El bucle de subtareas no corre porque tiene padre, que
+      // es justo lo que impide que cerrar una subtarea arrastre a sus hermanas.
+      expect(fila?.complete_task_cascade).toBe(1);
       expect((await leer(hija))?.status).toBe('completed');
       expect((await leer(padre))?.status).toBe('pending');
     });
