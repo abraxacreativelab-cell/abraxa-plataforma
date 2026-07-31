@@ -163,6 +163,13 @@ export interface FlowRun {
   triggerType: TriggerType;
   isTest: boolean;
   error: string | null;
+  /**
+   * Ejecuciones de nodo, no pasos guardados. Es el contador del tope
+   * anti-bucle: contar filas de `flow_steps` no sirve porque el índice único
+   * rechaza el segundo paso `ok` del mismo nodo, y en un ciclo el contador se
+   * quedaría clavado. Ver la migración 061.
+   */
+  stepsTaken: number;
   startedAt: string;
   wakeAt: string | null;
   completedAt: string | null;

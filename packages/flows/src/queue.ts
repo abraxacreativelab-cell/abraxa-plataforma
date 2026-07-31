@@ -37,10 +37,9 @@
  *  las corridas en `paused` con su razón a la vista, y `reanudarPendientes()`
  *  las rescata en cuanto haya cola. No se pierde ninguna.
  */
-import { ejecutarPaso, reanudar } from './engine/step';
+import { contextoDelMotor, ejecutarPaso, reanudar } from './engine/step';
 import type { Encolar, EntornoDelMotor, TrabajoDePaso } from './engine/step';
 import * as store from './store';
-import { contextoDelMotor } from './engine/step';
 
 /** El nombre de la cola en pg-boss. */
 export const COLA = 'flows.step';

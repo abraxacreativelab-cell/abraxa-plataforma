@@ -102,6 +102,7 @@ export function aCorrida(f: Fila): FlowRun {
     triggerType: String(f.trigger_type) as TriggerType,
     isTest: f.is_test === true,
     error: txt(f.error),
+    stepsTaken: Number(f.steps_taken ?? 0),
     startedAt: String(f.started_at ?? ''),
     wakeAt: txt(f.wake_at),
     completedAt: txt(f.completed_at),
@@ -548,13 +549,26 @@ export async function listarPasos(ctx: TenantContext, runId: string): Promise<Fl
   return (filas ?? []).map(aPaso);
 }
 
-export async function contarPasos(ctx: TenantContext, runId: string): Promise<number> {
-  const r = await tenantDb(ctx)
-    .from('flow_steps')
-    .select('id', { head: true, count: 'exact' })
-    .eq('run_id', runId);
-  if (r.error) throw new PlatformError('INTERNAL', `no se pudieron contar los pasos: ${r.error.message}`);
-  return r.count ?? 0;
+/**
+ * Suma una ejecución al contador del tope anti-bucle.
+ *
+ * Cuenta EJECUCIONES y no filas de `flow_steps`: en un flujo con ciclo, el
+ * segundo paso `ok` del mismo nodo lo rechaza `flow_steps_hecho_idx`, así que
+ * contar filas dejaría el contador clavado y el tope no saltaría nunca — el
+ * bucle correría para siempre, encolando un paso tras otro.
+ */
+export async function sumarEjecucion(
+  ctx: TenantContext,
+  runId: string,
+  llevaba: number,
+): Promise<void> {
+  exigir(
+    await tenantDb(ctx)
+      .from('flow_runs')
+      .update({ steps_taken: llevaba + 1, updated_at: new Date().toISOString() })
+      .eq('id', runId),
+    'no se pudo contar el paso',
+  );
 }
 
 /** ¿Este nodo ya se completó con éxito en esta corrida? El guard de doble envío. */

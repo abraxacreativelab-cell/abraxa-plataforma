@@ -84,19 +84,18 @@ export interface ResumenDeEmision {
 
 export interface OpcionesDeEmision {
   encolar: Encolar;
-  /** Restringe el disparo a UN flujo. Es lo que hace seguro el botón "Probar". */
-  soloFlujo?: string;
-  /** Marca las corridas como prueba. */
+  /** Marca las corridas como prueba, para que la UI las separe del historial. */
   esPrueba?: boolean;
 }
 
 /**
  * Publica un evento y enrola lo que corresponda.
  *
- * `soloFlujo` no es un adorno: sin él, "probar" emitiría el disparador de
- * verdad y enrolaría TODOS los flujos activos con ese mismo disparador sobre
- * el contacto de prueba — mensajes reales de automatizaciones que nadie quiso
- * probar. Es un error que GARDEN cometió y corrigió.
+ * Esto es SÓLO para eventos de verdad. El botón "Probar" no pasa por aquí:
+ * llama a `enrolar()` sobre su flujo y nada más. Emitir un disparador real
+ * para probar arrastraría a todos los demás flujos que lo escuchan sobre el
+ * contacto de prueba — mensajes reales de automatizaciones que nadie quiso
+ * probar. Ver `service.probar()`.
  */
 export async function emitirEvento(
   ctx: TenantContext,
@@ -110,8 +109,7 @@ export async function emitirEvento(
 
   const resumen: ResumenDeEmision = { enroladas: 0, duplicadas: 0, fallidas: [] };
 
-  let flujos = await store.flujosActivosPara(ctx, evento.type);
-  if (opciones.soloFlujo) flujos = flujos.filter((f) => f.id === opciones.soloFlujo);
+  const flujos = await store.flujosActivosPara(ctx, evento.type);
 
   for (const flujo of flujos) {
     if (!disparadorCalza(flujo, payload)) continue;

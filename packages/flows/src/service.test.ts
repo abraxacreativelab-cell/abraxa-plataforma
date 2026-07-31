@@ -180,6 +180,25 @@ describe('probar', () => {
     expect(dobles.bandeja.envios[0]?.body).toBe('Hola Ana');
   });
 
+  it('probar un flujo ACTIVO con filtro que no calza SÍ corre', async () => {
+    // Defecto encontrado al releer, antes de que llegara a nadie: si `probar`
+    // emitía el disparador de verdad, el filtro del disparador se aplicaba
+    // también a la prueba. Un flujo que escucha "cambia a la etapa
+    // Contactado" no enrolaba nada al probarlo, y el botón se veía roto sin
+    // decir por qué. Probar es un acto dirigido a UN flujo: no pasa por los
+    // filtros.
+    const flujo = await servicio.crear(ctx, {
+      ...PROPUESTA,
+      trigger_type: 'stage_changed',
+      trigger_config: { stage: 'contactado' },
+    });
+    await servicio.activar(ctx, flujo.id);
+
+    const r = await servicio.probar(ctx, flujo.id, { contactId: CONTACTO, encolar: colaEnLinea() });
+    expect(r.corridas).toBe(1);
+    expect(dobles.bandeja.envios).toHaveLength(1);
+  });
+
   it('probar dos veces seguidas con el mismo contacto SÍ se puede', async () => {
     // Es exactamente lo que hace quien está afinando un mensaje. El índice
     // único deja fuera las corridas de prueba justo por esto.

@@ -505,6 +505,13 @@ describe('el tope anti-bucle', () => {
     const corrida = (await store.listarCorridas(ctx, {}))[0]!;
     expect(corrida.status).toBe('error');
     expect(corrida.error).toContain('bucle');
-    expect((await store.listarPasos(ctx, corrida.id)).length).toBeLessThanOrEqual(100);
+
+    // El detalle que hace que esto funcione: el contador cuenta EJECUCIONES,
+    // no filas. Los dos nodos del ciclo sólo dejan DOS pasos guardados —el
+    // índice único rechaza el segundo `ok` de cada uno—, así que contar filas
+    // habría dejado el contador clavado en 2 y el bucle habría corrido para
+    // siempre.
+    expect(corrida.stepsTaken).toBe(100);
+    expect((await store.listarPasos(ctx, corrida.id)).length).toBeLessThanOrEqual(2);
   });
 });

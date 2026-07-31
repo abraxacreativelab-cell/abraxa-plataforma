@@ -22,7 +22,7 @@ import { PlatformError, tryPort } from '@abraxa/db';
 import type { TenantContext, TriggerType } from '@abraxa/db';
 import { contactos } from './crm';
 import type { Encolar } from './engine/step';
-import { emitirEvento, enrolar } from './events';
+import { enrolar } from './events';
 import * as store from './store';
 import type { Flow, FlowDefinition, FlowRun, FlowStep, RunSnapshot } from './types';
 import { CATALOGO_VACIO, validar } from './validate';
@@ -248,13 +248,19 @@ export async function volverAVersion(
 /**
  * Enrola UN contacto en ESTE flujo y sólo en éste.
  *
- * `soloFlujo` es la parte importante y no es un detalle de implementación: sin
- * él, probar emitiría el disparador de verdad y arrastraría a todos los flujos
- * activos con el mismo disparador sobre el contacto de prueba. Mensajes reales
- * de automatizaciones que nadie quiso probar.
+ * ── Por qué NO pasa por `emitirEvento` ─────────────────────────────────────
  *
- * Corre aunque el flujo esté en pausa —para eso es probar— y marca la corrida
- * con `is_test`, que la UI separa del historial real.
+ * Emitir el disparador de verdad haría dos daños. El primero es el que GARDEN
+ * cometió y corrigió: arrastraría a TODOS los flujos activos con ese mismo
+ * disparador sobre el contacto de prueba — mensajes reales de automatizaciones
+ * que nadie quiso probar. El segundo es más callado: `emitirEvento` respeta
+ * los FILTROS del disparador, así que probar un flujo que escucha "cambia a la
+ * etapa Contactado" no enrolaría nada, y el botón se vería roto sin decir por
+ * qué.
+ *
+ * Probar es un acto humano dirigido a UN flujo. Se enrola ese flujo, punto —
+ * corra o no corra su disparador, esté activo o en pausa (para eso es probar).
+ * La corrida queda marcada con `is_test`, y la UI la separa del historial real.
  */
 export async function probar(
   ctx: TenantContext,
@@ -264,37 +270,17 @@ export async function probar(
   exigirAdmin(ctx, 'probar una automatización');
   const flujo = await store.exigirFlujo(ctx, flujoId);
 
-  const r = await emitirEvento(
+  const enrolada = await enrolar(
     ctx,
-    {
-      type: flujo.triggerType,
-      payload: { contactId: i.contactId ?? null, prueba: true },
-    },
-    { encolar: i.encolar, soloFlujo: flujoId, esPrueba: true },
+    flujo,
+    { contactId: i.contactId ?? null, prueba: true },
+    flujo.triggerType,
+    { encolar: i.encolar, esPrueba: true },
   );
 
-  // Una prueba tiene que correr aunque el flujo esté en pausa: `emitirEvento`
-  // sólo mira los activos, así que si no enroló nada, se enrola a mano.
-  if (r.enroladas === 0 && flujo.status !== 'active') {
-    const ok = await enrolar(
-      ctx,
-      flujo,
-      { contactId: i.contactId ?? null, prueba: true },
-      flujo.triggerType,
-      { encolar: i.encolar, esPrueba: true },
-    );
-    return ok
-      ? { corridas: 1 }
-      : { corridas: 0, razon: 'ese contacto ya va corriendo esta automatización' };
-  }
-
-  if (r.enroladas === 0 && r.duplicadas > 0) {
-    return { corridas: 0, razon: 'ese contacto ya va corriendo esta automatización' };
-  }
-  if (r.enroladas === 0 && r.fallidas[0]) {
-    return { corridas: 0, razon: r.fallidas[0].razon };
-  }
-  return { corridas: r.enroladas };
+  return enrolada
+    ? { corridas: 1 }
+    : { corridas: 0, razon: 'ese contacto ya va corriendo esta automatización' };
 }
 
 // ════════════════════════════════════════════════════════════════════════════

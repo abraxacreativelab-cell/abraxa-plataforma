@@ -109,7 +109,8 @@ export async function ejecutarPaso(
     status: corrida.status,
     currentNode: corrida.currentNode,
     nodeId: trabajo.nodeId,
-    pasosDados: await store.contarPasos(ctx, corrida.id),
+    // Ejecuciones, no filas guardadas: ver `store.sumarEjecucion`.
+    pasosDados: corrida.stepsTaken,
     definition: definicion,
     nodoYaCompletado: await store.nodoYaCompletado(ctx, corrida.id, trabajo.nodeId),
   };
@@ -163,6 +164,12 @@ export async function ejecutarPaso(
   const escrito = await store.registrarPaso(ctx, { ...despues.paso, runId: corrida.id, startedAt: arranque });
   // `false` = el índice único rechazó el paso porque otro intento ya lo había
   // completado. No es un error: es el criterio #5 funcionando. Se sigue.
+
+  // El contador sube SIEMPRE, se haya escrito el paso o no. Si sólo subiera
+  // con la fila, un flujo con ciclo lo dejaría clavado —el índice único
+  // rechaza el segundo `ok` del mismo nodo— y el tope anti-bucle no saltaría
+  // nunca.
+  await store.sumarEjecucion(ctx, corrida.id, estado.pasosDados);
 
   if (despues.accion === 'terminar') {
     await store.terminarCorrida(ctx, corrida.id, despues.status, despues.error);

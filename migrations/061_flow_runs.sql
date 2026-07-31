@@ -73,6 +73,19 @@ CREATE TABLE app.flow_runs (
   -- Por qué se detuvo, en español y a la vista del emprendedor.
   error         text,
 
+  -- ── El contador del tope anti-bucle ──────────────────────────────────────
+  -- Cuenta EJECUCIONES, no filas de `flow_steps`, y la diferencia importa:
+  -- si un flujo trae un ciclo, el segundo paso `ok` del mismo nodo lo rechaza
+  -- `flow_steps_hecho_idx`, así que contar filas dejaría el contador clavado
+  -- y el tope no saltaría NUNCA. El bucle correría para siempre, encolando.
+  --
+  -- Se incrementa con lectura-escritura y no con `steps_taken + 1` en SQL
+  -- porque no se puede desde PostgREST. No es una carrera real: el fence de
+  -- `current_node` deja un solo job vivo por corrida a la vez, y en el peor
+  -- caso el contador se queda corto — el tope salta un poco más tarde, nunca
+  -- antes de tiempo.
+  steps_taken   integer NOT NULL DEFAULT 0,
+
   started_at    timestamptz NOT NULL DEFAULT now(),
   -- Cuándo debe despertar un `wait`. Lo lee el barrido de reanudación cuando
   -- no hay cola viva (y la cola lo usa como `startAfter`).

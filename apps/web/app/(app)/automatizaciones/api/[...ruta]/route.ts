@@ -90,17 +90,21 @@ async function manejar(req: NextRequest, metodo: Metodo, partes: string[]): Prom
 }
 
 interface Contexto {
-  params: { ruta?: string[] };
+  params: { ruta: string[] };
 }
 
-export const GET = (req: NextRequest, { params }: Contexto): Promise<NextResponse> =>
-  manejar(req, 'GET', params.ruta ?? []);
+export function GET(req: NextRequest, { params }: Contexto): Promise<NextResponse> {
+  return manejar(req, 'GET', params.ruta ?? []);
+}
 
-export const POST = (req: NextRequest, { params }: Contexto): Promise<NextResponse> =>
-  manejar(req, 'POST', params.ruta ?? []);
+export function POST(req: NextRequest, { params }: Contexto): Promise<NextResponse> {
+  return manejar(req, 'POST', params.ruta ?? []);
+}
 
-export const PUT = (req: NextRequest, { params }: Contexto): Promise<NextResponse> =>
-  manejar(req, 'PUT', params.ruta ?? []);
+export function PUT(req: NextRequest, { params }: Contexto): Promise<NextResponse> {
+  return manejar(req, 'PUT', params.ruta ?? []);
+}
 
-export const DELETE = (req: NextRequest, { params }: Contexto): Promise<NextResponse> =>
-  manejar(req, 'DELETE', params.ruta ?? []);
+export function DELETE(req: NextRequest, { params }: Contexto): Promise<NextResponse> {
+  return manejar(req, 'DELETE', params.ruta ?? []);
+}
