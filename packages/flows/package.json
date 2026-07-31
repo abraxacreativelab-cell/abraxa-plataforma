@@ -6,7 +6,8 @@
   "description": "Automatizaciones: motor, catalogo de nodos y asistente en espanol. Handoff H8.",
   "exports": {
     ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
-    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" }
+    "./meta": { "types": "./src/meta.ts", "default": "./src/meta.ts" },
+    "./ui": { "types": "./src/ui/index.ts", "default": "./src/ui/index.ts" }
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
