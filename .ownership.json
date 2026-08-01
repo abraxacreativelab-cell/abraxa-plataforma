@@ -158,12 +158,34 @@
   "h5-design-system": {
     "label": "H5 · Design system y shell",
     "migrations": null,
+    "nota": [
+      "El 2026-08-01 se le asignan tres archivos que NO EXISTÍAN, y las tres altas tienen la",
+      "misma raíz: el shell no tenía ni índice ni forma de fallar con dignidad.",
+      "",
+      "`(app)/page.tsx` — el grupo `(app)` no tiene índice. Tras el login el invitado aterriza",
+      "en /ritual y no hay a dónde llevarlo cuando guarde y quiera seguir después. Sin esta ruta",
+      "no se puede invertir el embudo, que es el encargo de Santiago: entregar algo impresionante",
+      "tras cuatro preguntas y que las secciones bloqueadas sean el gancho para seguir. Cae bajo",
+      "el glob `apps/web/app/**/page.tsx` de h1-fundacion, que está DORMIDO — y despertar a H1",
+      "por un archivo nuevo que nadie más va a tocar es el trámite que el mapa existe para",
+      "evitar.",
+      "",
+      "`(app)/error.tsx` y `(app)/not-found.tsx` — **no caen en NINGÚN glob del mapa**: h1 sólo",
+      "cubre `page.tsx` y `layout.tsx`. Crearlos sin alta pondría `--check-overlap` en rojo para",
+      "TODOS los carriles con «Archivos sin dueño». Y `error.tsx` no es cosmético: es el único",
+      "mecanismo NATIVO de Next para que el fallo de un Server Component de OTRO carril —H4, H9,",
+      "H6— no se vuelva pantalla blanca de React delante de un invitado. Es lo peor que puede",
+      "pasar en un evento y no había nada que lo atrapara."
+    ],
     "paths": [
       "packages/ui/**",
       "apps/web/app/layout.tsx",
       "apps/web/app/globals.css",
       "apps/web/tailwind.config.ts",
-      "apps/web/app/(app)/layout.tsx"
+      "apps/web/app/(app)/layout.tsx",
+      "apps/web/app/(app)/page.tsx",
+      "apps/web/app/(app)/error.tsx",
+      "apps/web/app/(app)/not-found.tsx"
     ]
   },
 
