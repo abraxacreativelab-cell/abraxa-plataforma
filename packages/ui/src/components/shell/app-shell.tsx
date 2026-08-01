@@ -12,6 +12,7 @@ import { AccentScope } from './accent-scope';
 import { MobileNav } from './mobile-nav';
 import { Sidebar, type EnlaceFijo } from './sidebar';
 import { Topbar } from './topbar';
+import { TransicionDeRuta } from './transicion-de-ruta';
 
 /** El panel. No es un área del negocio: es la puerta de entrada al producto. */
 export const ENLACE_AL_PANEL: EnlaceFijo = { href: '/panel', label: 'Tu panel', icon: 'resumen' };
@@ -154,7 +155,10 @@ export function AppShell({
           */}
           <div id="contenido" tabIndex={-1} className="min-w-0 focus:outline-none">
             <FronteraDeError resetKey={pathname} contexto={areaActual?.label ?? null}>
-              {children}
+              {/* La transición va DENTRO de la frontera de error, no fuera: si
+                  una pantalla revienta, lo que tiene que aparecer es la
+                  disculpa —y aparece quieta—, no una disculpa deslizándose. */}
+              <TransicionDeRuta ruta={pathname}>{children}</TransicionDeRuta>
             </FronteraDeError>
           </div>
         </AccentScope>

@@ -43,6 +43,26 @@ export { meta } from './meta';
 // ── Utilidades ──────────────────────────────────────────────────────────────
 export { cn } from './lib/cn';
 
+/**
+ * La aduana contra la jerga interna.
+ *
+ * Ya está cableada en `EmptyState`, `LoadError`, `LockedArea`, `SidebarArea` y
+ * `TarjetaDeArea`, así que casi nadie necesita llamarla a mano. Se exporta por
+ * dos motivos:
+ *
+ *  · para pintar un diagnóstico en una pantalla propia sin pasar por esos
+ *    componentes — `{sinJerga(motivo)}` y listo;
+ *  · y sobre todo para las PRUEBAS de los demás carriles:
+ *    `expect(tieneJerga(copy)).toBe(false)` es la forma barata de que un PR no
+ *    vuelva a filtrar «H2 · packages/tenancy» a producción.
+ */
+export {
+  RESPALDO_SIN_JERGA,
+  marcadoresDeJerga,
+  sinJerga,
+  tieneJerga,
+} from './lib/castellano';
+
 export {
   AA_LARGE,
   AA_NORMAL,
@@ -137,6 +157,10 @@ export { Sidebar, type EnlaceFijo, type SidebarProps } from './components/shell/
 export { SidebarArea, type SidebarAreaProps } from './components/shell/sidebar-area';
 export { Topbar, type TopbarProps } from './components/shell/topbar';
 export { MobileNav, type MobileNavProps } from './components/shell/mobile-nav';
+export {
+  TransicionDeRuta,
+  type TransicionDeRutaProps,
+} from './components/shell/transicion-de-ruta';
 
 // ── El panel ────────────────────────────────────────────────────────────────
 export { PanelDeInicio, type PanelDeInicioProps } from './components/panel/panel-de-inicio';
@@ -146,12 +170,23 @@ export {
   type AnilloDeProgresoProps,
 } from './components/panel/anillo-de-progreso';
 export {
+  areasRecienAbiertas,
+  guardarMemoria,
+  leerMemoria,
+  llaveDeMemoria,
+  slugsCerrados,
+} from './components/panel/recien-abiertas';
+export {
   areasQueAbreLaSiguienteFase,
   hitosDelRitual,
   llamadaDelPanel,
   loQueYaSabe,
   nombreDelAgente,
+  pasosDelRitual,
+  ritualEnPanel,
+  senalesDelRitual,
   type EstadoDelPaso,
+  type FotoDelRitual,
   type HitoDelRitual,
   type LlamadaDelPanel,
   type PasoDelRitual,

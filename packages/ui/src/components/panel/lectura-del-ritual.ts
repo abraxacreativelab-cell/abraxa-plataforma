@@ -11,6 +11,7 @@
  *  Ni un dato de aquí se inventa: todo viene de `GET /onboarding/ritual` y
  *  `GET /onboarding/_status` (H7), o no se muestra.
  */
+import type { SenalesDelRitual } from '../nav/areas-de-arranque';
 
 /** Una de las 7 fases, tal como las publica `GET /onboarding/_status`. */
 export interface PasoDelRitual {
@@ -146,6 +147,116 @@ export function loQueYaSabe(memoria: string | null | undefined, maximo = 4): str
     .map((l) => l.replace(/^·\s*/, '').trim())
     .filter((l) => l.length > 0)
     .slice(0, maximo);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// De la respuesta de H7 a lo que el panel necesita
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * La foto que devuelve `GET /onboarding/ritual`, recortada a lo que el panel
+ * lee. Se declara aquí y NO se importa de `@abraxa/onboarding` a propósito: ese
+ * paquete arrastra Express y el cliente de la base, y esto corre en el
+ * navegador. Es el mismo criterio —y el mismo comentario— que ya tomó H7 en
+ * `(onboarding)/ritual/lib/tipos.ts`.
+ *
+ * Todo opcional y todo `unknown`-tolerante: si la API cambia de forma, el panel
+ * enseña menos, no revienta.
+ */
+export interface FotoDelRitual {
+  vista?: {
+    faseIndice?: number;
+    fasesTotales?: number;
+    progreso?: number;
+    tituloDeFase?: string;
+    status?: string;
+    agente?: string | null;
+    turnos?: number;
+    faltante?: string[];
+  } | null;
+  memoria?: string | null;
+  nuevo?: boolean;
+}
+
+/**
+ * La foto de H7, convertida en lo que pinta el panel.
+ *
+ * Es lo único que traduce entre los dos contratos, y por eso es lo que hay que
+ * poder probar: cada `??` de aquí es una pantalla que NO se rompe el día que la
+ * API conteste algo raro.
+ *
+ * `null` entra y `null` sale — que el panel lee como "todavía no empieza su
+ * Ritual", el estado más conservador y el único que no le promete a nadie un
+ * avance que no tiene.
+ */
+export function ritualEnPanel(foto: FotoDelRitual | null | undefined): RitualEnPanel | null {
+  if (!foto) return null;
+
+  const v = foto.vista ?? {};
+  const fasesTotales = enteroPositivo(v.fasesTotales) ?? 7;
+  // El índice se recorta al total: un `faseIndice` mayor que `fasesTotales`
+  // pintaría «Llevas 9 de 7 fases», que es la clase de detalle que hace dudar
+  // de todos los demás números de la pantalla.
+  const faseIndice = Math.min(enteroPositivo(v.faseIndice) ?? 0, fasesTotales);
+
+  return {
+    agente: cadena(v.agente),
+    faseIndice,
+    fasesTotales,
+    // El progreso se RECALCULA por fases cerradas en vez de creerle al de la
+    // API. Son la misma cuenta (`progresoDe()` en H7), pero así el anillo y el
+    // «llevas X de 7» no se pueden contradecir nunca en pantalla.
+    progreso:
+      v.status === 'completada' ? 100 : Math.round((faseIndice / Math.max(fasesTotales, 1)) * 100),
+    tituloDeFase: cadena(v.tituloDeFase) ?? '',
+    status: cadena(v.status) ?? 'activa',
+    turnos: enteroPositivo(v.turnos) ?? 0,
+    // `nuevo` de la API manda; si no viene, se deduce de que no haya turnos.
+    nuevo: typeof foto.nuevo === 'boolean' ? foto.nuevo : (enteroPositivo(v.turnos) ?? 0) === 0,
+    loQueYaSabe: loQueYaSabe(foto.memoria),
+    faltante: Array.isArray(v.faltante) ? v.faltante.filter((f) => typeof f === 'string') : [],
+  };
+}
+
+/**
+ * Las señales que abren áreas, sacadas de la misma foto.
+ *
+ * Existe para que el shell y el panel lean el Ritual UNA vez y no dos: la barra
+ * lateral y el mosaico tienen que coincidir en qué está abierto, y la única
+ * forma de garantizarlo es que la cuenta salga del mismo sitio.
+ */
+export function senalesDelRitual(ritual: RitualEnPanel | null): SenalesDelRitual | null {
+  if (!ritual) return null;
+  return {
+    faseIndice: ritual.faseIndice,
+    fasesTotales: ritual.fasesTotales,
+    completado: ritual.status === 'completada',
+    agente: ritual.agente,
+  };
+}
+
+/** Las 7 fichas de `GET /onboarding/_status`, con lo que el panel necesita. */
+export function pasosDelRitual(datos: unknown): PasoDelRitual[] {
+  const fases = (datos as { fases?: unknown })?.fases;
+  if (!Array.isArray(fases)) return [];
+
+  return fases
+    .map((f) => {
+      const o = (f ?? {}) as Record<string, unknown>;
+      const fase = cadena(o.fase);
+      const titulo = cadena(o.titulo);
+      if (!fase || !titulo) return null;
+      return { fase, titulo, promesa: cadena(o.promesa) ?? '' } satisfies PasoDelRitual;
+    })
+    .filter((p): p is PasoDelRitual => p !== null);
+}
+
+function cadena(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+}
+
+function enteroPositivo(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
 }
 
 /**

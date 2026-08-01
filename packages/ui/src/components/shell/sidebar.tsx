@@ -77,7 +77,7 @@ export function Sidebar({
   return (
     <nav aria-label="Navegación de tu negocio" className="flex h-full flex-col">
       {enlacesFijos.length > 0 && (
-        <ul className="space-y-0.5 px-2 pt-3">
+        <ul className="entra-hijos space-y-0.5 px-2 pt-3">
           {enlacesFijos.map((e) => (
             <li key={e.href}>
               <EnlaceDeBarra enlace={e} pathname={pathname} onNavigate={onNavigate} />
@@ -113,8 +113,12 @@ export function Sidebar({
             className="m-2 p-6"
           />
         ) : (
+          // Las áreas se posan una tras otra. Es lo primero que ve alguien que
+          // entra, y es donde el escalonado paga: una barra que aparece de
+          // golpe se lee como una plantilla; una que se posa, como un mapa que
+          // se está armando para él.
           <ul className="space-y-0.5">
-            {areas.map((area) => (
+            {areas.map((area, i) => (
               <SidebarArea
                 key={area.slug}
                 area={area}
@@ -122,6 +126,7 @@ export function Sidebar({
                 pathname={pathname}
                 requirement={requirements[area.slug]}
                 brand={brand}
+                indice={i}
                 onNavigate={onNavigate}
               />
             ))}

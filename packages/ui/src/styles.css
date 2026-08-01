@@ -438,6 +438,212 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+ *  Entradas, transiciones y el momento de abrir un área
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ *  Santiago las pidió por nombre, y son lo que separa esto de "una app que
+ *  funciona". Tres piezas y ninguna más:
+ *
+ *    1. ENTRADA ESCALONADA — el contenido se posa, no aparece de golpe.
+ *    2. TRANSICIÓN ENTRE RUTAS — cambiar de sección es un movimiento, no un
+ *       parpadeo.
+ *    3. EL DESBLOQUEO — abrir un área es EL momento del producto y tiene que
+ *       sentirse como uno.
+ *
+ *  ── Las reglas que las hacen buenas y no molestas ──────────────────────────
+ *
+ *  · Se mueven POCO. 10px, no 40. Un desplazamiento grande se lee como que la
+ *    página está mal hecha; uno chico se lee como peso.
+ *  · Duran POCO. 380ms la entrada, 260ms la ruta. Por encima de ~400ms el
+ *    movimiento deja de sentirse rápido y empieza a sentirse lento, y quien
+ *    entra veinte veces al día lo va a odiar a la tercera.
+ *  · Curva de SALIDA (`cubic-bezier(.16,1,.3,1)`): arranca rápido y frena. Es
+ *    la que se siente física.
+ *  · TODAS son de una sola pasada (`forwards`) y ninguna hace bucle salvo el
+ *    latido del punto en vivo, que ya existía. Una interfaz que se mueve sola
+ *    para siempre es una interfaz que no deja trabajar.
+ *  · `prefers-reduced-motion` las apaga TODAS y deja el contenido visible y
+ *    quieto — no invisible, que es el error clásico de apagar sólo la
+ *    animación y dejar el `opacity: 0` inicial pegado.
+ */
+
+/* ── 1. Entrada escalonada ──────────────────────────────────────────────────
+ *
+ * `--entra-i` es el índice del elemento en su lista. El escalón es de 45ms y se
+ * TOPA a los 8 elementos: sin tope, una lista de treinta contactos tardaría un
+ * segundo y medio en terminar de aparecer, que es exactamente cómo se siente
+ * una página lenta.
+ */
+@keyframes abraxa-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.entra {
+  animation: abraxa-entra 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(min(var(--entra-i, 0), 8) * 45ms + var(--entra-base, 0ms));
+}
+
+/* La misma entrada, aplicada a los hijos directos sin tener que numerarlos a
+ * mano. Sirve para listas cortas y fijas —los enlaces del pie, las fases del
+ * Ritual— donde escribir el índice sería ruido. */
+.entra-hijos > * {
+  animation: abraxa-entra 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.entra-hijos > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.entra-hijos > *:nth-child(2) {
+  animation-delay: 45ms;
+}
+.entra-hijos > *:nth-child(3) {
+  animation-delay: 90ms;
+}
+.entra-hijos > *:nth-child(4) {
+  animation-delay: 135ms;
+}
+.entra-hijos > *:nth-child(5) {
+  animation-delay: 180ms;
+}
+.entra-hijos > *:nth-child(n + 6) {
+  animation-delay: 225ms;
+}
+
+/* ── 2. Transición entre rutas ──────────────────────────────────────────────
+ *
+ * Más corta y más corta de recorrido que la entrada: el shell NO se mueve —la
+ * barra lateral y el encabezado se quedan clavados— y sólo el lienzo cambia.
+ * Es lo que hace que navegar se sienta como abrir un cajón del mismo mueble y
+ * no como cargar otra página.
+ */
+@keyframes abraxa-ruta {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.transicion-de-ruta {
+  animation: abraxa-ruta 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── 3. El desbloqueo ───────────────────────────────────────────────────────
+ *
+ * El momento del producto: contestó unas preguntas y se le abrió un área. Tres
+ * capas encima de la tarjeta, todas de UNA pasada:
+ *
+ *   · `abraxa-abre`   — la tarjeta se posa con un empujón de escala mínimo
+ *                       (1.5%). Más que eso y parece un globo.
+ *   · `abraxa-halo`   — un anillo del acento que crece y se apaga. Es el
+ *                       "clic" visual del candado que se suelta.
+ *   · `abraxa-barrido`— una luz que cruza el cristal una vez. Es la misma fuga
+ *                       de luz del sistema, puesta en movimiento.
+ *
+ * Suman ~1.2s y después la tarjeta queda EXACTAMENTE como cualquier otra: el
+ * premio es haberla abierto, no una tarjeta que brilla para siempre.
+ */
+@keyframes abraxa-abre {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0) scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes abraxa-halo {
+  0% {
+    opacity: 0;
+    box-shadow: 0 0 0 0 hsl(var(--glow) / 0.55);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    box-shadow: 0 0 0 14px hsl(var(--glow) / 0);
+  }
+}
+
+@keyframes abraxa-barrido {
+  0% {
+    opacity: 0;
+    transform: translateX(-120%);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(120%);
+  }
+}
+
+.se-abre {
+  position: relative;
+  overflow: hidden;
+  animation: abraxa-abre 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.se-abre::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: abraxa-halo 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+}
+
+.se-abre::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    hsl(var(--white) / 0.14) 48%,
+    hsl(var(--glow) / 0.22) 52%,
+    transparent 70%
+  );
+  animation: abraxa-barrido 1.15s cubic-bezier(0.4, 0, 0.2, 1) 0.24s both;
+}
+
+/* El candado que se suelta: gira un poco y se desvanece mientras el icono del
+ * área ocupa su lugar. Va en el `span` del icono, que no cambia de tamaño. */
+@keyframes abraxa-candado {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(-18deg) translateY(-6px) scale(0.8);
+  }
+}
+
+.candado-se-suelta {
+  animation: abraxa-candado 0.42s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
  *  Barras de desplazamiento
  * ══════════════════════════════════════════════════════════════════════════ */
 
@@ -565,6 +771,42 @@ body {
   .scanline::after,
   .status-dot-live::before {
     animation: none !important;
+  }
+
+  /* ── El error clásico, evitado a propósito ────────────────────────────────
+   *
+   * La red global de arriba pone `animation-duration: 0.01ms`, y con `both` el
+   * fotograma inicial se aplica igual: durante ese instante el elemento está en
+   * `opacity: 0`. En la práctica se ve bien… salvo cuando el navegador decide
+   * NO correr la animación (pestaña en segundo plano, `content-visibility`,
+   * una impresión), y entonces la entrada se queda pegada en invisible y el
+   * panel sale EN BLANCO justo para quien pidió menos movimiento.
+   *
+   * Así que aquí no se acorta: se APAGA la animación y se escribe el estado
+   * final a mano. Quieto, visible, y sin depender de que algo corra.
+   */
+  .entra,
+  .entra-hijos > *,
+  .transicion-de-ruta,
+  .se-abre {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* El barrido y el halo del desbloqueo desaparecen del todo: son puro
+     movimiento y sin él no comunican nada. */
+  .se-abre::before,
+  .se-abre::after {
+    animation: none !important;
+    content: none !important;
+  }
+
+  /* El candado no se suelta con una vuelta: simplemente ya no está. El icono
+     del área abierta ocupa su lugar sin transición. */
+  .candado-se-suelta {
+    animation: none !important;
+    display: none !important;
   }
 
   /* El punto en vivo deja de latir pero tiene que seguir viéndose. */
