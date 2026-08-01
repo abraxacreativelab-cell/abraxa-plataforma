@@ -71,8 +71,31 @@ export interface OpcionesDriverMeta {
  * `verificarWebhook` no está en `ChannelDriver` (de H1) ni en `ExtrasDriver` (de
  * H6) porque ninguno de los dos archivos es de este carril. Se declara aquí, y
  * el parche de seis líneas que hace que la ruta lo llame está en el README.
+ *
+ * ── Y por qué se repiten aquí cinco métodos que ya existen arriba ───────────
+ *
+ * En `ExtrasDriver` son OPCIONALES, porque un driver puede no traerlos —el port
+ * está escrito para que el mínimo baste—. Éste los trae **todos y siempre**, así
+ * que aquí se redeclaran sin `?`. No es cosmética: es lo que permite a H6 y a
+ * H17 escribir `driver.parseEvents(...)` sin un `?.` o un `!` en cada llamada, y
+ * lo que hace que quitar uno por accidente falle en el `typecheck` de este
+ * carril en vez de convertirse en un `undefined is not a function` en el
+ * webhook de alguien.
  */
 export interface DriverMeta extends DriverCompleto {
+  normalizeAddress(raw: string): string;
+  displayAddress(address: string): string;
+  parseEvents(raw: unknown): Promise<EventoCanal[]>;
+  provisionChannel(i: {
+    tenantId: string;
+    name: string;
+    config: Record<string, unknown>;
+  }): Promise<{ externalId: string; status: string; qr?: string }>;
+  channelStatus(i: {
+    channelId: string;
+    config: Record<string, unknown>;
+  }): Promise<{ status: string; externalId?: string | null; qr?: string | null }>;
+  teardownChannel(i: { channelId: string; config: Record<string, unknown> }): Promise<void>;
   /**
    * El challenge del GET de alta de Meta, o `null`.
    *
@@ -561,9 +584,13 @@ export { idYaConectado, resolverCanalPorEntrada } from './enrutado';
 export {
   EVENTOS,
   PERMISOS,
+  REDIRECT_URI,
   conectarCuenta,
   configDeCanal,
+  credencialesDeApp,
   cuentasVinculables,
+  redirectUriPorDefecto,
   urlDeAutorizacion,
   type CuentaVinculable,
+  type ResultadoConexion,
 } from './conexion';

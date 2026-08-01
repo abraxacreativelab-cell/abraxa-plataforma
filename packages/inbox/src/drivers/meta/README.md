@@ -203,6 +203,64 @@ Funciona, y es exactamente lo que se hace en modo desarrollo.
 
 ---
 
+## 2 bis. Para H17 — vincular la cuenta, en dos llamadas
+
+H0 decidió y registró el `redirect_uri` (2026-07-31):
+
+```
+https://mi.abraxa.club/ajustes/integraciones/meta/callback
+```
+
+**La pantalla y esa ruta son de H17.** Aquí sólo está el lado servidor. Las credenciales salen
+de `META_APP_ID` / `META_APP_SECRET` sin que haya que pasarlas, y se pueden pasar por parámetro el
+día que sean por tenant — que es exactamente lo que H17 va a hacer.
+
+```ts
+import { urlDeAutorizacion, cuentasVinculables, conectarCuenta, createClienteMeta }
+  from '@abraxa/inbox';   // vía el barril, ya exportado
+
+// 1 · El botón «Conectar Instagram». `state` lo genera y lo guarda H17.
+const url = urlDeAutorizacion({ canal: 'instagram', state });
+
+// 2 · En el callback, con el `code` de la query (y tras comprobar el `state`):
+const cliente = createClienteMeta();
+const cuentas = await cuentasVinculables(cliente, { canal: 'instagram', code });
+//   → [{ pageId, pageName, igUserId, igUsername, pageAccessToken,
+//        utilizable, motivo? }]
+//   Vienen TODAS, también las que no sirven, con `motivo` en español para
+//   enseñarlo: «esta página no tiene una cuenta de Instagram profesional
+//   vinculada» es el caso más común y el que más soporte genera.
+
+// 3 · El emprendedor elige una, y se conecta:
+const { config, externalId, status } = await conectarCuenta(cliente, {
+  canal: 'instagram',
+  cuenta: cuentas.find((c) => c.pageId === elegida)!,
+  ...credencialesDeApp(),
+});
+// `config` es lo que va a `crearCanal()` / `ajustarCanal()` de H6. No se escribe
+// la fila aquí: eso ya lo sabe hacer H6 y ya valida lo suyo.
+```
+
+**El `redirect_uri` no se pasa a mano en ninguna de las dos**, y es a propósito: Meta compara el
+del diálogo con el del canje **carácter por carácter** y, cuando no coinciden, el error dice
+«Invalid verification code format» sin mencionarlo. Sale de una sola constante
+(`REDIRECT_URI`), y `conexion.test.ts` mide que las dos llamadas emiten el mismo valor.
+`META_REDIRECT_URI` lo pisa para desarrollo.
+
+`conectarCuenta` además **suscribe la página** (`POST /{page-id}/subscribed_apps`). Es el paso
+que todo el mundo olvida: la URL del webhook se configura a nivel de app, pero cada página se
+suscribe por separado, y sin eso no llega ni un mensaje.
+
+Y se niega —con `CONFLICT`— si esa página o esa cuenta de Instagram ya está conectada en otra
+empresa, **sin decir en cuál**: los mensajes de una acabarían en la bandeja de la otra, y decir
+de quién es le filtraría a un cliente el nombre de otro.
+
+> **Variables que faltan en `.env.example`** (es de H1, no se edita desde aquí): `META_APP_ID` y
+> `META_REDIRECT_URI`. `META_APP_SECRET` y `META_VERIFY_TOKEN` ya están. Quedan anotadas, no
+> añadidas.
+
+---
+
 ## 3. Esto no puede salir a producción sin H17
 
 Mientras las credenciales de canal sean variables del proceso (`.env.example:46-47`), **dos

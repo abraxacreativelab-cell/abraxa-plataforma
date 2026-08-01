@@ -231,10 +231,16 @@ describe('parseWebhook', () => {
     const { fetchImpl } = fetchFalso();
     const d = driver(canal(), fetchImpl);
 
-    // Se manda algo, y Meta devuelve su eco.
+    // Se manda algo, y Meta devuelve su eco. La ventana se abre con una fecha
+    // RELATIVA a ahora: una fija haría que la prueba dependiera del día en que
+    // se corre, y empezaría a fallar sola pasadas 24 h del valor escrito.
     await registrarEntrante(
       { tenantId: TENANT, tenantSlug: '', userEmail: null, role: null, areas: {} },
-      { channelId: 'canal-ig', address: CLIENTE, cuando: T0.toISOString() },
+      {
+        channelId: 'canal-ig',
+        address: CLIENTE,
+        cuando: new Date(Date.now() - 60_000).toISOString(),
+      },
     );
     await d.send({ channelId: 'canal-ig', address: CLIENTE, body: 'son $500' });
 
@@ -480,9 +486,11 @@ describe('provisionChannel', () => {
     const { fetchImpl } = fetchFalso();
     const config: Record<string, unknown> = {};
 
-    const provision = driver(canal(), fetchImpl).provisionChannel;
-    if (!provision) throw new Error('el driver de Meta tiene que aprovisionar');
-    const r = await provision({ tenantId: TENANT, name: 'Instagram', config });
+    const r = await driver(canal(), fetchImpl).provisionChannel({
+      tenantId: TENANT,
+      name: 'Instagram',
+      config,
+    });
 
     expect(typeof config.webhook_token).toBe('string');
     expect((config.secret as Record<string, string>).verify_token).toMatch(/^[0-9a-f]{48}$/);
@@ -497,9 +505,11 @@ describe('provisionChannel', () => {
       secret: { verify_token: 'v-de-siempre', page_access_token: TOKEN },
     };
 
-    const provision = driver(canal(), fetchImpl).provisionChannel;
-    if (!provision) throw new Error('el driver de Meta tiene que aprovisionar');
-    await provision({ tenantId: TENANT, name: 'Instagram', config });
+    await driver(canal(), fetchImpl).provisionChannel({
+      tenantId: TENANT,
+      name: 'Instagram',
+      config,
+    });
 
     expect(config.webhook_token).toBe('el-de-siempre');
     expect(config.secret).toMatchObject({

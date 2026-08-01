@@ -11,9 +11,11 @@ import { createClienteMeta } from './graph';
 import {
   EVENTOS,
   PERMISOS,
+  REDIRECT_URI,
   conectarCuenta,
   configDeCanal,
   cuentasVinculables,
+  redirectUriPorDefecto,
   urlDeAutorizacion,
   type CuentaVinculable,
 } from './conexion';
@@ -90,9 +92,97 @@ describe('urlDeAutorizacion', () => {
   });
 
   it('sin App ID lo dice, en vez de armar una URL rota', () => {
-    expect(() =>
-      urlDeAutorizacion({ canal: 'instagram', appId: '', redirectUri: 'https://x', state: 's' }),
-    ).toThrow(/App ID/);
+    const previo = process.env.META_APP_ID;
+    delete process.env.META_APP_ID;
+    try {
+      expect(() => urlDeAutorizacion({ canal: 'instagram', state: 's' })).toThrow(/App ID/);
+    } finally {
+      if (previo !== undefined) process.env.META_APP_ID = previo;
+    }
+  });
+
+  it('toma el App ID del entorno cuando no se lo pasan — es lo que puso H0', () => {
+    const previo = process.env.META_APP_ID;
+    process.env.META_APP_ID = APP_ID;
+    try {
+      const url = new URL(urlDeAutorizacion({ canal: 'instagram', state: 's' }));
+      expect(url.searchParams.get('client_id')).toBe(APP_ID);
+    } finally {
+      if (previo === undefined) delete process.env.META_APP_ID;
+      else process.env.META_APP_ID = previo;
+    }
+  });
+});
+
+describe('el redirect_uri', () => {
+  it('es el que H0 registró en Meta', () => {
+    expect(REDIRECT_URI).toBe('https://mi.abraxa.club/ajustes/integraciones/meta/callback');
+    expect(redirectUriPorDefecto()).toBe(REDIRECT_URI);
+  });
+
+  it('`META_REDIRECT_URI` lo pisa, para desarrollo', () => {
+    const previo = process.env.META_REDIRECT_URI;
+    process.env.META_REDIRECT_URI = 'https://localhost:3000/cb';
+    try {
+      expect(redirectUriPorDefecto()).toBe('https://localhost:3000/cb');
+    } finally {
+      if (previo === undefined) delete process.env.META_REDIRECT_URI;
+      else process.env.META_REDIRECT_URI = previo;
+    }
+  });
+
+  /**
+   * LA prueba de este bloque. Meta compara el `redirect_uri` del diálogo con el
+   * del canje **carácter por carácter**, y cuando no coinciden el error no lo
+   * menciona: dice «Invalid verification code format». Media tarde.
+   */
+  it('el del diálogo y el del canje son EL MISMO, sin pasarlo por ningún lado', async () => {
+    const previo = process.env.META_APP_ID;
+    const previoS = process.env.META_APP_SECRET;
+    process.env.META_APP_ID = APP_ID;
+    process.env.META_APP_SECRET = APP_SECRET;
+
+    try {
+      const enElDialogo = new URL(
+        urlDeAutorizacion({ canal: 'instagram', state: 's' }),
+      ).searchParams.get('redirect_uri');
+
+      const { fetchImpl, urls } = fetchFalso([
+        { access_token: 'corto' },
+        { access_token: 'largo' },
+        { data: [] },
+      ]);
+      await cuentasVinculables(createClienteMeta({ fetchImpl }), {
+        canal: 'instagram',
+        code: 'codigo',
+      });
+      const enElCanje = new URL(urls[0] ?? '').searchParams.get('redirect_uri');
+
+      expect(enElCanje).toBe(enElDialogo);
+      expect(enElCanje).toBe(REDIRECT_URI);
+    } finally {
+      if (previo === undefined) delete process.env.META_APP_ID;
+      else process.env.META_APP_ID = previo;
+      if (previoS === undefined) delete process.env.META_APP_SECRET;
+      else process.env.META_APP_SECRET = previoS;
+    }
+  });
+
+  it('sin credenciales en el entorno, el canje lo dice en vez de fallar en Meta', async () => {
+    const previo = process.env.META_APP_ID;
+    const previoS = process.env.META_APP_SECRET;
+    delete process.env.META_APP_ID;
+    delete process.env.META_APP_SECRET;
+
+    try {
+      const { fetchImpl } = fetchFalso([{}]);
+      await expect(
+        cuentasVinculables(createClienteMeta({ fetchImpl }), { canal: 'instagram', code: 'c' }),
+      ).rejects.toThrow(/META_APP_ID/);
+    } finally {
+      if (previo !== undefined) process.env.META_APP_ID = previo;
+      if (previoS !== undefined) process.env.META_APP_SECRET = previoS;
+    }
   });
 });
 

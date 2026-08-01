@@ -80,6 +80,12 @@ ALTER TABLE app.meta_message_windows ENABLE ROW LEVEL SECURITY;
 --
 -- Escrito como un `if` en el driver sería cierto sólo mientras nadie escriba
 -- por otro camino. Aquí es cierto para cualquiera que toque la tabla.
+--
+-- Y sí cubre el camino que de verdad se usa: el driver escribe con `upsert`,
+-- que PostgREST traduce a `INSERT … ON CONFLICT DO UPDATE`, y Postgres dispara
+-- los triggers BEFORE UPDATE de fila para los renglones que entran por la rama
+-- del conflicto. Un trigger sólo sobre el UPDATE desnudo no serviría de nada
+-- aquí, porque el driver nunca hace un UPDATE desnudo.
 CREATE OR REPLACE FUNCTION app.meta_ventana_solo_avanza()
 RETURNS trigger
 LANGUAGE plpgsql

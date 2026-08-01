@@ -333,9 +333,10 @@ export function createClienteMeta(opts: OpcionesCliente = {}): ClienteMeta {
       });
       fallarSiHayError(largo, 'Meta no cambió el token corto por uno de larga duración');
 
+      const expira = largo.data?.expires_in;
       return {
         token: String(largo.data?.access_token ?? breve),
-        expiraEn: typeof largo.data?.expires_in === 'number' ? largo.data.expires_in : null,
+        expiraEn: typeof expira === 'number' ? expira : null,
       };
     },
 
@@ -350,7 +351,8 @@ export function createClienteMeta(opts: OpcionesCliente = {}): ClienteMeta {
         appSecret,
       });
       fallarSiHayError(r, 'No se pudieron leer las páginas del usuario');
-      return Array.isArray(r.data?.data) ? r.data.data : [];
+      const paginas = r.data?.data;
+      return Array.isArray(paginas) ? paginas : [];
     },
   };
 }

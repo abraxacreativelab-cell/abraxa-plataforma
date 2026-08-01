@@ -106,7 +106,13 @@ export async function midsPropios(
 
     // Se consumen: el eco ya llegó y esta fila no vuelve a servir para nada.
     // Es lo que mantiene la tabla del tamaño de «lo que está en vuelo».
-    if (encontrados.length > 0) void olvidar(ctx, i.channelId, encontrados);
+    //
+    // Se ESPERA en vez de lanzarlo y olvidarlo. Un `void` aquí ahorraría unos
+    // milisegundos en el webhook y a cambio dejaría el borrado corriendo fuera
+    // de orden: el siguiente lote podría leer una fila que ya se consumió, y
+    // ninguna prueba podría afirmar nada sobre el estado de la tabla sin
+    // volverse intermitente. Es un DELETE por llave indexada.
+    if (encontrados.length > 0) await olvidar(ctx, i.channelId, encontrados);
 
     return new Set(encontrados);
   } catch (err) {

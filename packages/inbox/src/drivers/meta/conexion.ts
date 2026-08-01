@@ -33,6 +33,51 @@ import { idYaConectado } from './enrutado';
 import type { ClienteMeta, PaginaDeUsuario } from './graph';
 
 /**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  El `redirect_uri`, decidido por H0 y ya registrado en Meta (2026-07-31).
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  La pantalla que lo atiende es de **H17** (`app/(app)/ajustes/integraciones`);
+ *  aquí sólo vive el valor, porque tiene que ser **exactamente el mismo** en dos
+ *  llamadas distintas y separadas en el tiempo:
+ *
+ *    1. el diálogo de autorización  (`urlDeAutorizacion`)
+ *    2. el canje del código          (`cuentasVinculables` → `/oauth/access_token`)
+ *
+ *  Meta compara las dos cadenas **carácter por carácter** contra la que tiene
+ *  registrada. Una barra final de más, `http` en vez de `https` o un parámetro
+ *  de query cualquiera y el canje falla con
+ *  `redirect_uri isn't an absolute URI` o con un genérico
+ *  «Invalid verification code format», que no menciona el `redirect_uri` por
+ *  ningún lado. Es el fallo más caro de depurar de todo el flujo, y la razón de
+ *  que el valor esté en UNA constante y no en dos llamadores.
+ */
+export const REDIRECT_URI = 'https://mi.abraxa.club/ajustes/integraciones/meta/callback';
+
+/** El `redirect_uri` efectivo. `META_REDIRECT_URI` lo pisa para desarrollo. */
+export function redirectUriPorDefecto(): string {
+  const v = String(process.env.META_REDIRECT_URI ?? '').trim();
+  return v || REDIRECT_URI;
+}
+
+/**
+ * Las credenciales de la app de Meta.
+ *
+ * Del entorno HOY (`META_APP_ID` / `META_APP_SECRET`, que H0 ya puso). Cuando
+ * llegue H17 serán por tenant y sólo hay que pasarlas por parámetro: todo lo de
+ * aquí las acepta, y este respaldo es el último recurso. Ver `ajustes.ts`.
+ */
+export function credencialesDeApp(i: { appId?: string; appSecret?: string } = {}): {
+  appId: string;
+  appSecret: string;
+} {
+  return {
+    appId: i.appId || String(process.env.META_APP_ID ?? '').trim(),
+    appSecret: i.appSecret || String(process.env.META_APP_SECRET ?? '').trim(),
+  };
+}
+
+/**
  * Los permisos que se piden, por canal.
  *
  * Se piden los MÍNIMOS. Cada permiso extra alarga la App Review y le enseña al
@@ -79,16 +124,20 @@ export const EVENTOS: Record<CanalMeta, readonly string[]> = {
  */
 export function urlDeAutorizacion(i: {
   canal: CanalMeta;
-  appId: string;
-  redirectUri: string;
   state: string;
+  /** Por defecto, `META_APP_ID`. H17 lo pasará por tenant. */
+  appId?: string;
+  /** Por defecto, el registrado en Meta. Tiene que coincidir con el del canje. */
+  redirectUri?: string;
   baseUrl?: string;
   apiVersion?: string;
 }): string {
-  if (!i.appId) {
+  const { appId } = credencialesDeApp({ ...(i.appId ? { appId: i.appId } : {}) });
+  if (!appId) {
     throw new PlatformError(
       'CHANNEL_ERROR',
-      'Falta el App ID de Meta. Se lo pide H0 (la app "Abraxa platform").',
+      'Falta el App ID de Meta. Está en el entorno como `META_APP_ID`; si el despliegue ' +
+        'lo perdió, se lo pide H0 (la app "Abraxa platform").',
       { retryable: false },
     );
   }
@@ -102,8 +151,8 @@ export function urlDeAutorizacion(i: {
 
   const base = (i.baseUrl ?? 'https://www.facebook.com').replace(/\/+$/, '');
   const url = new URL(`${base}/${i.apiVersion ?? API_VERSION}/dialog/oauth`);
-  url.searchParams.set('client_id', i.appId);
-  url.searchParams.set('redirect_uri', i.redirectUri);
+  url.searchParams.set('client_id', appId);
+  url.searchParams.set('redirect_uri', i.redirectUri ?? redirectUriPorDefecto());
   url.searchParams.set('state', i.state);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', PERMISOS[i.canal].join(','));
@@ -135,30 +184,46 @@ export async function cuentasVinculables(
   cliente: ClienteMeta,
   i: {
     canal: CanalMeta;
-    appId: string;
-    appSecret: string;
+    /** El `code` que Meta devolvió al `redirect_uri`. Lo recoge H17. */
     code: string;
-    redirectUri: string;
+    appId?: string;
+    appSecret?: string;
+    /** DEBE ser el mismo que se usó al abrir el diálogo. Ver `REDIRECT_URI`. */
+    redirectUri?: string;
     baseUrl?: string;
     apiVersion?: string;
   },
 ): Promise<CuentaVinculable[]> {
   const baseUrl = (i.baseUrl ?? BASE_GRAPH).replace(/\/+$/, '');
   const apiVersion = i.apiVersion ?? API_VERSION;
+  const { appId, appSecret } = credencialesDeApp({
+    ...(i.appId ? { appId: i.appId } : {}),
+    ...(i.appSecret ? { appSecret: i.appSecret } : {}),
+  });
+
+  if (!appId || !appSecret) {
+    throw new PlatformError(
+      'CHANNEL_ERROR',
+      'Faltan las credenciales de la app de Meta (`META_APP_ID` / `META_APP_SECRET`).',
+      { retryable: false },
+    );
+  }
 
   const { token } = await cliente.tokenDeUsuario({
     baseUrl,
     apiVersion,
-    appId: i.appId,
-    appSecret: i.appSecret,
+    appId,
+    appSecret,
     code: i.code,
-    redirectUri: i.redirectUri,
+    // El mismo valor que en el diálogo, y por eso sale de la misma función:
+    // Meta las compara carácter por carácter y el error no lo menciona.
+    redirectUri: i.redirectUri ?? redirectUriPorDefecto(),
   });
 
   const paginas = await cliente.paginasDeUsuario({
     baseUrl,
     apiVersion,
-    appSecret: i.appSecret,
+    appSecret,
     userToken: token,
   });
 
