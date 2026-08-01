@@ -55,8 +55,24 @@ describe('crear', () => {
     await expect(crearValor(h.a, { ...BASE, key })).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
-  it('el mensaje de error explica cómo se escribe una clave', async () => {
-    await expect(crearValor(h.a, { ...BASE, key: 'Precio Hora' })).rejects.toThrow(/snake_case/i);
+  /**
+   * Antes esperaba la palabra «snake_case». La explicación quedó, el término se
+   * fue: quien vende pasteles no sabe qué es snake_case, y el mensaje ya decía
+   * la regla completa justo al lado. Ver `mensajeSinColumnas` en service.ts.
+   */
+  it('el mensaje de error explica cómo se escribe una clave, sin decir "snake_case"', async () => {
+    const intento = crearValor(h.a, { ...BASE, key: 'Precio Hora' });
+    await expect(intento).rejects.toThrow(/minúsculas sin acentos, números y guion bajo/i);
+    await expect(crearValor(h.a, { ...BASE, key: 'Precio Hora' })).rejects.not.toThrow(
+      /snake_case/i,
+    );
+  });
+
+  it('el mensaje nombra el campo en castellano, no la columna', async () => {
+    // Decía «key: La clave va en…». La ruta de Zod es el nombre de la columna.
+    await expect(crearValor(h.a, { ...BASE, key: 'Precio Hora' })).rejects.toThrow(
+      /^En la clave: /,
+    );
   });
 
   it('rechaza un monto sin número', async () => {

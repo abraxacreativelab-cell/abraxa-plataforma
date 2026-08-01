@@ -10,6 +10,7 @@ import type { z } from 'zod';
 import { PlatformError, notFound, tenantDb } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { notifyVaultChanged } from '../cache';
+import { etiquetaCampo, etiquetaKind } from '../copy';
 import { formatVault } from '../format';
 import { esRango } from '../ingest/money';
 import { requireVaultEdit, requireVaultRead } from '../rbac';
@@ -403,14 +404,39 @@ function porQueNoSePuedeAceptar(v: VaultRow): string {
   return `${queDice} ${queSePierde} ${escribelo}, o descarta la propuesta.`;
 }
 
-/** Un error de validación tiene que decir QUÉ campo y POR QUÉ, no "inválido". */
+/**
+ * Un error de validación tiene que decir QUÉ campo y POR QUÉ, no "inválido".
+ *
+ * El campo se nombra en castellano. Antes se ponía la ruta de Zod tal cual y el
+ * cliente leía «scope_id: Un valor general no lleva scope_id» — el nombre de la
+ * columna, dos veces, en el aviso flotante de alguien que vende pasteles.
+ */
 function parse<S extends z.ZodTypeAny>(schema: S, input: unknown): z.infer<S> {
   const r = schema.safeParse(input);
   if (r.success) return r.data as z.infer<S>;
   const detalle = r.error.issues
-    .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
+    .map((i) => {
+      const mensaje = mensajeSinColumnas(i.message);
+      return i.path.length ? `En ${etiquetaCampo(String(i.path[0]))}: ${mensaje}` : mensaje;
+    })
     .join(' · ');
   throw new PlatformError('VALIDATION', detalle);
+}
+
+/**
+ * Los mensajes del esquema que nombran una columna o un tipo interno.
+ *
+ * Se traducen aquí y no en el esquema porque el esquema también responde a la
+ * API, donde `scope_id` SÍ es el nombre correcto del campo que mandaron.
+ */
+function mensajeSinColumnas(mensaje: string): string {
+  return mensaje
+    .replace(/\bno lleva scope_id\b/, 'no se limita a un área')
+    .replace(
+      /\bUn valor de tipo (money|percent|number) necesita un número\.?/,
+      (_m, kind: string) => `Un valor de tipo «${etiquetaKind(kind)}» necesita un número.`,
+    )
+    .replace(/\bsnake_case\b/, 'un formato sencillo');
 }
 
 interface DbError {
@@ -431,8 +457,17 @@ function traducirError(error: DbError, key?: string): PlatformError {
     );
   }
   // 23514 = check_violation: clave mal formada o alcance incoherente.
+  //
+  // El texto de Postgres nombra la restricción («violates check constraint
+  // "canonical_values_scope_ck"»), que no le dice nada a nadie fuera de aquí.
+  // Se cuenta lo que sí se puede arreglar y el crudo se manda al log.
   if (error.code === '23514') {
-    return new PlatformError('VALIDATION', `La base rechazó el valor: ${error.message}`);
+    console.error(`[vault] check_violation al guardar un valor: ${error.message}`);
+    return new PlatformError(
+      'VALIDATION',
+      'Ese valor no se puede guardar así. Revisa la clave —minúsculas, números y ' +
+        'guion bajo— y que el área elegida corresponda con el alcance.',
+    );
   }
   return new PlatformError('INTERNAL', error.message);
 }

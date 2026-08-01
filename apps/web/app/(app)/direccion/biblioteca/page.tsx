@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { BookOpen, FileText, Search } from 'lucide-react';
 import {
   buscar,
+  etiquetaDocType,
   listarDocumentos,
   loadTenantMeta,
   taxonomiaDe,
@@ -176,7 +177,7 @@ export default async function PaginaBiblioteca({
                         >
                           <FileText className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--muted-foreground))]" />
                           <span className="min-w-0 flex-1 truncate text-sm">{d.title}</span>
-                          <Insignia tono="neutro">{d.doc_type}</Insignia>
+                          <Insignia tono="neutro">{etiquetaDocType(d.doc_type)}</Insignia>
                           {d.status === 'draft' ? (
                             <Insignia tono="borrador">borrador</Insignia>
                           ) : null}
