@@ -66,6 +66,7 @@ export {
   etiquetaDocType,
   etiquetaKind,
   etiquetaCampo,
+  etiquetaDeClave,
   mensajeEsParaElCliente,
   jergaEn,
   PATRONES_DE_JERGA,

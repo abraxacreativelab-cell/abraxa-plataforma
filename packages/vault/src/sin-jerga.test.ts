@@ -39,6 +39,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   etiquetaCampo,
+  etiquetaDeClave,
   etiquetaDocType,
   etiquetaKind,
   jergaEn,
@@ -300,6 +301,24 @@ describe('el vocabulario visible', () => {
     expect(etiquetaKind('lo-que-sea')).toBe('Valor');
   });
 
+  it('dice las claves de la bóveda como se dicen', () => {
+    // Las dos que hay hoy en el catálogo por defecto.
+    expect(etiquetaDeClave('ticket_promedio')).toBe('Ticket promedio');
+    expect(etiquetaDeClave('iva_pct')).toBe('IVA (%)');
+  });
+
+  it('respeta las siglas y no las deja a medias', () => {
+    expect(etiquetaDeClave('comision_pct')).toBe('Comisión (%)'.replace('ó', 'o'));
+    expect(etiquetaDeClave('rfc')).toBe('RFC');
+    expect(etiquetaDeClave('precio_mxn')).toBe('Precio (MXN)');
+  });
+
+  it('no revienta con una clave vacía o rara', () => {
+    expect(etiquetaDeClave('')).toBe('');
+    expect(etiquetaDeClave('___')).toBe('');
+    expect(etiquetaDeClave('pct')).toBe('Pct');
+  });
+
   it('ninguna etiqueta visible trae jerga', () => {
     const todas = [
       ...[
@@ -317,6 +336,73 @@ describe('el vocabulario visible', () => {
       ...['key', 'label', 'value_text', 'scope_id', 'area_slug'].map(etiquetaCampo),
     ];
     for (const etiqueta of todas) expect(jergaEn(etiqueta)).toEqual([]);
+  });
+});
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  `copy.ts` tiene que seguir siendo seguro para el navegador.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  Costó un build entero descubrirlo. El lector de documentos es un componente
+ *  de CLIENTE; en cuanto importó una función del barril `@abraxa/vault/api`,
+ *  webpack se trajo `resolver.ts` → `@abraxa/db` → `http/proxy-verified.ts` →
+ *  `node:crypto`, y `next build` murió con:
+ *
+ *      Module build failed: UnhandledSchemeError:
+ *      Reading from "node:crypto" is not handled by plugins
+ *
+ *  Un error que no se parece en nada a su causa —«toqué un texto y se cayó el
+ *  build»— y que además tarda cuatro minutos en aparecer.
+ *
+ *  Por eso `copy.ts` se publica aparte en `@abraxa/vault/copy` y no importa
+ *  NADA en ejecución. Esto lo comprueba en milisegundos, leyendo el archivo.
+ */
+describe('copy.ts se puede importar desde el navegador', () => {
+  const fuente = readFileSync(join(AQUI, 'copy.ts'), 'utf8');
+
+  const imports = [...soloTexto(fuente).matchAll(/^\s*import\s+([\s\S]*?)from\s+'([^']+)'/gm)].map(
+    ([, cuerpo = '', modulo = '']) => ({ cuerpo, modulo }),
+  );
+
+  it('no importa nada en ejecución: todos sus imports son de tipos', () => {
+    const deEjecucion = imports.filter((i) => !/^\s*type\b/.test(i.cuerpo));
+    expect(
+      deEjecucion.map((i) => i.modulo),
+      'copy.ts ganó un import de ejecución. Lo consumen componentes de cliente: ' +
+        'un import de valor arrastra @abraxa/db y node:crypto al navegador.',
+    ).toEqual([]);
+  });
+
+  it('y no importa @abraxa/db ni de tipos, que es de donde viene el problema', () => {
+    expect(imports.map((i) => i.modulo).filter((m) => m.startsWith('@abraxa/db'))).toEqual([]);
+  });
+
+  it('el subcamino ./copy sigue publicado en package.json', () => {
+    const pkg = JSON.parse(readFileSync(join(AQUI, '..', 'package.json'), 'utf8')) as {
+      exports?: Record<string, unknown>;
+    };
+    expect(pkg.exports?.['./copy']).toBeTruthy();
+  });
+
+  it('ningún componente de cliente del carril importa el barril como VALOR', () => {
+    const culpables: string[] = [];
+    for (const archivo of archivos(PANTALLAS, esFuente)) {
+      const fuenteArchivo = readFileSync(archivo, 'utf8');
+      if (!/^\s*['"]use client['"]/m.test(fuenteArchivo)) continue;
+      const limpio = soloTexto(fuenteArchivo);
+      for (const [, cuerpo = '', modulo = ''] of limpio.matchAll(
+        /^\s*import\s+([\s\S]*?)from\s+'([^']+)'/gm,
+      )) {
+        const esBarril = modulo === '@abraxa/vault' || modulo === '@abraxa/vault/api';
+        if (esBarril && !/^\s*type\b/.test(cuerpo)) culpables.push(relative(RAIZ, archivo));
+      }
+    }
+    expect(
+      culpables,
+      'Un componente de cliente importa el barril de la bóveda como valor. ' +
+        'Usa `@abraxa/vault/copy` para texto, o `import type` para tipos.',
+    ).toEqual([]);
   });
 });
 

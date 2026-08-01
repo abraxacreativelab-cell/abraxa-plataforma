@@ -1,4 +1,5 @@
 import type { VaultKind, VaultRow } from './types';
+import { ETIQUETA_KIND } from './copy';
 
 /**
  * Cómo se ve un valor canónico cuando sale de la bóveda.
@@ -92,13 +93,8 @@ export function formatVault(row: VaultRow): string {
   }
 }
 
-/** Etiqueta legible de un tipo. La usan la UI y los mensajes de error. */
-export const KIND_LABEL: Record<VaultKind, string> = {
-  money: 'Monto',
-  percent: 'Porcentaje',
-  number: 'Número',
-  text: 'Texto',
-  date: 'Fecha',
-  bool: 'Sí / No',
-  list: 'Lista',
-};
+/**
+ * Etiqueta legible de un tipo. La usan la UI y los mensajes de error.
+ * La tabla vive en `copy.ts`, con el resto del vocabulario visible.
+ */
+export const KIND_LABEL: Record<VaultKind, string> = ETIQUETA_KIND;

@@ -13,13 +13,22 @@
  *  Postgres, la variable de entorno que falta— va al log del servidor, que es
  *  donde de verdad sirve.
  *
+ *  ── Por qué este archivo no importa NADA en ejecución ────────────────────
+ *
+ *  Sólo tipos, que se borran al compilar. Lo consumen componentes de CLIENTE
+ *  —el lector de un documento, el selector de tipo— y el barril
+ *  `@abraxa/vault/api` arrastra `resolver.ts` → `@abraxa/db` →
+ *  `http/proxy-verified.ts` → `node:crypto`. Un `import` de valor desde el
+ *  navegador rompe el build entero con «UnhandledSchemeError: node:crypto», y
+ *  el error no se parece en nada a su causa. Por eso hay un subcamino propio,
+ *  `@abraxa/vault/copy`, y por eso aquí no entra un import de ejecución.
+ *
  *  Y una segunda regla, que es la que hace que la primera se sostenga: los
  *  identificadores internos (`sop`, `value_text`, `money`) NO se pintan crudos
  *  aunque estén en español o parezcan inocentes. `sop` no significa nada para
  *  quien vende pasteles.
  */
 import type { DocType, VaultKind } from './types';
-import { KIND_LABEL } from './format';
 
 // ════════════════════════════════════════════════════════════════════════════
 // Vocabulario visible
@@ -50,11 +59,24 @@ export function etiquetaDocType(tipo: string | null | undefined): string {
   return ETIQUETA_DOC_TYPE[tipo as DocType] ?? ETIQUETA_DOC_TYPE.otro;
 }
 
-/** La etiqueta de un tipo de valor. `KIND_LABEL` ya la tenía bien; se reexpone
- *  desde aquí para que el vocabulario visible se lea en un solo archivo. */
+/**
+ * Los 7 tipos de un valor. Vivían en `format.ts` como `KIND_LABEL`; se mudan
+ * aquí porque `format.ts` arrastra ejecución y este archivo NO puede — ver la
+ * nota de arriba sobre por qué. `KIND_LABEL` sigue existiendo y apunta aquí.
+ */
+export const ETIQUETA_KIND: Record<VaultKind, string> = {
+  money: 'Monto',
+  percent: 'Porcentaje',
+  number: 'Número',
+  text: 'Texto',
+  date: 'Fecha',
+  bool: 'Sí / No',
+  list: 'Lista',
+};
+
 export function etiquetaKind(kind: string | null | undefined): string {
   if (!kind) return 'Valor';
-  return KIND_LABEL[kind as VaultKind] ?? 'Valor';
+  return ETIQUETA_KIND[kind as VaultKind] ?? 'Valor';
 }
 
 /**
@@ -89,6 +111,42 @@ export const ETIQUETA_CAMPO: Record<string, string> = {
 export function etiquetaCampo(ruta: string): string {
   const limpia = ruta.trim();
   return ETIQUETA_CAMPO[limpia] ?? limpia.replace(/_/g, ' ');
+}
+
+/** Siglas que quedan feas en minúscula o capitalizadas a medias. */
+const SIGLAS = new Set(['iva', 'isr', 'rfc', 'cfdi', 'sat', 'imss', 'sku', 'roi', 'iep', 'mxn', 'usd']);
+
+/**
+ * La clave de un valor, dicha como se dice.
+ *
+ * En la lista de «qué le falta a tu negocio» se pintaba la clave cruda en
+ * monoespaciada: `ticket_promedio`, `iva_pct`. Es el identificador con el que
+ * se interpola en una plantilla —ahí sí se escribe así— pero en una lista de
+ * pendientes no le dice nada a nadie. `iva_pct` pasa a «IVA (%)».
+ */
+export function etiquetaDeClave(key: string): string {
+  const partes = String(key ?? '')
+    .trim()
+    .split('_')
+    .filter(Boolean);
+  if (partes.length === 0) return '';
+
+  // El sufijo sólo se separa si queda algo delante: `pct` a secas es la
+  // clave entera, y devolver « (%)» sería peor que devolver «Pct».
+  let sufijo = '';
+  const ultima = partes.length > 1 ? partes[partes.length - 1] : undefined;
+  if (ultima === 'pct') {
+    sufijo = ' (%)';
+    partes.pop();
+  } else if (ultima && SIGLAS.has(ultima)) {
+    sufijo = ` (${ultima.toUpperCase()})`;
+    partes.pop();
+  }
+
+  const palabras = partes.map((p) => (SIGLAS.has(p) ? p.toUpperCase() : p));
+  const primera = palabras[0] ?? '';
+  const texto = [primera.charAt(0).toUpperCase() + primera.slice(1), ...palabras.slice(1)].join(' ');
+  return `${texto}${sufijo}`;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -152,7 +210,7 @@ export function mensajeEsParaElCliente(code: string): boolean {
  * aparecer. `sin-jerga.test.ts` la aplica sobre todo el carril.
  */
 export const PATRONES_DE_JERGA: ReadonlyArray<{ nombre: string; re: RegExp }> = [
-  { nombre: 'nombre de carril (H1…H18)', re: /\bH\d{1,2}\s*[·:.\-]/ },
+  { nombre: 'nombre de carril (H1…H18)', re: /\bH\d{1,2}\s*[·:.-]/ },
   { nombre: 'ruta de paquete', re: /\bpackages\/[a-z-]+/ },
   { nombre: 'ruta de app', re: /\bapps\/(web|api|worker)\b/ },
   { nombre: 'número de migración', re: /\bmigraci[oó]n(?:es)?\s+\d{3}/i },

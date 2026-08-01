@@ -3,7 +3,10 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Archive, Eye, History, Layers, Pencil, Save } from 'lucide-react';
-import { etiquetaDocType, type DocType, type DocumentRow, type VaultRow } from '@abraxa/vault/api';
+// `@abraxa/vault/copy` y no `/api`: esto es un componente de CLIENTE y el
+// barril de la bóveda arrastra `node:crypto` al bundle del navegador.
+import { etiquetaDocType } from '@abraxa/vault/copy';
+import type { DocType, DocumentRow, VaultRow } from '@abraxa/vault/api';
 import { accionArchivarDocumento, accionGuardarDocumento } from '../../_lib/actions';
 import {
   AreaTexto,

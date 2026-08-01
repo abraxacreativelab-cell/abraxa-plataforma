@@ -1,4 +1,11 @@
-/// <reference path="../../../../../../packages/tenancy/src/express.d.ts" />
+/**
+ * Trae la declaración de `req.tenant` de H2. NO es decorativo y no se puede
+ * borrar: sin ella, el `import()` de `packages/tenancy/src/port` de más abajo
+ * mete `middleware/rbac.ts` en el proyecto de `apps/web` y ahí `req.tenant` no
+ * existe — seis errores en código ajeno que además no está roto. Es un import
+ * SÓLO de tipos: no emite nada y webpack no lo ve.
+ */
+import type {} from '../../../../../../packages/tenancy/src/express';
 import { PlatformError, tryPort, type TenancyPort, type TenantContext } from '@abraxa/db';
 import { RUTA_DE_ENTRADA } from '../../../../../../packages/auth/src/identidad';
 
