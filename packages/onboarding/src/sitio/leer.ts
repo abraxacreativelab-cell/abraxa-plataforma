@@ -219,7 +219,7 @@ export function textoDe(html: string, tope = 12_000): string {
     .replace(/<[^>]+>/g, ' ');
 
   return decodificar(limpio)
-    .replace(/[ \t ]+/g, ' ')
+    .replace(/[ \t\u00a0\u2000-\u200b\u3000]+/g, ' ')
     .replace(/\s*\n\s*/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

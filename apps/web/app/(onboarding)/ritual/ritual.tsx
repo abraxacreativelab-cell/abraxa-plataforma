@@ -4,10 +4,36 @@ import * as React from 'react';
 import { Button, Icon } from '@abraxa/ui';
 import { Compositor } from './componentes/compositor';
 import { Conversacion, Esqueleto } from './componentes/conversacion';
+import { InterruptorDeVoz } from './componentes/interruptor-de-voz';
 import { MapaDeNegocio } from './componentes/mapa-de-negocio';
 import { Progreso } from './componentes/progreso';
 import { Regreso } from './componentes/regreso';
-import type { Foto, RespuestaDelRitual, Turno } from './lib/tipos';
+import { Sitio } from './componentes/sitio';
+import { useVozDelRitual } from './lib/voz-del-ritual';
+import type {
+  Foto,
+  LecturaDelSitio,
+  PropuestaDelSitio,
+  RespuestaDelRitual,
+  Turno,
+} from './lib/tipos';
+
+/**
+ * A dónde lleva "guardar y seguir después".
+ *
+ * ── Por qué `/mapa` y no `/panel` ─────────────────────────────────────────
+ *
+ * El encargo dice `/panel`. En `main` (8591c35) esa ruta NO existe: lo que H11
+ * entregó en el PR #21 es `/mapa`, y es exactamente la pantalla que describe el
+ * encargo — las áreas abiertas primero, las bloqueadas al final con candado, su
+ * promesa y qué falta para abrirlas. Mandar a `/panel` sería mandar a un 404 en
+ * el momento en que el invitado por fin ve lo que ganó, que es el peor lugar
+ * posible para un 404.
+ *
+ * El día que exista `/panel`, esto es una línea. Está aquí arriba y con nombre
+ * propio para que sea esa línea y no una búsqueda.
+ */
+const EL_PANEL = '/mapa';
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -105,6 +131,37 @@ export function Ritual({ inicial }: { inicial: Foto }) {
   const completada = foto.vista.status === 'completada';
   const cerrando = foto.vista.status === 'cerrando';
   const bautizo = !completada && foto.vista.agente === null && foto.vista.fase === 'bienvenida';
+
+  /**
+   * La voz. Toda su lógica vive en el hook; aquí sólo se decide cuándo hablar.
+   *
+   * El contexto sesga el vocabulario del dictado hacia lo que esta persona va a
+   * decir: el nombre que le puso a su agente y las palabras de su giro. Sin él,
+   * Whisper convierte "Cariñeeto" en "cariñito" con toda seguridad.
+   */
+  const voz = useVozDelRitual({
+    contexto: [foto.vista.agente, foto.vista.tituloDeFase].filter(Boolean).join(', '),
+  });
+
+  /**
+   * Ofrecer leer su página: sólo al principio, y sólo una vez.
+   *
+   * `sitioResuelto` es un estado que sólo va en una dirección. Un atajo que
+   * vuelve a aparecer después de que lo omitiste deja de ser un atajo y se
+   * vuelve una distracción — y para entonces lo que se sacaría de la página ya
+   * lo dijo él, mejor.
+   *
+   * La condición es la más temprana posible: bautizado y todavía sin contestar
+   * la primera pregunta. Justo el momento en que ahorrarse preguntas vale más.
+   */
+  const [sitioResuelto, setSitioResuelto] = React.useState(false);
+  const ofrecerSitio =
+    !sitioResuelto &&
+    !completada &&
+    !cerrando &&
+    !bautizo &&
+    foto.vista.fase === 'identidad' &&
+    foto.vista.ayuda?.clave === 'categoria';
 
   const llamar = React.useCallback(
     async (accion: 'iniciar' | 'turno', cuerpo?: Record<string, unknown>): Promise<void> => {
@@ -286,21 +343,99 @@ export function Ritual({ inicial }: { inicial: Foto }) {
     }
   };
 
+  /**
+   * "Guardar y seguir después" → AL PANEL.
+   *
+   * Antes se quedaba aquí, escribiendo "guardado" debajo del mismo compositor
+   * que acababa de dejar. Eso no es una salida: es una pantalla que se queda
+   * quieta, y el invitado que quería irse se iba del producto entero.
+   *
+   * Ahora sale a su panel, que es el momento en que ve lo que ganó: sus áreas,
+   * las abiertas encendidas y las cerradas con su promesa y qué les falta. Ése
+   * es el gancho para volver — y sólo funciona si lo ve.
+   *
+   * La pausa se marca ANTES de navegar y con `keepalive`, porque irse de la
+   * página cancela las peticiones en vuelo: sin eso, el 30% de las pausas se
+   * perderían en el camino. Y si aun así falla, se navega igual: su avance ya
+   * está guardado desde el turno anterior —la pausa sólo deja escrito que se
+   * fue por su voluntad— así que quedarse aquí para reportar un fallo que no le
+   * quita nada sería el peor de los dos mundos.
+   */
   const pausar = (): void => {
-    void fetch('/ritual/api/pausa', { method: 'POST' })
-      .then((r) => r.json())
-      .then((d: { vista?: Foto['vista'] }) => {
-        if (d.vista) setFoto((p) => ({ ...p, vista: d.vista as Foto['vista'] }));
-      })
-      .catch(() => setError('No se pudo guardar la pausa. Tu avance sí está guardado.'));
+    voz.callar();
+    void fetch('/ritual/api/pausa', { method: 'POST', keepalive: true })
+      .catch(() => undefined)
+      .finally(() => {
+        window.location.assign(EL_PANEL);
+      });
+  };
+
+  /** Manda a leer su página. Nunca lanza: un `null` es "sigamos por lo normal". */
+  const leerSitio = async (url: string): Promise<LecturaDelSitio | null> => {
+    try {
+      const r = await fetch('/ritual/api/sitio', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (!r.ok) return null;
+      return (await r.json()) as LecturaDelSitio;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Lo que sacó de su página, ya confirmado, entra como un turno SUYO.
+   *
+   * Es lo que hace que no exista un camino de escritura paralelo: el agente
+   * recibe una frase del invitado, la marca con sus `[DATO:…]` y las fases se
+   * cierran con las mismas condiciones de siempre. Un atajo que escribiera
+   * directo en el estado podría cerrar fases con datos que su dueño nunca vio.
+   */
+  const confirmarSitio = (propuestas: PropuestaDelSitio[]): void => {
+    setSitioResuelto(true);
+    if (propuestas.length === 0) return;
+
+    const dicho = [
+      'Esto es de mi página y ya lo revisé:',
+      ...propuestas.map((p) => `- ${p.etiqueta.toLowerCase()}: ${p.valor}`),
+    ].join('\n');
+
+    void enviar(dicho);
   };
 
   const turnos = enVuelo ? [...foto.transcript, enVuelo] : foto.transcript;
 
+  /**
+   * Narrar la última pregunta del agente, cuando aparece.
+   *
+   * `narrar()` ya ignora un texto que acaba de leer, así que un re-render no
+   * produce una segunda lectura. Y no se narra mientras se está grabando: el
+   * micrófono no se puede grabar a sí mismo.
+   */
+  const ultimoDelAgente = React.useMemo(() => {
+    for (let i = turnos.length - 1; i >= 0; i--) {
+      const t = turnos[i];
+      if (t?.role === 'assistant') return t.content;
+    }
+    return null;
+  }, [turnos]);
+
+  React.useEffect(() => {
+    if (!ultimoDelAgente || ocupado || voz.grabando) return;
+    voz.narrar(ultimoDelAgente);
+  }, [ocupado, ultimoDelAgente, voz]);
+
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-5 py-8 sm:px-8">
       <header className="sticky top-0 z-10 -mx-5 bg-[hsl(var(--background)/0.85)] px-5 py-4 backdrop-blur-xl sm:-mx-8 sm:px-8">
-        <Progreso vista={foto.vista} />
+        <div className="flex items-start gap-4">
+          <div className="flex-1">
+            <Progreso vista={foto.vista} />
+          </div>
+          <InterruptorDeVoz voz={voz} />
+        </div>
       </header>
 
       <main id="contenido" className="flex flex-1 flex-col gap-8">
@@ -361,6 +496,17 @@ export function Ritual({ inicial }: { inicial: Foto }) {
        * como su agente de todos los días. Ver `guionDespuesDelRitual`.
        */}
       <footer className="sticky bottom-0 -mx-5 bg-[hsl(var(--background)/0.9)] px-5 pb-6 pt-3 backdrop-blur-xl sm:-mx-8 sm:px-8">
+        {ofrecerSitio ? (
+          <div className="mb-4">
+            <Sitio
+              ocupado={ocupado || cerrando}
+              onLeer={leerSitio}
+              onConfirmar={confirmarSitio}
+              onOmitir={() => setSitioResuelto(true)}
+            />
+          </div>
+        ) : null}
+
         <Compositor
           bautizo={bautizo}
           // Mientras se arma el mapa no hay turno que mandar: cualquier cosa
@@ -368,6 +514,8 @@ export function Ritual({ inicial }: { inicial: Foto }) {
           ocupado={ocupado || cerrando}
           pausada={foto.vista.status === 'pausada'}
           terminado={completada}
+          ayuda={foto.vista.ayuda}
+          voz={voz}
           onEnviar={enviar}
           onPausar={pausar}
         />
