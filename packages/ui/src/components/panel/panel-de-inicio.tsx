@@ -311,9 +311,15 @@ function useDesbloqueoReciente(
     guardarMemoria(llave, slugsCerrados(areas));
 
     if (abiertas.length > 0) setRecien(new Set(abiertas));
-    // `areas` queda fuera a propósito: `huella` es su contenido, y es lo que de
-    // verdad decide si hay algo nuevo que festejar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    // Las dependencias son `huella` y `tenantSlug`, NO `areas`.
+    //
+    // `areas` es un arreglo nuevo en cada render del servidor aunque diga
+    // exactamente lo mismo, así que ponerlo aquí re-dispararía el efecto en
+    // cada pintado: leería la memoria que él mismo acaba de escribir, no
+    // encontraría nada nuevo y el festejo se perdería. `huella` es su
+    // CONTENIDO —los slugs cerrados, en orden— y es lo único que de verdad
+    // decide si hay algo que festejar.
   }, [huella, tenantSlug]);
 
   return recien;

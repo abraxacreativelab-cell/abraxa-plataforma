@@ -148,7 +148,6 @@ export function sinJerga<T extends string | null | undefined>(
  */
 function avisar(texto: string): void {
   if (process.env.NODE_ENV === 'production') return;
-  // eslint-disable-next-line no-console
   console.warn(
     `[@abraxa/ui] Jerga interna interceptada antes de llegar al cliente ` +
       `(${marcadoresDeJerga(texto).join(', ')}): «${texto}»\n` +
