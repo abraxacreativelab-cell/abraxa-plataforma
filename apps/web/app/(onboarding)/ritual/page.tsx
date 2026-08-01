@@ -1,23 +1,63 @@
 import type { Metadata } from 'next';
+import { Espera } from './espera';
+import { Ritual } from './ritual';
+import { baseDeLaApi, cabecerasPara, identidadDeLaSesion } from './lib/sesion';
+import type { Foto, Impedimento } from './lib/tipos';
 
-export const metadata: Metadata = { title: 'El Ritual de Fundación · ABRAXA Plataforma' };
+export const metadata: Metadata = { title: 'El Ritual de Fundación' };
 
 /**
- * ANDAMIO DE H1 — bórralo y escribe lo tuyo. Es de H7.
- * Ruta: /ritual · archivo: apps/web/app/(onboarding)/ritual/page.tsx
+ * Es lo PRIMERO que vive un emprendedor en el producto, y lo que decide si se
+ * queda.
+ *
+ * Componente de servidor a propósito: el estado del Ritual —fase, avance,
+ * conversación y lo que el agente ya sabe del negocio— llega YA RESUELTO en el
+ * HTML. Quien vuelve al día siguiente abre esta página y lee su propia
+ * conversación de inmediato, sin un parpadeo de pantalla vacía y sin esperar a
+ * que un modelo conteste. Ésa es la cara visible del criterio #2.
  */
-export default function Page() {
-  return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-4 px-6 py-24">
-      <p className="text-sm font-medium uppercase tracking-widest text-[hsl(var(--primary))]">
-        H7
-      </p>
-      <h1 className="text-4xl font-semibold tracking-tight">El Ritual de Fundación</h1>
-      <p className="text-lg text-[hsl(var(--muted-foreground))]">Tu agente aparece, te pide que le pongas nombre y entiende tu negocio. Puedes parar cuando quieras y volver mañana.</p>
-      <p className="mt-6 text-sm text-[hsl(var(--muted-foreground))]">
-        Andamio de H1. La ruta <code className="text-[hsl(var(--foreground))]">/ritual</code> ya existe y
-        renderiza; el contenido lo trae H7 en su carril.
-      </p>
-    </main>
-  );
+export const dynamic = 'force-dynamic';
+
+export default async function Page() {
+  const resultado = await cargar();
+
+  if ('impedimento' in resultado) return <Espera impedimento={resultado.impedimento} />;
+
+  return <Ritual inicial={resultado.foto} />;
+}
+
+async function cargar(): Promise<{ foto: Foto } | { impedimento: Impedimento }> {
+  const identidad = await identidadDeLaSesion();
+
+  if (!identidad) {
+    return {
+      impedimento: {
+        tipo: 'sesion',
+        mensaje:
+          'identidadDeLaSesion() → null · lo cablea H2 · apps/web/app/(onboarding)/ritual/lib/sesion.ts',
+      },
+    };
+  }
+
+  try {
+    const r = await fetch(`${baseDeLaApi()}/onboarding/ritual`, {
+      headers: cabecerasPara(identidad),
+      cache: 'no-store',
+    });
+
+    if (r.ok) return { foto: (await r.json()) as Foto };
+
+    const cuerpo = (await r.json().catch(() => null)) as { error?: { message: string } } | null;
+    const mensaje = cuerpo?.error?.message ?? `La API respondió ${r.status}.`;
+
+    // 501 es PORT_NOT_IMPLEMENTED: falta un carril, no falló nada.
+    return { impedimento: { tipo: r.status === 501 ? 'puerto' : 'desconocido', mensaje } };
+  } catch (err) {
+    return {
+      impedimento: {
+        tipo: 'red',
+        mensaje: `fetch ${baseDeLaApi()}/onboarding/ritual → ${String(err)}`,
+      },
+    };
+  }
 }
