@@ -79,12 +79,26 @@ interface PuenteDelRitual {
 type Aplicar = (ctx: TenantContext, blueprint: unknown) => Promise<void>;
 
 /**
- * El módulo de H7, o `null`.
+ * El módulo de H7, o `null`. Se resuelve UNA vez, AL ARRANCAR, y se memoiza
+ * —incluido el fallo—.
  *
- * Se resuelve UNA vez y se memoiza —incluido el fallo—: si el paquete no está,
- * no tiene sentido reintentar el `import()` en cada carga de página, y sin
- * memoizar el fallo cada visita al mapa pagaría una resolución de módulo que ya
- * se sabe que no existe.
+ * ── El `import()` NO se dispara nunca desde una petición ───────────────────
+ *
+ * Sólo lo enciende `registrarSink()`, y a `registrarSink()` sólo lo llama
+ * `src/index.ts`. O sea: cargar el paquete de H7 pasa una vez, al importar
+ * `@abraxa/areas` —que es lo que hacen `apps/api` al arrancar y Next al
+ * construir—, y nunca dentro del render de una página ni de una consulta.
+ *
+ * No es una micro-optimización: se midió. Con el `import()` colgando de la
+ * lectura del mapa, la primera prueba que leía un mapa vacío pasó de 3 s a 67 s,
+ * porque arrastraba el paquete entero del Ritual a transformarse en ese
+ * instante. Lo que en una prueba son 67 s, en producción es la primera petición
+ * de un usuario que estrena empresa — justo la que tiene que ser buena.
+ *
+ * `proyectarBlueprint()` sólo espera este promise si YA existe. Si nadie cargó
+ * el puente (una prueba que importa `services/areas` suelto, una app que sólo
+ * monta el mapa), devuelve `false` en el acto y el mapa se sirve del catálogo
+ * del giro. Un carril que no está montado no puede costarle nada a otro.
  */
 let puente: Promise<PuenteDelRitual | null> | null = null;
 
@@ -110,7 +124,12 @@ function cargarPuente(): Promise<PuenteDelRitual | null> {
   return puente;
 }
 
-/** Sólo para pruebas: vuelve a intentar la carga del puente. */
+/** `true` si alguien ya encendió el puente con H7. Para las pruebas. */
+export function hayPuente(): boolean {
+  return puente !== null;
+}
+
+/** Sólo para pruebas: vuelve a dejar el puente apagado. */
 export function __olvidarPuenteParaPruebas(): void {
   puente = null;
 }
@@ -298,7 +317,10 @@ export async function registrarSink(): Promise<boolean> {
  * @returns `true` si había blueprint y quedó proyectado.
  */
 export async function proyectarBlueprint(ctx: TenantContext): Promise<boolean> {
-  const mod = await cargarPuente();
+  // Si nadie encendió el puente, aquí NO se enciende. Ver `cargarPuente()`.
+  if (!puente) return false;
+
+  const mod = await puente;
   if (!mod) return false;
 
   try {
