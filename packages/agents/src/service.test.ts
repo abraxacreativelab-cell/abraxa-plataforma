@@ -23,6 +23,7 @@ import { createStaticPricingCatalog, type PricingRow } from './pricing/catalog';
 import { createFakeDb, type FakeDb } from './testing/fake-db';
 import { createFakeAdapter, usage } from './testing/fakes';
 import { estadoPresupuesto, invalidarCachePresupuesto } from './ledger/budget';
+import { invalidarCacheReglas, VAR_ENTORNO } from './providers/allowlist';
 import { calcularCosto } from './pricing/compute';
 import { toolRegistry } from './tools/registry';
 
@@ -432,6 +433,103 @@ describe('un modelo sin precio ya no apaga el tope', () => {
     // por dinero que nadie está pagando.
     expect(calcularCosto(usage({ inputTokens: 1_000_000 }), null, 'local').budgetedUsd).toBe(0);
     expect(calcularCosto(usage({ inputTokens: 1_000_000 }), null, 'anthropic').budgetedUsd).toBe(10);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Frontera de datos · a qué países puede salir una conversación
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('la lista blanca de proveedores', () => {
+  it('un modelo fuera de la lista NO se corre, NO llama al proveedor y NO deja fila', async () => {
+    // El escenario del ledger de producción: corridas contra DeepSeek, que
+    // procesa en China, sin que ningún agent_definition lo declarara. El único
+    // insumo de la selección era `agent_definitions.model`, texto libre que
+    // nadie validaba ni al escribir ni al elegir.
+    const { svc, anthropic, openrouter } = servicio();
+    db.sembrar('agent_definitions', [
+      definicion(T_LUPITA, { provider: 'openrouter', model: 'deepseek/deepseek-chat' }),
+    ]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'hola' })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+
+    // Las tres aserciones que importan, y en este orden:
+    // 1. falló con un error de validación explícito  (arriba)
+    // 2. NO se llamó al proveedor — ni un token salió del proceso
+    expect(anthropic.llamadas).toHaveLength(0);
+    expect(openrouter.llamadas).toHaveLength(0);
+    // 3. NO se escribió fila en el ledger: la puerta va ANTES del paso que lo
+    //    escribe, no dentro del try que registra el consumo de lo que falló.
+    expect(db.tabla('usage_ledger')).toHaveLength(0);
+  });
+
+  it('lo mismo con Google, y el error dice cómo abrirlo si de verdad se quiere', async () => {
+    const { svc } = servicio();
+    db.sembrar('agent_definitions', [
+      definicion(T_LUPITA, { provider: 'openrouter', model: 'google/gemini-2.5-flash' }),
+    ]);
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'hola' })).rejects.toThrow(
+      /AGENTS_MODELOS_PERMITIDOS/,
+    );
+    expect(db.tabla('usage_ledger')).toHaveLength(0);
+  });
+
+  it('Anthropic pasa, directo y por OpenRouter: la lista no rompe lo que sí vale', async () => {
+    const { svc, anthropic, openrouter } = servicio();
+
+    db.sembrar('agent_definitions', [definicion(T_LUPITA)]);
+    expect((await svc.run(lupita, { role: 'sales', input: 'hola' })).text).toBeTruthy();
+    expect(anthropic.llamadas).toHaveLength(1);
+
+    db.sembrar('agent_definitions', [
+      definicion(T_CARLOS, { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }),
+    ]);
+    expect((await svc.run(carlos, { role: 'sales', input: 'hola' })).text).toBeTruthy();
+    expect(openrouter.llamadas).toHaveLength(1);
+  });
+
+  it('la variable de entorno abre un proveedor, y sólo mientras esté puesta', async () => {
+    // Configurable a propósito: abrir Google mañana tiene que ser una decisión
+    // explícita y visible en el despliegue, no un descuido — y quitarla vuelve
+    // a cerrar la puerta sin tocar código.
+    const { svc, openrouter } = servicio();
+    db.sembrar('agent_definitions', [
+      definicion(T_LUPITA, { provider: 'openrouter', model: 'google/gemini-2.5-flash' }),
+    ]);
+
+    process.env[VAR_ENTORNO] = 'anthropic:*,openrouter:google/*';
+    invalidarCacheReglas();
+    try {
+      expect((await svc.run(lupita, { role: 'sales', input: 'hola' })).text).toBeTruthy();
+      expect(openrouter.llamadas).toHaveLength(1);
+    } finally {
+      delete process.env[VAR_ENTORNO];
+      invalidarCacheReglas();
+    }
+
+    await expect(svc.run(lupita, { role: 'sales', input: 'otra' })).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+  });
+
+  it('tampoco se puede GUARDAR una definición fuera de la lista', async () => {
+    // Defensa en profundidad: la puerta que protege es la de service.ts, pero
+    // dejar escribir la fila deja al agente de ese rol muerto hasta que alguien
+    // lea el log.
+    const { svc } = servicio();
+
+    await expect(
+      svc.upsertDefinition(lupita, {
+        role: 'analyst',
+        name: 'Analista',
+        systemPrompt: 'p',
+        provider: 'openrouter',
+        model: 'deepseek/deepseek-chat',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 });
 

@@ -166,19 +166,39 @@ describe('la combinación proveedor/modelo no se puede escribir rota', () => {
   });
 
   it('un modelo de OpenRouter que NO está en el catálogo también pasa', async () => {
-    // La validación mira el DIALECTO del id, no el catálogo. Si mirara el
-    // catálogo, estrenar un modelo pediría un deploy — el problema que H3 vino
-    // a matar. El riesgo de dinero de un modelo desconocido lo cubre el piso
-    // conservador del ledger, no esta puerta.
+    // La validación de DIALECTO mira la forma del id, no el catálogo. Si mirara
+    // el catálogo, estrenar un modelo pediría un deploy — el problema que H3
+    // vino a matar. El riesgo de dinero de un modelo desconocido lo cubre el
+    // piso conservador del ledger, no esta puerta.
+    //
+    // El ejemplo es un Claude que el catálogo todavía no tabula. Antes esta
+    // prueba usaba `deepseek/deepseek-chat`, y ese cambio es el punto: el
+    // dialecto sigue siendo laxo con el CATÁLOGO, pero la lista blanca de
+    // proveedores ya no deja pasar a quien procesa fuera de la declaración de
+    // datos. Son dos puertas distintas y las dos hacen falta.
     await upsertDefinicion(ctx, {
       role: 'analyst',
       name: 'Analista',
       systemPrompt: 'p',
       provider: 'openrouter',
-      model: 'deepseek/deepseek-chat',
+      model: 'anthropic/claude-opus-6',
     });
 
-    expect((await obtenerDefinicion(ctx, 'analyst')).model).toBe('deepseek/deepseek-chat');
+    expect((await obtenerDefinicion(ctx, 'analyst')).model).toBe('anthropic/claude-opus-6');
+  });
+
+  it('y un proveedor fuera de la lista blanca NO pasa, aunque el dialecto esté bien', async () => {
+    // `deepseek/deepseek-chat` es un id perfectamente formado de OpenRouter.
+    // Lo que lo detiene no es la forma: es dónde procesa.
+    await expect(
+      upsertDefinicion(ctx, {
+        role: 'analyst',
+        name: 'Analista',
+        systemPrompt: 'p',
+        provider: 'openrouter',
+        model: 'deepseek/deepseek-chat',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
   it('cambiar sólo el nombre NO exige modelo: el proveedor no se movió', async () => {

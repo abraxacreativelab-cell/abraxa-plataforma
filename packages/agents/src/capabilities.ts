@@ -212,11 +212,16 @@ export function canonizarModelo(model: string, provider: ProviderName): string |
  * `true` si el id RESPETA el dialecto del proveedor, esté o no en el catálogo.
  *
  * Es la validación que usa la escritura de `app.agent_definitions`, y es MÁS
- * LAXA que `esConocido()` a propósito: `deepseek/deepseek-chat` no está en el
- * catálogo de capacidades y aun así es un id perfectamente válido de OpenRouter
- * —de hecho tiene fila de precio desde la migración 021—. Exigir `esConocido()`
- * para escribir una definición devolvería a H3 al problema que vino a matar:
- * estrenar un modelo requeriría un deploy.
+ * LAXA que `esConocido()` a propósito: un Claude que el catálogo todavía no
+ * tabula (`anthropic/claude-opus-6`) es un id perfectamente válido de
+ * OpenRouter. Exigir `esConocido()` para escribir una definición devolvería a
+ * H3 al problema que vino a matar: estrenar un modelo requeriría un deploy.
+ *
+ * Y NO opina sobre el proveedor: `deepseek/deepseek-chat` pasa este filtro
+ * porque su forma es correcta. Quien lo detiene es la lista blanca de
+ * `providers/allowlist.ts`, que es una frontera de DATOS —en qué país se
+ * procesa la conversación— y no de sintaxis. Son dos puertas y hacen falta las
+ * dos.
  */
 export function dialectoValido(model: string, provider: ProviderName): boolean {
   return canonizarModelo(model, provider) !== null;
