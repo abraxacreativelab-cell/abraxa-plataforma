@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Card, CardContent } from '@abraxa/ui';
 import { FormularioEmpezar } from './_componentes/formulario-empezar';
 import { VistaPrevia } from './_componentes/vista-previa';
+import { RUTA_DE_ENTRADA } from '../../../../packages/auth/src/identidad';
 
 export const metadata: Metadata = {
   title: 'Tu negocio contesta mientras duermes',
@@ -60,6 +61,8 @@ export default function Page() {
           <p className="mt-4 text-sm text-muted-foreground">
             Pagas lo que tú quieras. Sin contrato, sin vendedor, sin llamada.
           </p>
+
+          <YaTengoCuenta />
         </div>
       </section>
 
@@ -119,10 +122,39 @@ export default function Page() {
 
           <div className="mt-10 max-w-xl">
             <FormularioEmpezar />
+            <YaTengoCuenta />
           </div>
         </div>
       </section>
     </main>
+  );
+}
+
+/**
+ * La puerta de regreso, junto al formulario.
+ *
+ * El encabezado ya tiene un "Entrar", pero quien llega a la landing desde un
+ * enlace va directo al formulario y lee hacia abajo: en un teléfono, la barra
+ * de arriba deja de existir en cuanto hace scroll. El sitio donde de verdad se
+ * pregunta "¿y si ya tengo cuenta?" es justo debajo del campo que pide el
+ * nombre del negocio — porque es ahí donde alguien que ya se dio de alta se da
+ * cuenta de que ese formulario no es para él.
+ *
+ * Se pinta las dos veces que la landing pinta el formulario. Es `<a>` y no
+ * `<Link>` por lo mismo que en el layout: `/api/auth/signin` es un Route
+ * Handler, no una página del App Router.
+ */
+function YaTengoCuenta() {
+  return (
+    <p className="mt-4 text-sm text-muted-foreground">
+      ¿Ya tienes cuenta?{' '}
+      <a
+        href={RUTA_DE_ENTRADA}
+        className="text-foreground underline underline-offset-4 hover:text-primary"
+      >
+        Entrar
+      </a>
+    </p>
   );
 }
 
