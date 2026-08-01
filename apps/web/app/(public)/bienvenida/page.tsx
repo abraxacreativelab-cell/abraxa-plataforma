@@ -13,14 +13,23 @@ export const metadata: Metadata = {
  *
  * ── Por qué el correo llega aquí y no directo al Ritual ────────────────────
  *
- * El destino natural sería el login (H18) y de ahí el Ritual de Fundación
- * (H7). Ninguno de los dos existe todavía, y un correo de bienvenida con un
- * enlace roto es peor que no mandarlo: es la primera impresión del producto
- * después de que la persona ya pagó.
+ * Se escribió cuando ni el login (H18) ni el Ritual (H7) existían, y un correo
+ * de bienvenida con un enlace roto es peor que no mandarlo: es la primera
+ * impresión del producto después de que la persona ya pagó. Esta página era el
+ * punto de encuentro seguro.
  *
- * Esta página es el punto de encuentro. Hoy confirma el alta y dice qué sigue;
- * cuando H18 aterrice, el botón manda a iniciar sesión y de ahí al Ritual.
- * `packages/billing/src/correo.ts` no cambia — apunta aquí desde el principio.
+ * Los dos ya aterrizaron, y el botón ya hace lo que prometía: manda a
+ * `/ritual`. No hace falta enlazar el login a mano —`/ritual` no es pública, y
+ * `decidir()` (packages/auth/src/identidad.ts) manda a `/api/auth/signin` con
+ * `callbackUrl=/ritual`, así que después de entrar se vuelve exactamente aquí.
+ * Poner el login en el `href` se saltaría ese regreso.
+ *
+ * ── OJO: hoy nadie llega a esta página ─────────────────────────────────────
+ *
+ * Es el destino del correo de bienvenida, y ese correo NO SE ENVÍA: falta
+ * `RESEND_API_KEY` en producción (ver `packages/billing/src/correo.ts`). La
+ * pantalla es correcta y queda lista para el día que la llave exista; mientras
+ * tanto, quien paga entra por `/gracias`, que ya no promete ningún correo.
  *
  * `?empresa=<slug>` viene del correo. Se muestra para que la persona reconozca
  * su negocio, y NO se usa para dar acceso a nada: quien decide qué puede ver
