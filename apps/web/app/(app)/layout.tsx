@@ -121,9 +121,19 @@ async function cargarAreas(
  */
 async function contextoVerificado(): Promise<TenantContext | null> {
   try {
-    const tenancy = tryPort('tenancy');
-    if (!tenancy) return null;
-
+    // ── El orden importa, y estaba al revés ─────────────────────────────────
+    //
+    // Antes esto empezaba con `tryPort('tenancy')` y salía por `null` si el port
+    // no estaba registrado. Y NUNCA lo estaba: un port se registra al IMPORTAR
+    // el paquete que lo publica, y `apps/web` no importa `@abraxa/tenancy` en
+    // ninguna parte —lo hace `apps/api`, que es otro proceso—. O sea que esta
+    // función devolvía `null` para todo el mundo, el shell caía siempre al
+    // catálogo de arranque, y la barra lateral terminaba contradiciendo al panel
+    // que tenía al lado: uno decía «Ventas abierta» y el otro «se abre cuando
+    // termines el bautizo».
+    //
+    // Así que primero la sesión —que no depende de ningún port— y sólo después
+    // el port, importando el paquete para que se registre si nadie lo hizo.
     const [{ getServerSession }, { authOptions }] = await Promise.all([
       import('next-auth/next') as unknown as Promise<{
         getServerSession: (o: unknown) => Promise<{
@@ -137,6 +147,15 @@ async function contextoVerificado(): Promise<TenantContext | null> {
     const userEmail = sesion?.user?.email;
     const tenantSlug = sesion?.user?.tenantSlug;
     if (!userEmail || !tenantSlug) return null;
+
+    // Ahora sí el port. Si nadie lo registró todavía, se importa el paquete que
+    // lo publica: un `registerPort` ocurre como efecto de cargar el módulo.
+    let tenancy = tryPort('tenancy');
+    if (!tenancy) {
+      await import('@abraxa/tenancy');
+      tenancy = tryPort('tenancy');
+    }
+    if (!tenancy) return null;
 
     return await tenancy.contextFor({ userEmail, tenantSlug });
   } catch {
