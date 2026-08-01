@@ -212,13 +212,36 @@ export function aplicarTurno(fase: Fase, previo: EstadoNegocio, cruda: string): 
 
   // ── La transición ─────────────────────────────────────────────────────────
   //
-  // Tres condiciones, y las tres tienen que darse: que el modelo lo pida, que
-  // lo pida para la fase en la que de verdad estamos (un modelo despistado
-  // cierra la que ya cerró), y que los datos estén.
+  // Decide `puedeCerrar()`. Y SÓLO `puedeCerrar()`.
+  //
+  // Hasta el 2026-07-31 esto exigía además que el modelo emitiera
+  // `[FASE_COMPLETA:x]`, y con eso el Ritual no llegaba nunca al Mapa de
+  // Negocio. Medido en vivo: la fase 'bienvenida' —que pide UN dato, el nombre
+  // del agente— duró 10 turnos con el agente ya bautizado y sin nada
+  // pendiente; 'proceso' se atoró otros 6 con el recorrido completo. Sólo
+  // avanzaba cuando el entrevistado escribía «Sigamos», que no es una función
+  // del producto.
+  //
+  // La causa no era el prompt: se probó con el system EXACTO del sistema
+  // —incluido el bloque «--- ESTA FASE YA TIENE TODO --- … emite
+  // [FASE_COMPLETA:proceso]»— contra tres modelos. claude-sonnet-4.5 emitió
+  // CERO marcadores de fase; claude-haiku-4.5, cero; gpt-4.1 sí. La familia
+  // Claude es justo la que está configurada por defecto para el rol `master`.
+  //
+  // Así que la regla de oro se cumple ahora de verdad: el marcador es una
+  // PETICIÓN —se sigue leyendo, y pedirlo sin datos sigue siendo un cierre
+  // denegado que el guion le reclama— pero quien decide es esta función, que
+  // verifica los requisitos de `cierre.ts` uno por uno. No se pierde un ápice
+  // de rigor: se pierde la dependencia de que un modelo se acuerde de escribir
+  // un corchete.
+  //
+  // La petición tampoco elige destino: la única transición posible es a la
+  // fase inmediatamente siguiente. Un modelo que pide cerrar otra fase no
+  // salta a ninguna parte.
   const pidioCerrar = s.faseCompleta === fase;
   const puede = puedeCerrar(fase, estado);
   const siguiente = siguienteFase(fase);
-  const avanzo = pidioCerrar && puede && siguiente !== null;
+  const avanzo = puede && siguiente !== null;
 
   return {
     estado,

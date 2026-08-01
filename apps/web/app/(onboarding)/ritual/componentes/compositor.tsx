@@ -33,12 +33,22 @@ export function Compositor({
   bautizo,
   ocupado,
   pausada,
+  terminado = false,
   onEnviar,
   onPausar,
 }: {
   bautizo: boolean;
   ocupado: boolean;
   pausada: boolean;
+  /**
+   * El Ritual ya cerró y esto es la plática de todos los días.
+   *
+   * Cambia dos cosas y ninguna es cosmética: el marcador de posición deja de
+   * hablar de una entrevista que ya terminó, y desaparece "guardar y seguir
+   * después" — que después del cierre no significa nada, porque no hay nada
+   * pendiente que retomar.
+   */
+  terminado?: boolean;
   /** Resuelve `false` si el turno no pudo mandarse: el texto se restaura. */
   onEnviar: (texto: string) => Promise<boolean> | boolean;
   onPausar: () => void;
@@ -125,8 +135,10 @@ export function Compositor({
           onChange={(e) => setTexto(e.target.value)}
           onKeyDown={teclas}
           disabled={ocupado}
-          placeholder="Escríbele a tu agente…"
-          aria-label="Tu respuesta"
+          placeholder={
+            terminado ? 'Pregúntale lo que quieras de tu negocio…' : 'Escríbele a tu agente…'
+          }
+          aria-label={terminado ? 'Tu pregunta' : 'Tu respuesta'}
           className="max-h-[200px] min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-[0.95rem] leading-relaxed text-foreground outline-none placeholder:text-[hsl(var(--muted-foreground)/0.7)]"
         />
         <Button
@@ -139,16 +151,25 @@ export function Compositor({
         </Button>
       </div>
 
-      <div className="flex items-center justify-between gap-4 px-1">
+      {/*
+        En un teléfono estos dos elementos no caben en una línea: el texto se
+        aprieta a dos o tres renglones y el botón se encoge hasta ser difícil de
+        picar. Se apilan hasta `sm` y se ponen lado a lado a partir de ahí.
+      */}
+      <div className="flex flex-col items-start gap-2 px-1 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <p className="text-xs text-[hsl(var(--muted-foreground))]">
-          {pausada
-            ? 'Guardado. Escribe cuando quieras y seguimos donde te quedaste.'
-            : 'Todo se guarda solo. Puedes irte cuando quieras.'}
+          {terminado
+            ? 'Tu agente ya conoce tu negocio. Pregúntale lo que sea.'
+            : pausada
+              ? 'Guardado. Escribe cuando quieras y seguimos donde te quedaste.'
+              : 'Todo se guarda solo. Puedes irte cuando quieras.'}
         </p>
-        <Button variant="ghost" size="sm" onClick={onPausar} disabled={ocupado || pausada}>
-          <Icon name="check" className="h-3.5 w-3.5" />
-          Guardar y seguir después
-        </Button>
+        {!terminado ? (
+          <Button variant="ghost" size="sm" onClick={onPausar} disabled={ocupado || pausada}>
+            <Icon name="check" className="h-3.5 w-3.5" />
+            Guardar y seguir después
+          </Button>
+        ) : null}
       </div>
     </div>
   );

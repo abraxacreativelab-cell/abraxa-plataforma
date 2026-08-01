@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Espera } from './espera';
 import { Ritual } from './ritual';
-import { baseDeLaApi, cabecerasPara, identidadDeLaSesion } from './lib/sesion';
+import { baseDeLaApi, cabecerasPara, puertaDeEntrada, resolverIdentidad } from './lib/sesion';
 import type { Foto, Impedimento } from './lib/tipos';
 
 export const metadata: Metadata = { title: 'El Ritual de Fundación' };
@@ -21,42 +21,60 @@ export const dynamic = 'force-dynamic';
 export default async function Page() {
   const resultado = await cargar();
 
-  if ('impedimento' in resultado) return <Espera impedimento={resultado.impedimento} />;
+  if ('impedimento' in resultado) {
+    // El diagnóstico va al log del servidor, que es donde sirve. Lo que ve el
+    // invitado es una frase en su idioma y, cuando la hay, una salida.
+    console.warn(
+      `[ritual] no se pudo arrancar (${resultado.impedimento.tipo}): ${resultado.impedimento.detalle}`,
+    );
+    return <Espera impedimento={resultado.impedimento} />;
+  }
 
   return <Ritual inicial={resultado.foto} />;
 }
 
 async function cargar(): Promise<{ foto: Foto } | { impedimento: Impedimento }> {
-  const identidad = await identidadDeLaSesion();
+  const quien = await resolverIdentidad();
 
-  if (!identidad) {
+  if (!quien.ok) {
+    if (quien.motivo === 'sin-sesion') {
+      return {
+        impedimento: {
+          tipo: 'sesion',
+          detalle: 'resolverIdentidad() → sin-sesion: no hay cookie de NextAuth válida',
+          entrada: await puertaDeEntrada(),
+        },
+      };
+    }
+
     return {
       impedimento: {
-        tipo: 'sesion',
-        mensaje:
-          'identidadDeLaSesion() → null · lo cablea H2 · apps/web/app/(onboarding)/ritual/lib/sesion.ts',
+        tipo: 'empresa',
+        detalle:
+          'resolverIdentidad() → sin-empresa: hay sesión, pero ni GET /tenants/internal/' +
+          'primary-tenant ni POST /tenants devolvieron una empresa para este correo',
       },
     };
   }
 
   try {
     const r = await fetch(`${baseDeLaApi()}/onboarding/ritual`, {
-      headers: cabecerasPara(identidad),
+      headers: cabecerasPara(quien.identidad),
       cache: 'no-store',
     });
 
     if (r.ok) return { foto: (await r.json()) as Foto };
 
     const cuerpo = (await r.json().catch(() => null)) as { error?: { message: string } } | null;
-    const mensaje = cuerpo?.error?.message ?? `La API respondió ${r.status}.`;
+    const detalle = cuerpo?.error?.message ?? `La API respondió ${r.status}.`;
 
     // 501 es PORT_NOT_IMPLEMENTED: falta un carril, no falló nada.
-    return { impedimento: { tipo: r.status === 501 ? 'puerto' : 'desconocido', mensaje } };
+    return { impedimento: { tipo: r.status === 501 ? 'puerto' : 'desconocido', detalle } };
   } catch (err) {
     return {
       impedimento: {
         tipo: 'red',
-        mensaje: `fetch ${baseDeLaApi()}/onboarding/ritual → ${String(err)}`,
+        detalle: `fetch ${baseDeLaApi()}/onboarding/ritual → ${String(err)}`,
       },
     };
   }

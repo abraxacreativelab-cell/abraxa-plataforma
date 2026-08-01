@@ -27,7 +27,7 @@
  */
 import { PlatformError, usePort } from '@abraxa/db';
 import type { AgentRunResult, TenantContext } from '@abraxa/db';
-import { guionDelTurno, PROMPT_MAESTRO_BASE } from '../interview/guion';
+import { guionDelTurno, guionDespuesDelRitual, PROMPT_MAESTRO_BASE } from '../interview/guion';
 import { FASES, FICHAS, indiceDeFase, progresoDe } from '../interview/fases';
 import { faltantesDe } from '../interview/cierre';
 import { aplicarTurno } from '../interview/maquina';
@@ -355,10 +355,6 @@ export async function responder(
 
   const sesion = (await cargarSesion(ctx)) ?? (await abrirSesion(ctx));
 
-  if (sesion.status === 'completada') {
-    return { mensaje: '', vista: vistaDe(sesion), avanzo: false, mapa: await mapaDe(ctx) };
-  }
-
   // ── ¿Es el mismo envío otra vez? ──────────────────────────────────────────
   //
   // Va ANTES que cualquier otro guardia porque es el caso más amable de los
@@ -368,12 +364,26 @@ export async function responder(
   //
   // El lock por `turns` no puede cubrir esto: protege escrituras concurrentes, y
   // un reenvío llega DESPUÉS, lee la versión nueva y pasa limpio.
+  //
+  // Y va ANTES de la rama del Ritual terminado desde que ese caso corre el
+  // modelo: si no, un reenvío después del cierre le cobraría al cliente una
+  // corrida y le duplicaría el turno en su propia conversación.
   if (o.turnoId && sesion.ultimoEnvio === o.turnoId) {
     log.info(
       `envío ${o.turnoId} repetido en el ritual ${sesion.id}: ya está aplicado, ` +
         'se devuelve la foto vigente sin correr el modelo.',
     );
     return fotoComoRespuesta(ctx, sesion);
+  }
+
+  // ── El Ritual ya terminó: ahora se PLATICA ────────────────────────────────
+  //
+  // Antes esto devolvía `{ mensaje: '' }` sin correr el modelo, y con eso el
+  // producto se quedaba mudo justo después del único momento que impresiona:
+  // el dueño acababa de recibir su Mapa y ya no tenía dónde preguntarle nada a
+  // su agente. Ver `guionDespuesDelRitual`.
+  if (sesion.status === 'completada') {
+    return conversar(ctx, sesion, limpio, ahora, o.turnoId);
   }
 
   // ── La fase 6 no admite visitas ───────────────────────────────────────────
@@ -425,6 +435,82 @@ async function fotoComoRespuesta(
     avanzo: false,
     mapa: sesion.status === 'completada' ? await mapaDe(ctx) : null,
   };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Después del Ritual: la conversación de todos los días
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Un turno con el Ritual ya cerrado.
+ *
+ * Es el MISMO motor —el mismo agente maestro, con la bóveda y el contexto de
+ * empresa que le inyecta H3— con otra tarea: ya no entrevista, contesta. Por
+ * eso no hay un endpoint nuevo ni una pantalla nueva; hay una rama.
+ *
+ * Tres cosas se conservan del turno normal, y las tres importan:
+ *
+ *   · **se guarda en el transcript** — recargar la página no borra la plática;
+ *   · **se sigue aprendiendo** — un `[DATO:…]` que suelte aquí aterriza en el
+ *     estado igual que en la entrevista, así que la bóveda no se congela el día
+ *     que cerró el Ritual;
+ *   · **el lock optimista por `turns`** — dos pestañas platicando no se pisan.
+ *
+ * Lo que NO se conserva es la máquina de fases: `sintesis` no tiene siguiente,
+ * así que `aplicarTurno` no puede mover nada. La fase se queda donde está por
+ * construcción, no por un `if`.
+ */
+async function conversar(
+  ctx: TenantContext,
+  sesion: SesionRitual,
+  texto: string,
+  ahora: Date,
+  envioId?: string,
+): Promise<RespuestaDelRitual> {
+  const mapa = await mapaDe(ctx);
+  const guion = guionDespuesDelRitual(sesion.estado, mapa?.resumen ?? null);
+
+  const corrida = await correrAgente(
+    ctx,
+    texto,
+    guion,
+    historialParaElModelo(sesion.transcript),
+  );
+  const r = aplicarTurno('sintesis', sesion.estado, corrida.text);
+
+  const transcript = [...sesion.transcript, turno('user', texto, 'sintesis', ahora)];
+  if (r.visible) transcript.push(turno('assistant', r.visible, 'sintesis', ahora));
+  else log.warn('turno sin texto visible después del Ritual: el modelo sólo emitió marcadores');
+
+  const actualizada: SesionRitual = {
+    ...sesion,
+    estado: r.estado,
+    transcript,
+    turnos: sesion.turnos + 1,
+    updatedAt: ahora.toISOString(),
+    ultimoEnvio: envioId ?? sesion.ultimoEnvio,
+  };
+
+  await guardarTurno(
+    ctx,
+    sesion.id,
+    {
+      fase: 'sintesis',
+      estado: actualizada.estado,
+      transcript: actualizada.transcript,
+      turnos: actualizada.turnos,
+      // Sigue completada. Platicar no reabre el Ritual: si lo reabriera, la
+      // barra de progreso volvería a moverse y la fase 6 podría dispararse otra
+      // vez.
+      status: 'completada',
+      cerroFase: false,
+      turnoPrevio: sesion.turnos,
+      envioId,
+    },
+    ahora,
+  );
+
+  return { mensaje: r.visible, vista: vistaDe(actualizada), avanzo: false, mapa };
 }
 
 interface OpcionesDeTurno {

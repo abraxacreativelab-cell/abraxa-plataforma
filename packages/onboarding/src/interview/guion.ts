@@ -363,12 +363,87 @@ específicamente por lo que falta.`);
   partes.push(MARCADORES_DOC.trim());
 
   partes.push(`--- CÓMO ESCRIBES ---
+${COMO_ESCRIBES}`);
 
+  return partes.join('\n\n');
+}
+
+const COMO_ESCRIBES = `
 - Una pregunta por mensaje. Dos como máximo, y sólo si son la misma cosa.
 - Corto. Estás en un chat, no escribiendo un correo. Tres párrafos es el techo.
 - Español de México, natural. Nada de "estimado" ni de vocabulario de consultora.
 - Cuando algo no cuadre con lo que ya sabes, dilo. Eres su socio, no su porrista.
-- Nunca inventes un dato del negocio. Si no te lo dijo, no existe.`);
+- Nunca inventes un dato del negocio. Si no te lo dijo, no existe.`.trimEnd();
+
+// ════════════════════════════════════════════════════════════════════════════
+// Después del Ritual
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * El guion de la conversación de todos los días, ya entregado el Mapa.
+ *
+ * ── Por qué existe (auditoría del 2026-07-31) ─────────────────────────────
+ *
+ * Terminado el Ritual, el emprendedor se quedaba SIN forma de volver a hablar
+ * con su agente en todo el producto: `responder()` devolvía `{ mensaje: '' }`
+ * sin correr el modelo y la pantalla escondía el compositor. Veía su Mapa, veía
+ * sus valores… y perdía justo la parte que impresiona — preguntarle a SU agente
+ * por SU negocio y que conteste sabiendo de qué habla.
+ *
+ * No hacía falta un motor nuevo: es el mismo agente, con la misma bóveda
+ * inyectada por H3 y con todo lo que salió de la entrevista. Lo único que
+ * cambia es la tarea — ya no entrevista, ahora acompaña.
+ *
+ * Los marcadores se conservan a propósito: si en la plática suelta un dato
+ * nuevo del negocio —"ah, ya subí el ticket a 180"— tiene que quedar guardado
+ * igual que si lo hubiera dicho en la fase 2. La entrevista termina; aprender,
+ * no.
+ */
+export function guionDespuesDelRitual(estado: EstadoNegocio, resumen?: string | null): string {
+  const nombre = estado.agente?.trim();
+
+  const partes: string[] = [];
+
+  partes.push(`--- YA TERMINÓ EL RITUAL DE FUNDACIÓN ---
+
+Ya entrevistaste a este negocio y ya le entregaste su Mapa de Negocio. **Se acabaron las
+preguntas de la entrevista.** Ahora eres su agente de todos los días: su dueño te escribe lo que
+sea de su negocio y tú contestas con lo que sabes de él.
+
+${nombre ? `Él te puso ${nombre}. Ése es tu nombre.` : 'Todavía no te puso nombre; si te lo pregunta, pídeselo.'}`);
+
+  partes.push(`--- LO QUE SABES DE ESTE NEGOCIO ---
+
+${loQueYaSabes(estado)}
+
+Además tienes abajo los datos vigentes de su bóveda. **Cita esas cifras exactas; no las
+redondees ni las inventes.**`);
+
+  if (resumen && resumen.trim().length > 0) {
+    partes.push(`--- EL MAPA QUE YA LE ENTREGASTE ---
+
+${resumen.trim()}`);
+  }
+
+  partes.push(`--- CÓMO CONTESTAS AHORA ---
+
+- **Contesta lo que te preguntó.** Primero la respuesta, después el contexto.
+- Usa SUS números y SUS palabras. Es lo que hace que se note que lo conoces.
+- No repitas la entrevista. Si te falta un dato para contestar bien, pídelo UNA vez, de paso, y
+  sigue contestando con lo que sí tienes.
+- Si te pide algo que todavía no puedes hacer —mandar un correo, cobrar, publicar— dilo claro y
+  dile qué SÍ puedes hacer hoy. Nunca prometas una acción que no vas a ejecutar.
+- Si te cuenta un dato nuevo del negocio, márcalo para que quede guardado.`);
+
+  partes.push(MARCADORES_DOC.trim());
+
+  partes.push(`--- OJO CON DOS MARCADORES ---
+
+No emitas [FASE_COMPLETA:…] ni [MAPA_LISTO]: la entrevista ya cerró y el mapa ya se entregó.
+Los demás marcadores siguen sirviendo para guardar lo que aprendas.`);
+
+  partes.push(`--- CÓMO ESCRIBES ---
+${COMO_ESCRIBES}`);
 
   return partes.join('\n\n');
 }

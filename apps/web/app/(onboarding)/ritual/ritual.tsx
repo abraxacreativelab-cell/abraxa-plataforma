@@ -351,19 +351,27 @@ export function Ritual({ inicial }: { inicial: Foto }) {
         ) : null}
       </main>
 
-      {!completada ? (
-        <footer className="sticky bottom-0 -mx-5 bg-[hsl(var(--background)/0.9)] px-5 pb-6 pt-3 backdrop-blur-xl sm:-mx-8 sm:px-8">
-          <Compositor
-            bautizo={bautizo}
-            // Mientras se arma el mapa no hay turno que mandar: cualquier cosa
-            // que se escriba aquí se toparía con la fase 6 en curso.
-            ocupado={ocupado || cerrando}
-            pausada={foto.vista.status === 'pausada'}
-            onEnviar={enviar}
-            onPausar={pausar}
-          />
-        </footer>
-      ) : null}
+      {/*
+       * El compositor NO desaparece al terminar el Ritual.
+       *
+       * Antes sí, y con eso el producto se quedaba mudo justo en el momento que
+       * impresiona: la persona acababa de recibir su Mapa de Negocio y ya no
+       * tenía dónde preguntarle nada a su agente. Ahora los turnos siguen
+       * yendo a la misma acción; el motor sabe que el Ritual cerró y contesta
+       * como su agente de todos los días. Ver `guionDespuesDelRitual`.
+       */}
+      <footer className="sticky bottom-0 -mx-5 bg-[hsl(var(--background)/0.9)] px-5 pb-6 pt-3 backdrop-blur-xl sm:-mx-8 sm:px-8">
+        <Compositor
+          bautizo={bautizo}
+          // Mientras se arma el mapa no hay turno que mandar: cualquier cosa
+          // que se escriba aquí se toparía con la fase 6 en curso.
+          ocupado={ocupado || cerrando}
+          pausada={foto.vista.status === 'pausada'}
+          terminado={completada}
+          onEnviar={enviar}
+          onPausar={pausar}
+        />
+      </footer>
     </div>
   );
 }
