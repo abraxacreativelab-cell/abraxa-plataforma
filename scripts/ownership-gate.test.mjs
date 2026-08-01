@@ -318,14 +318,25 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
 
   it('H0 alcanza los archivos de la excepción, y sólo ésos', () => {
     const globs = pathsEfectivos(CARRIL_ORQUESTADOR, h0);
-    expect(perteneceA('packages/agents/src/routes.ts', globs)).toBe(true);
-    expect(perteneceA('packages/agents/src/http/proxy-verified.ts', globs)).toBe(true);
-    expect(perteneceA('packages/vault/src/http/context.ts', globs)).toBe(true);
-    expect(perteneceA('packages/tenancy/src/middleware/proxy.ts', globs)).toBe(true);
-    // El resto de los árboles ajenos sigue cerrado para H0.
+
+    // Se deriva de la excepción REAL del mapa, nunca de una lista transcrita a
+    // mano. Una excepción se concede y se retira cada pocos días —es su razón de
+    // ser— y una prueba que enumera sus rutas se pone roja por el motivo
+    // equivocado en cuanto alguien la cambia. Pasó en el PR #27: retirar la
+    // excepción vencida tumbó esta prueba, que no tenía nada que ver con el
+    // cambio. Una prueba que se rompe por el motivo equivocado entrena a la
+    // gente a editarla sin leerla, y ahí es donde se pierde el candado.
+    for (const p of h0.excepcionTransversal.paths) {
+      const ejemplo = p.endsWith('/**') ? p.replace(/\/\*\*$/, '/cualquiera.ts') : p;
+      expect(perteneceA(ejemplo, globs), ejemplo).toBe(true);
+    }
+
+    // El resto de los árboles ajenos sigue cerrado para H0. Éstos SÍ van fijos:
+    // no dependen de qué excepción esté vigente, y son el otro lado del candado.
     expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
     expect(perteneceA('packages/vault/src/resolver.ts', globs)).toBe(false);
     expect(perteneceA('packages/tenancy/src/middleware/tenant.ts', globs)).toBe(false);
+    expect(perteneceA('packages/inbox/src/ingest.ts', globs)).toBe(false);
   });
 
   it('un carril de construcción NO puede concederse una', () => {
@@ -340,10 +351,16 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
   });
 
   it('la excepción NO transfiere propiedad: el dueño real no cambia', () => {
-    // Es lo que hace que `--check-overlap` siga siendo verdad.
-    expect(duenosDe('packages/agents/src/routes.ts', ownership)).toEqual(['h3-agents']);
-    expect(duenosDe('packages/vault/src/http/context.ts', ownership)).toEqual(['h4-vault']);
-    expect(duenosDe('packages/tenancy/src/middleware/proxy.ts', ownership)).toEqual(['h2-tenancy']);
+    // Es lo que hace que `--check-overlap` siga siendo verdad. Y también se
+    // deriva de la excepción vigente: lo que se afirma no es QUIÉN es el dueño
+    // —eso cambia con cada excepción— sino que sigue habiendo EXACTAMENTE UN
+    // dueño y que NO es el orquestador. Ése es el invariante de verdad.
+    for (const p of h0.excepcionTransversal.paths) {
+      const ejemplo = p.endsWith('/**') ? p.replace(/\/\*\*$/, '/cualquiera.ts') : p;
+      const duenos = duenosDe(ejemplo, ownership);
+      expect(duenos, `${ejemplo} debe tener exactamente un dueño`).toHaveLength(1);
+      expect(duenos[0], `${ejemplo} no puede pasar a ser de H0`).not.toBe(CARRIL_ORQUESTADOR);
+    }
   });
 });
 

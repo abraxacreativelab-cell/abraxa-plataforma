@@ -44,7 +44,14 @@
       "archivo de docs/: `--check-overlap` corre en el PR de TODOS los carriles y se pondría",
       "rojo para todos. Por eso es un alias y no una entrada."
     ],
-    "ramas": ["h0-integracion", "h0-docs-ola2", "h0-contexto-canonico", "h0-middleware", "h0-web-src"],
+    "ramas": [
+      "h0-integracion",
+      "h0-docs-ola2",
+      "h0-contexto-canonico",
+      "h0-middleware",
+      "h0-web-src",
+      "h0-sesion-authoptions"
+    ],
     "paths": [
       "docs/**",
       "deploy/**",
@@ -55,19 +62,11 @@
       "packages/db/src/http/**"
     ],
     "excepcionTransversal": {
-      "fecha": "2026-07-31",
-      "venceEn": "2026-08-14",
-      "pr": "h0-contexto-canonico — la pieza canónica de TenantContext",
-      "razon": "El mismo agujero de identidad-por-header apareció en CUATRO carriles: agents (PR #12, cerrado), inbox (PR #10), onboarding (PR #8) y vault — que ya está en main, montado en /vault, con el port de tenancy registrado y sin una sola llamada a proxyVerified(). No es descuido: el patrón correcto no existía como pieza importable. Esta excepción cubre lo mínimo para publicarla y migrar a sus dos consumidores en main: el barril de @abraxa/db, el resolvedor de la bóveda, el re-export de tenancy y las rutas de agents.",
-      "paths": [
-        "packages/db/src/index.ts",
-        "packages/vault/src/http/context.ts",
-        "packages/vault/src/http/context.test.ts",
-        "packages/tenancy/src/middleware/proxy.ts",
-        "packages/agents/src/routes.ts",
-        "packages/agents/src/routes.test.ts",
-        "packages/agents/src/http/**"
-      ]
+      "fecha": "2026-08-01",
+      "venceEn": "2026-08-08",
+      "pr": "h0-sesion-authoptions — el Ritual no veía la sesión ya emitida",
+      "razon": "Se RETIRA la excepción anterior (h0-contexto-canonico, 2026-07-31): su PR mergeó y un permiso que nadie retira es un permiso permanente. La de hoy cubre UN archivo y no puede esperar: con H18 desplegado y una sesión de Google válida, apps/web/app/(onboarding)/ritual/lib/sesion.ts llamaba a getServerSession() SIN authOptions, así que el callback `session` —que vive en las opciones y es quien pone tenantSlug— nunca corría; la guarda veía tenantSlug undefined y devolvía null, indistinguible de 'no hay sesión'. Resultado: el invitado se autentica y la pantalla le sigue pidiendo entrar. Fallo silencioso, sin error ni log. Es un bloqueo TOTAL del producto el día de un evento con invitados reales, sobre un archivo cuyo propio comentario ya prescribía este cambio ('cuando H2 configure NextAuth de verdad, esto se cambia por su authOptions'). El dueño es h7-ritual y no está disponible; esperar significa no tener producto. Se toca SÓLO la función identidadDeLaSesion(), sin cambiar su firma ni su contrato.",
+      "paths": ["apps/web/app/(onboarding)/ritual/lib/sesion.ts"]
     }
   },
 

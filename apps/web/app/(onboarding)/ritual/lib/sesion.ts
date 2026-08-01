@@ -27,16 +27,28 @@ interface SesionConTenant {
 
 export async function identidadDeLaSesion(): Promise<Identidad | null> {
   try {
-    // Import dinámico: si H2 todavía no configuró NextAuth, no queremos que la
-    // ruta reviente al cargar el módulo — queremos que diga que falta.
-    // El cast pasa por `unknown` porque `getServerSession` de NextAuth está
-    // sobrecargado y su firma real no se solapa con la mínima que aquí hace
-    // falta. Cuando H2 configure NextAuth de verdad, esto se cambia por su
-    // `authOptions` y el cast desaparece.
-    const modulo = (await import('next-auth/next')) as unknown as {
-      getServerSession: () => Promise<SesionConTenant | null>;
-    };
-    const sesion = await modulo.getServerSession();
+    // El cableado de NextAuth YA aterrizó (H18, PR #25). Este archivo anticipaba
+    // el cambio en su propio comentario: «cuando H2 configure NextAuth de verdad,
+    // esto se cambia por su `authOptions`». Es exactamente lo que ocurre aquí.
+    //
+    // `authOptions` NO ES OPCIONAL, y ésta es la razón por la que la pantalla
+    // decía «falta saber quién eres» con una sesión de Google perfectamente
+    // válida ya emitida: `getServerSession()` SIN opciones no ejecuta el callback
+    // `session` que vive en ellas, y ese callback es quien pone `tenantSlug`. Sin
+    // él la guarda de abajo veía `tenantSlug === undefined` y devolvía `null`,
+    // indistinguible de «no hay sesión». Un fallo silencioso: sin error, sin log,
+    // y con el invitado ya autenticado mirando una pantalla que le pide entrar.
+    //
+    // Los imports siguen siendo dinámicos a propósito: mantienen esta carpeta
+    // desacoplada del arranque del módulo y no cambian el comportamiento cuando
+    // todo está en su sitio.
+    const [modulo, opciones] = await Promise.all([
+      import('next-auth/next') as unknown as Promise<{
+        getServerSession: (o: unknown) => Promise<SesionConTenant | null>;
+      }>,
+      import('../../../api/auth/opciones'),
+    ]);
+    const sesion = await modulo.getServerSession(opciones.authOptions);
 
     const userEmail = sesion?.user?.email;
     const tenantSlug = sesion?.user?.tenantSlug;
@@ -44,8 +56,10 @@ export async function identidadDeLaSesion(): Promise<Identidad | null> {
 
     return { userEmail, tenantSlug };
   } catch {
-    // TODO(H2): en cuanto exista el handler de NextAuth y `primaryTenantSlugFor`,
-    // esto empieza a devolver identidad sin que cambie nada más de esta carpeta.
+    // Un invitado que todavía no tiene empresa llega aquí con `tenantSlug: null`
+    // y sale por la guarda de arriba, no por este catch. Esto cubre lo
+    // inesperado —el módulo ausente, una excepción del proveedor— y falla
+    // CERRADO, que es lo correcto: sin identidad no se entrevista a nadie.
     return null;
   }
 }
