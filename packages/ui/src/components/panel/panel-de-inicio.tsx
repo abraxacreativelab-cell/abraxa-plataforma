@@ -10,6 +10,13 @@ import { isNavigable } from '../nav/resolve-areas';
 import { AnilloDeProgreso } from './anillo-de-progreso';
 import { TarjetaDeArea } from './tarjeta-de-area';
 import {
+  areasRecienAbiertas,
+  guardarMemoria,
+  leerMemoria,
+  llaveDeMemoria,
+  slugsCerrados,
+} from './recien-abiertas';
+import {
   type HitoDelRitual,
   type PasoDelRitual,
   type RitualEnPanel,
@@ -33,6 +40,9 @@ export interface PanelDeInicioProps {
   areas: AreaSummary[] | null;
   requisitos?: Record<string, string>;
   brand?: string | null;
+  /** El slug de la empresa. Sólo se usa para separar la memoria del desbloqueo:
+   *  dos negocios en el mismo navegador no comparten festejos. */
+  tenantSlug?: string | null;
 }
 
 /**
@@ -77,6 +87,7 @@ export function PanelDeInicio({
   areas,
   requisitos = {},
   brand,
+  tenantSlug,
 }: PanelDeInicioProps) {
   const hitos = React.useMemo(() => hitosDelRitual(pasos, ritual), [pasos, ritual]);
   const siguiente = hitos.find((h) => h.estado === 'actual') ?? null;
@@ -86,11 +97,16 @@ export function PanelDeInicio({
 
   const abiertas = areas?.filter(isNavigable).length ?? 0;
   const total = areas?.length ?? 0;
+  const recien = useDesbloqueoReciente(areas, tenantSlug);
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-      {/* ── Quién eres ──────────────────────────────────────────────────── */}
-      <header className="mb-8 sm:mb-12">
+      {/* ── Quién eres ────────────────────────────────────────────────────
+          El escalonado del panel va por BLOQUES, no por elemento: primero
+          quién eres, luego lo que ya tienes, luego lo que falta, y al final
+          las puertas. Es el mismo orden en que se lee, y ponerle el ritmo
+          encima hace que se lea así de verdad en vez de caer todo junto. */}
+      <header className="entra mb-8 sm:mb-12" style={{ '--entra-i': 0 } as React.CSSProperties}>
         <p className="eyebrow">Tu panel</p>
 
         <h1 className="mt-2 text-balance text-3xl font-light tracking-tight sm:text-4xl">
@@ -125,7 +141,8 @@ export function PanelDeInicio({
       {/* ── El Ritual: lo que ya tienes y lo que sigue ───────────────────── */}
       <section
         aria-labelledby="titulo-ritual"
-        className="glass light-leak light-leak-accent hud-frame rounded-2xl p-5 sm:p-8"
+        className="entra glass light-leak light-leak-accent hud-frame rounded-2xl p-5 sm:p-8"
+        style={{ '--entra-i': 1 } as React.CSSProperties}
       >
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8">
           <AnilloDeProgreso
@@ -187,7 +204,11 @@ export function PanelDeInicio({
 
       {/* ── Las 7 fases ──────────────────────────────────────────────────── */}
       {hitos.length > 0 && (
-        <section aria-labelledby="titulo-fases" className="mt-10">
+        <section
+          aria-labelledby="titulo-fases"
+          className="entra mt-10"
+          style={{ '--entra-i': 2 } as React.CSSProperties}
+        >
           <h2 id="titulo-fases" className="eyebrow">
             Las {hitos.length} conversaciones de tu Ritual
           </h2>
@@ -200,8 +221,18 @@ export function PanelDeInicio({
       )}
 
       {/* ── Las áreas: el gancho ─────────────────────────────────────────── */}
-      <section aria-labelledby="titulo-areas" className="mt-10 sm:mt-14">
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+      {/* Las tarjetas llevan su PROPIO escalonado (`indice`), que arranca
+          después de este bloque: `--entra-base` corre su reloj para que el
+          mosaico no empiece a posarse antes de que su título esté puesto. */}
+      <section
+        aria-labelledby="titulo-areas"
+        className="mt-10 sm:mt-14"
+        style={{ '--entra-base': '135ms' } as React.CSSProperties}
+      >
+        <div
+          className="entra mb-4 flex flex-wrap items-baseline justify-between gap-2"
+          style={{ '--entra-i': 0 } as React.CSSProperties}
+        >
           <h2 id="titulo-areas" className="section-title">
             Las áreas de tu negocio
           </h2>
@@ -214,12 +245,14 @@ export function PanelDeInicio({
 
         {areas && areas.length > 0 ? (
           <div className="grid gap-3 sm:grid-cols-2">
-            {areas.map((a) => (
+            {areas.map((a, i) => (
               <TarjetaDeArea
                 key={a.slug}
                 area={a}
                 requisito={requisitos[a.slug]}
                 brand={brand}
+                recienAbierta={recien.has(a.slug)}
+                indice={i}
               />
             ))}
           </div>
@@ -235,6 +268,56 @@ export function PanelDeInicio({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Qué se le abrió desde la última vez que estuvo aquí.
+ *
+ * ── Por qué el primer render devuelve SIEMPRE vacío ─────────────────────────
+ *
+ * Porque el servidor no tiene `localStorage`. Si el cálculo se hiciera durante
+ * el render, el HTML del servidor y el del cliente no coincidirían y React
+ * tiraría el árbol entero para volverlo a pintar — el panel parpadearía en cada
+ * carga justo para que el festejo llegue medio segundo antes.
+ *
+ * Así que el primer pintado es el neutro, y el festejo entra en el efecto. Se
+ * ve mejor de todas formas: la tarjeta ya está en pantalla cuando se abre, que
+ * es la coreografía correcta. Una tarjeta que aparece YA festejando no cuenta
+ * ninguna historia.
+ *
+ * ── Y la memoria se escribe en el MISMO efecto que la lee ───────────────────
+ *
+ * En ese orden y sin esperar a nada: leer, calcular, guardar. Si el guardado
+ * dependiera de que la animación terminara —o de un `beforeunload`, que no se
+ * ejecuta de forma fiable en móvil— alguien que recarga a media animación
+ * volvería a ver el mismo festejo, y un festejo repetido deja de ser un premio
+ * y pasa a ser un adorno.
+ */
+function useDesbloqueoReciente(
+  areas: AreaSummary[] | null,
+  tenantSlug: string | null | undefined,
+): ReadonlySet<string> {
+  const [recien, setRecien] = React.useState<ReadonlySet<string>>(() => new Set());
+
+  // La huella de lo cerrado, para que el efecto no se re-dispare cuando el
+  // arreglo es nuevo pero dice exactamente lo mismo (cada render del servidor
+  // produce objetos distintos).
+  const huella = areas ? slugsCerrados(areas).join('|') : null;
+
+  React.useEffect(() => {
+    if (!areas) return;
+
+    const llave = llaveDeMemoria(tenantSlug);
+    const abiertas = areasRecienAbiertas(leerMemoria(llave), areas);
+    guardarMemoria(llave, slugsCerrados(areas));
+
+    if (abiertas.length > 0) setRecien(new Set(abiertas));
+    // `areas` queda fuera a propósito: `huella` es su contenido, y es lo que de
+    // verdad decide si hay algo nuevo que festejar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [huella, tenantSlug]);
+
+  return recien;
+}
 
 function Fase({ hito, numero }: { hito: HitoDelRitual; numero: number }) {
   const cerrada = hito.estado === 'cerrada';

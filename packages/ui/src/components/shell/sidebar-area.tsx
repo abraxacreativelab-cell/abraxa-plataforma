@@ -27,6 +27,8 @@ export interface SidebarAreaProps {
   /** Qué hace falta para desbloquearla, si se sabe. */
   requirement?: string;
   brand?: string | null;
+  /** Posición en la barra. Escalona la entrada. */
+  indice?: number;
   onNavigate?: () => void;
 }
 
@@ -42,6 +44,7 @@ export function SidebarArea({
   pathname,
   requirement,
   brand,
+  indice = 0,
   onNavigate,
 }: SidebarAreaProps) {
   const abierta = isNavigable(area);
@@ -96,7 +99,10 @@ export function SidebarArea({
   const clasesBase = 'flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors';
 
   return (
-    <li style={vars as React.CSSProperties}>
+    <li
+      className="entra"
+      style={{ ...(vars as React.CSSProperties), '--entra-i': indice } as React.CSSProperties}
+    >
       {abierta ? (
         <Link
           href={destino}
