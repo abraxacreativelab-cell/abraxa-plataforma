@@ -127,6 +127,41 @@ Secret equivocado. Está medido en
 Para desarrollo hay un escape explícito y por canal: `config.meta_firma_opcional = true` deja
 pasar un webhook **sin** firma (nunca uno con firma inválida) y avisa en el log cada vez.
 
+### 1.4 Nadie está escribiendo `contact_identities` — y no es de este carril
+
+El criterio #7 del handoff pide que «el mismo humano en dos canales quede con **dos identidades
+ligadas al contacto**, sin fusión automática». Hoy eso **no lo hace nadie**, y conviene que se
+sepa antes de darlo por hecho:
+
+```
+$ grep -rn "useContacts\|resolveByIdentity\|@abraxa/crm" packages/inbox/src/
+(sin resultados)
+
+$ grep -n dependencies -A 6 packages/inbox/package.json
+    "@abraxa/config": "*", "@abraxa/db": "*", "express", "nanoid", "zod"
+```
+
+H15 construyó el contrato y lo dejó documentado para este uso exacto
+(`packages/crm/src/port.ts:32-35`), pero H15 mergeó **después** que H6 y el inbox nunca llegó a
+llamarlo. `threads.contact_id` se queda en `null` para todos los canales, no sólo los míos.
+
+**Por qué no lo escribo yo**, aunque sería una tentación de veinte líneas:
+
+- `packages/inbox/**` fuera de esta carpeta es de H6.
+- Añadir `@abraxa/crm` a `packages/inbox/package.json` toca el lockfile, y el gate rechaza el PR
+  de cualquier rama que no sea la de H1 (CONTRIBUTING §4).
+- Y aunque se pudiera: dar de alta contactos desde un **driver** sería la segunda ruta de alta
+  del CRM. La normalización de identidades existe en un solo sitio a propósito
+  (`packages/crm/src/identity.ts`), y una segunda que normalizara distinto rompería el índice
+  `(tenant_id, channel, identifier)` sin que nadie lo notara hasta ver dos fichas del mismo
+  cliente.
+
+Lo que este driver sí garantiza es la mitad que le toca: la `address` que produce ya converge con
+`normalizarHandle()` de H15 (probado en `direccion.test.ts`), así que el día que el núcleo llame
+al port, las identidades de Instagram y Messenger caen donde deben **sin tocar este código**. Y
+no se fusiona nada: un PSID es un id de la *relación* entre una persona y una página, no de la
+persona — ver [`direccion.ts`](direccion.ts).
+
 ---
 
 ## 2. El webhook de Meta es por APP, no por canal
