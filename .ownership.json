@@ -52,7 +52,8 @@
       "h0-web-src",
       "h0-sesion-authoptions",
       "h0-voz-paths",
-      "h0-panel-path"
+      "h0-panel-path",
+      "h0-alias-h11"
     ],
     "paths": [
       "docs/**",
@@ -239,6 +240,16 @@
 
   "h11-areas": {
     "label": "H11 · Áreas y gamificación",
+    "ramas": ["h11-areas", "h11-areas-mapa"],
+    "nota": [
+      "`h11-areas-mapa` se declara el 2026-08-01 por el mismo motivo mecánico que los alias de",
+      "H0: el carril abrió un SEGUNDO PR —cablear /mapa a la sesión y proyectar el blueprint— y",
+      "no puede reusar la rama del primero, que ya mergeó por squash. `carrilDeRama`",
+      "(scripts/ownership-gate.mjs:229) honra `ramas` para cualquier entrada; su propio",
+      "comentario lo dice: «un carril que abre más de un PR en su vida no puede reusar una sola",
+      "rama». Un alias NO reparte propiedad: los `paths` siguen siendo los mismos y",
+      "`--check-overlap` no lo ve."
+    ],
     "migrations": [90, 99],
     "paths": ["packages/areas/**", "apps/web/app/(app)/mapa/**"]
   },
