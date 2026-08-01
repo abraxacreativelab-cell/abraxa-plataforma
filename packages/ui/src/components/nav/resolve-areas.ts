@@ -2,16 +2,19 @@ import type { AreaSummary } from '@abraxa/db/ports';
 // Desde `failure.ts`, NO desde `load-error.tsx`: esta función corre en el
 // servidor y ese archivo es `'use client'`.
 import { type LoadFailure, toLoadFailure } from '../feedback/failure';
-import { MOCK_AREAS } from './mock-areas';
+import { type SenalesDelRitual, areasDeArranque } from './areas-de-arranque';
 
 /**
- * De dónde salieron las áreas que está pintando el sidebar. Se muestra en
- * desarrollo: saber que estás viendo el mock y no datos reales evita una tarde
- * entera de depuración.
+ * De dónde salieron las áreas que está pintando el sidebar.
+ *
+ * `arranque` sustituye al antiguo `mock`, y no es sólo el nombre: el mock traía
+ * cuatro áreas inventadas y cuatro rutas muertas. El catálogo de arranque son
+ * las áreas del giro `general` de `app.industry_templates` —la misma semilla con
+ * la que H11 va a materializar el mapa— y todas sus rutas existen.
  */
 export type AreasResult =
   | { source: 'port'; areas: AreaSummary[]; failure?: never }
-  | { source: 'mock'; areas: AreaSummary[]; failure?: never }
+  | { source: 'arranque'; areas: AreaSummary[]; failure?: never }
   | { source: 'error'; areas: null; failure: LoadFailure };
 
 /**
@@ -24,16 +27,18 @@ export type AreasResult =
  * corre en el servidor.
  *
  * Regla 5 del contrato: se programa contra `AreasPort`, no contra H11. Mientras
- * H11 no registre su implementación, `fetcher` llega en `null` y se usa el mock.
+ * H11 no registre su implementación, `fetcher` llega en `null` y se usa el
+ * catálogo de arranque, que se abre solo conforme avanza el Ritual.
  */
 export async function resolveAreas(
   fetcher: (() => Promise<AreaSummary[]>) | null,
+  senales: SenalesDelRitual | null = null,
 ): Promise<AreasResult> {
   // Ojo: el registro de herramientas NO se toca aquí. Esto corre en el
   // servidor y el sidebar lee el registro en el cliente — son dos instancias
   // distintas del módulo. Las de respaldo las registra `AppShell`, que sí corre
   // en los dos lados.
-  if (!fetcher) return { source: 'mock', areas: MOCK_AREAS };
+  if (!fetcher) return { source: 'arranque', areas: areasDeArranque(senales) };
 
   try {
     const areas = await fetcher();

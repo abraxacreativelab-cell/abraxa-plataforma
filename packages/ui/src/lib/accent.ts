@@ -36,23 +36,36 @@ import {
  * Acento sugerido por área (handoff H5 §6). Son SUGERENCIAS: el color de marca
  * del emprendedor le gana a cualquiera de éstos.
  *
- * Las cuatro primeras son las áreas de v1 (decisión D5 del plan maestro). RH y
- * Finanzas están declaradas desde ya para que H11 pueda activarlas sin tocar
- * este paquete.
+ * ── De dónde salen los slugs ────────────────────────────────────────────────
  *
- * Los seis tonos están separados **al menos 30° de matiz** y `accent.test.ts` lo
+ * No los inventamos: son los de `app.industry_templates.areas[].slug`, la
+ * semilla que ya vive en la base (migración de H2) y con la que H11 va a
+ * materializar el mapa de cada negocio. Los cinco giros sembrados usan entre
+ * los siete: `ventas`, `marketing`, `operaciones`, `inventario`, `servicio`,
+ * `finanzas` y `direccion`. Consultado en producción el 2026-08-01.
+ *
+ * `onboarding` y `rh` no están en esa semilla y se quedan: son del plan maestro
+ * §5.3 y no cuestan nada tenerlos listos.
+ *
+ * Los nueve tonos están separados **más de 25° de matiz** y `accent.test.ts` lo
  * verifica: dos áreas que se ven del mismo color no distinguen nada. Los tonos
  * obvios de la tabla del handoff no cumplían —el cian de Servicio y la
  * esmeralda de Finanzas quedaban a 14°, indistinguibles en una barra lateral—
  * así que la paleta se redistribuyó conservando el nombre de cada color.
+ *
+ * Ninguno cae cerca del rojo a propósito: el rojo es el estado de error, que es
+ * FIJO, y un área roja al lado de un fallo rojo no distingue nada.
  */
 export const AREA_ACCENTS: Record<string, string> = {
-  direccion: '#f5a524', // dorado    ·  37°
+  inventario: '#b5d651', // lima      ·  75°
   ventas: '#45d351', // verde crecimiento · 125°
   finanzas: '#1abc8c', // esmeralda ·  162°
   servicio: '#20c5ee', // cian      ·  192°
   onboarding: '#5d88ef', // azul    ·  222°
   rh: '#b38cf8', // violeta         ·  262°
+  operaciones: '#db87e8', // orquídea · 292°
+  marketing: '#eb7ac2', // rosa     ·  322°
+  direccion: '#f5a524', // dorado    ·  37°
 };
 
 /**

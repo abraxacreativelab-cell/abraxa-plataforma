@@ -1,7 +1,7 @@
 import type { AreaSummary } from '@abraxa/db/ports';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { __resetRegistry, registerTools } from '../registry/tool-registry';
-import { MOCK_AREAS, registerMockTools } from './mock-areas';
+import { areasDeArranque, registrarHerramientasDeArranque } from './areas-de-arranque';
 import { isNavigable, resolveAreas } from './resolve-areas';
 import { findActiveArea } from '../shell/app-shell';
 
@@ -20,10 +20,20 @@ const area = (over: Partial<AreaSummary>): AreaSummary => ({
 });
 
 describe('resolveAreas — se programa contra el port, no contra H11', () => {
-  it('sin implementación registrada usa el mock y lo dice', async () => {
+  it('sin implementación registrada usa el catálogo de arranque y lo dice', async () => {
     const r = await resolveAreas(null);
-    expect(r.source).toBe('mock');
-    expect(r.areas).toEqual(MOCK_AREAS);
+    expect(r.source).toBe('arranque');
+    expect(r.areas).toEqual(areasDeArranque(null));
+  });
+
+  it('el catálogo de arranque se abre solo conforme avanza el Ritual', async () => {
+    // El enganche que pide el encargo: H7 le pasa el progreso y las áreas se
+    // abren sin que nadie toque el shell.
+    const senales = { faseIndice: 1, fasesTotales: 7, completado: false, agente: 'Chica Guapa' };
+    const sin = await resolveAreas(null);
+    const con = await resolveAreas(null, senales);
+    expect(sin.areas?.filter(isNavigable)).toHaveLength(0);
+    expect(con.areas?.filter(isNavigable).map((a) => a.slug)).toEqual(['ventas']);
   });
 
   it('con implementación usa los datos reales, ordenados por posición', async () => {
@@ -82,22 +92,16 @@ describe('áreas bloqueadas — criterio 5', () => {
     expect(isNavigable(area({ state, access: 'view' }))).toBe(true);
   });
 
-  it('el mock trae al menos un área bloqueada, con promesa', () => {
-    const bloqueadas = MOCK_AREAS.filter((a) => a.state === 'bloqueada');
+  it('el catálogo de arranque trae bloqueadas, y todas con promesa', () => {
+    const bloqueadas = areasDeArranque(null).filter((a) => a.state === 'bloqueada');
     expect(bloqueadas.length).toBeGreaterThan(0);
     for (const a of bloqueadas) {
       expect(a.blurb.length).toBeGreaterThan(20);
     }
   });
 
-  it('los cuatro estados están representados en el mock', () => {
-    expect(new Set(MOCK_AREAS.map((a) => a.state))).toEqual(
-      new Set(['activa', 'en_progreso', 'disponible', 'bloqueada']),
-    );
-  });
-
-  it('todas las áreas del mock traen su promesa', () => {
-    for (const a of MOCK_AREAS) expect(a.blurb.trim()).not.toBe('');
+  it('todas las áreas del catálogo traen su promesa', () => {
+    for (const a of areasDeArranque(null)) expect(a.blurb.trim()).not.toBe('');
   });
 });
 
@@ -129,6 +133,18 @@ describe('findActiveArea — la ruta la manda el registro, no la convención', (
     expect(findActiveArea(areas, '/direccion/lo-que-sea')).toBe('direccion');
   });
 
+  it('un área BLOQUEADA no reclama la ruta', () => {
+    // Si lo hiciera, entrar a /tareas teñiría el shell del color de un área con
+    // candado y la barra superior anunciaría un área en la que no se puede
+    // estar.
+    registerTools({ key: 'ops:tareas', label: 'Tareas', icon: 'tasks', href: '/tareas' });
+    const areas = [
+      area({ slug: 'operaciones', state: 'bloqueada', access: null, tools: ['ops:tareas'] }),
+    ];
+    expect(findActiveArea(areas, '/tareas')).toBeNull();
+    expect(findActiveArea(areas, '/operaciones')).toBeNull();
+  });
+
   it('devuelve null fuera de toda área', () => {
     expect(findActiveArea([area({})], '/ajustes')).toBeNull();
     expect(findActiveArea(null, '/ventas')).toBeNull();
@@ -142,15 +158,18 @@ describe('findActiveArea — la ruta la manda el registro, no la convención', (
   });
 });
 
-describe('las herramientas del mock son navegables hoy', () => {
-  it('todas las claves que anuncia el mock tienen registro de respaldo', () => {
-    registerMockTools();
-    const anunciadas = MOCK_AREAS.filter((a) => a.state !== 'bloqueada').flatMap((a) => a.tools);
+describe('las herramientas del catálogo de arranque son navegables hoy', () => {
+  const senales = { faseIndice: 7, fasesTotales: 7, completado: true, agente: 'Chica Guapa' };
+
+  it('toda clave que anuncia un área abierta tiene registro de respaldo', () => {
+    registrarHerramientasDeArranque();
+    const areas = areasDeArranque(senales);
+    const anunciadas = areas.filter(isNavigable).flatMap((a) => a.tools);
     expect(anunciadas.length).toBeGreaterThan(0);
     for (const clave of anunciadas) {
-      expect(findActiveArea(MOCK_AREAS, '/')).toBeNull();
       expect(clave).toMatch(/^[a-z-]+:[a-z-]+$/);
     }
+    expect(findActiveArea(areas, '/bandeja')).toBe('ventas');
   });
 
   it('el respaldo NO pisa a un handoff que ya registró la suya', () => {
@@ -161,8 +180,8 @@ describe('las herramientas del mock son navegables hoy', () => {
       href: '/bandeja',
       load: async () => ({ default: () => null }),
     });
-    registerMockTools();
-    // Si el mock hubiera ganado, se perdería el componente real de H6.
-    expect(findActiveArea(MOCK_AREAS, '/bandeja')).toBe('ventas');
+    registrarHerramientasDeArranque();
+    // Si el respaldo hubiera ganado, se perdería el componente real de H6.
+    expect(findActiveArea(areasDeArranque(senales), '/bandeja')).toBe('ventas');
   });
 });
