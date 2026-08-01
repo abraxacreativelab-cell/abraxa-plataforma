@@ -11,6 +11,24 @@ import { Roadmap } from './ui/roadmap';
 export const metadata: Metadata = { title: 'Mapa de negocio · ABRAXA Plataforma' };
 
 /**
+ * `/mapa` NUNCA se prerenderiza. Depende de la sesión, y punto.
+ *
+ * Sin esta línea `next build` la marcó `○ (Static)` — se comprobó en la salida
+ * del build. El motivo es de manual: la única lectura de cookie que quedaba en
+ * producción estaba detrás de una salida temprana, así que Next no vio nada
+ * dinámico y horneó el HTML del estado vacío. En producción eso significa
+ * servirle a TODO el mundo, para siempre, la misma pantalla que dice que no
+ * sabemos quién eres — que es literalmente el hallazgo #1 del ensayo, servido
+ * ahora desde una caché.
+ *
+ * Declararlo es más honesto que confiar en que la detección automática nos
+ * salga bien: esta pantalla es el mapa de UNA empresa. No hay versión estática
+ * de eso.
+ */
+export const dynamic = 'force-dynamic';
+
+
+/**
  * `/mapa` — El Mapa de Negocio (H11).
  *
  * Componente de SERVIDOR. Arma el `TenantContext` desde la sesión verificada,

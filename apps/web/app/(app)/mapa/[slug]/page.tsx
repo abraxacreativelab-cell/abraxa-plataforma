@@ -11,6 +11,10 @@ import { Tutorial } from './ui/tutorial';
 
 export const metadata: Metadata = { title: 'Configurar área · ABRAXA Plataforma' };
 
+/** Igual que `/mapa`: depende de la sesión, así que nunca se prerenderiza. */
+export const dynamic = 'force-dynamic';
+
+
 /**
  * `/mapa/[slug]` — el mini-onboarding de un área (H11, handoff §6).
  *
