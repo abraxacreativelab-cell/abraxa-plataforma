@@ -49,19 +49,83 @@ function conReglas(especifico: string): string {
 }
 
 /**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  El proveedor por defecto es OPENROUTER. Decisión de Santiago, 2026-08-01.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * Todo el tráfico del sistema sale por OpenRouter. Las llaves directas de
+ * Anthropic quedan para el futuro: la capacidad se conserva en el código —el
+ * adaptador y el dialecto de `anthropic` siguen enteros— pero NADA NACE
+ * apuntando ahí.
+ *
+ * No es una preferencia: es lo que estaba tumbando el producto. Cada tenant
+ * nuevo nacía con `provider: 'anthropic'` y NO existe `ANTHROPIC_API_KEY` (a
+ * propósito), así que el PRIMER mensaje del Ritual de cada invitado moría con
+ *
+ *     502 PROVIDER_ERROR — "No hay llave para 'anthropic'"
+ *
+ * y no había override global: el proveedor sale exclusivamente de la fila del
+ * agente, así que la única cura era editar la fila a mano, tenant por tenant.
+ *
+ * ── Por qué el modelo se TRADUCE y no se copia ──────────────────────────────
+ *
+ * Cambiar sólo `provider` y dejar el id sin prefijo produce exactamente la
+ * combinación inválida que este carril ya cerró: `provider='openrouter'` con un
+ * id de Anthropic es un 400 «not a valid model ID» del proveedor, a media
+ * corrida y en la cara del cliente final. Cada proveedor nombra al mismo modelo
+ * distinto, y ese par es UNA sola decisión:
+ *
+ *     anthropic   claude-haiku-4-5              sin prefijo, guiones
+ *     openrouter  anthropic/claude-haiku-4.5    vendor/modelo, puntos
+ *
+ * `agent_definitions_provider_model_ck` (migración 027) lo impide a nivel de
+ * base, y `dialectoValido()` lo impide en código. Esto lo respeta traduciendo.
+ */
+const A_OPENROUTER: Readonly<Record<string, string>> = {
+  'claude-sonnet-5': 'anthropic/claude-sonnet-5',
+  'claude-haiku-4-5': 'anthropic/claude-haiku-4.5',
+};
+
+/**
+ * El id del catálogo en el dialecto de OpenRouter.
+ *
+ * Falla RUIDOSO ante un modelo sin traducción, y es deliberado: un id sin
+ * equivalente conocido caería en `cost_source='unpriced'`, y una corrida sin
+ * precio deja CIEGO al tope de gasto —el hueco que este carril ya cerró una vez—.
+ * Los dos pares de arriba tienen precio verificado en `app.model_pricing`:
+ * $3/$15 el sonnet y $1/$5 el haiku. Si mañana `@abraxa/config` estrena un
+ * modelo, esto revienta al arrancar en vez de facturar a ciegas.
+ */
+function enOpenRouter(modeloDelCatalogo: string): string {
+  const traducido = A_OPENROUTER[modeloDelCatalogo];
+  if (!traducido) {
+    throw new Error(
+      `No hay id de OpenRouter para '${modeloDelCatalogo}'. Agrégalo a A_OPENROUTER ` +
+        `(packages/agents/src/definitions/defaults.ts) y siembra su precio en ` +
+        `app.model_pricing, o el tope de gasto nacerá ciego para ese modelo.`,
+    );
+  }
+  return traducido;
+}
+
+/** El proveedor con el que nace todo. Ver el bloque de arriba. */
+const PROVEEDOR_POR_DEFECTO: ProviderName = 'openrouter';
+
+/**
  * Las semillas.
  *
  * Los modelos salen de `DEFAULT_MODEL_BY_ROLE` de `@abraxa/config` (H1) para
- * que no haya dos listas que se puedan desincronizar. Y de todas formas la fila
- * de DB manda: esto es sólo con qué nace.
+ * que no haya dos listas que se puedan desincronizar — traducidos al dialecto
+ * del proveedor. Y de todas formas la fila de DB manda: esto es sólo con qué
+ * nace.
  */
 export function semillasPorDefecto(nombreDelMaestro = 'tu asistente'): SemillaAgente[] {
   return [
     {
       role: 'master',
       name: nombreDelMaestro,
-      provider: 'anthropic',
-      model: DEFAULT_MODEL_BY_ROLE.master,
+      provider: PROVEEDOR_POR_DEFECTO,
+      model: enOpenRouter(DEFAULT_MODEL_BY_ROLE.master),
       tools: [],
       systemPrompt: conReglas(`
 Eres el agente maestro de esta empresa y hablas con SU DUEÑO, no con sus
@@ -80,8 +144,8 @@ Cómo trabajas:
     {
       role: 'sales',
       name: 'Ventas',
-      provider: 'anthropic',
-      model: DEFAULT_MODEL_BY_ROLE.sales,
+      provider: PROVEEDOR_POR_DEFECTO,
+      model: enOpenRouter(DEFAULT_MODEL_BY_ROLE.sales),
       tools: [],
       systemPrompt: conReglas(`
 Atiendes a personas que preguntan por lo que vende este negocio. Tu trabajo es
@@ -97,8 +161,8 @@ Cómo trabajas:
     {
       role: 'service',
       name: 'Servicio',
-      provider: 'anthropic',
-      model: DEFAULT_MODEL_BY_ROLE.service,
+      provider: PROVEEDOR_POR_DEFECTO,
+      model: enOpenRouter(DEFAULT_MODEL_BY_ROLE.service),
       tools: [],
       systemPrompt: conReglas(`
 Atiendes a clientes que YA compraron. Dudas, seguimiento, problemas.
@@ -112,8 +176,8 @@ Cómo trabajas:
     {
       role: 'social',
       name: 'Redes',
-      provider: 'anthropic',
-      model: DEFAULT_MODEL_BY_ROLE.social,
+      provider: PROVEEDOR_POR_DEFECTO,
+      model: enOpenRouter(DEFAULT_MODEL_BY_ROLE.social),
       tools: [],
       systemPrompt: conReglas(`
 Contestas mensajes y comentarios que llegan por redes sociales.
@@ -127,8 +191,8 @@ Cómo trabajas:
     {
       role: 'analyst',
       name: 'Analista',
-      provider: 'anthropic',
-      model: DEFAULT_MODEL_BY_ROLE.analyst,
+      provider: PROVEEDOR_POR_DEFECTO,
+      model: enOpenRouter(DEFAULT_MODEL_BY_ROLE.analyst),
       tools: [],
       systemPrompt: conReglas(`
 Analizas los datos del negocio y propones mejoras concretas. No hablas con

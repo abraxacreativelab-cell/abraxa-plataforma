@@ -4,6 +4,7 @@
  * ════════════════════════════════════════════════════════════════════════════
  *
  *      1. definición    ← fila de app.agent_definitions   (no un YAML del disco)
+ *     1b. lista blanca  ← ¿a ese proveedor se le puede mandar? (frontera de DATOS)
  *      2. presupuesto   ← lanza ANTES de gastar           (no degrada en silencio)
  *      3. precio        ← lanza ANTES de gastar si el modelo es conocido y no
  *                         tiene precio vigente            (si no, el tope es ciego)
@@ -46,6 +47,7 @@ import type { PricingCatalog } from './pricing/catalog';
 import { createPricingCatalog } from './pricing/catalog';
 import { decidirCache } from './prompt/cache';
 import { componerPrompt } from './prompt/compose';
+import { modeloPermitido, razonDeBloqueo } from './providers/allowlist';
 import { resolverLlave } from './providers/keys';
 import type { ProviderRouter } from './providers/router';
 import { createProviderRouter } from './providers/router';
@@ -93,6 +95,23 @@ export function createAgentService(opciones: OpcionesServicio = {}): AgentPort {
 
       // ── 1. La definición. De la base, no del disco. ──────────────────────
       const def = await obtenerDefinicion(ctx, i.role);
+
+      // ── 1b. ¿A ese proveedor se le puede mandar esto? ────────────────────
+      // Va AQUÍ —en cuanto se elige el modelo y antes de absolutamente todo lo
+      // demás— y no en el adaptador. La diferencia no es de estilo: al fallar
+      // en esta línea no se verifica presupuesto, no se resuelve la llave, no
+      // se compone el prompt (que es donde se junta la bóveda del cliente con
+      // su conversación), no se toca al proveedor y NO se escribe fila en el
+      // ledger. Un bloqueo en el adaptador ya habría armado el cuerpo con la
+      // conversación del cliente dentro.
+      //
+      // Es una frontera de DATOS, no una preferencia técnica: acota en qué
+      // países se procesan las conversaciones. Ver providers/allowlist.ts.
+      if (!modeloPermitido(def.model, def.provider)) {
+        throw new PlatformError('VALIDATION', razonDeBloqueo(def.model, def.provider), {
+          details: { provider: def.provider, model: def.model, role: def.role },
+        });
+      }
 
       // ── 2. El presupuesto. Antes de gastar un solo token. ────────────────
       // Lanza BUDGET_EXCEEDED o RATE_LIMITED. No hay degradación silenciosa a

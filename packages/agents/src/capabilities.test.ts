@@ -14,6 +14,7 @@ import {
   esConocido,
   modelosConocidos,
 } from './capabilities';
+import { modeloPermitido } from './providers/allowlist';
 
 describe('capacidades por modelo', () => {
   it('Haiku 4.5 NO acepta effort — es el 400 que tumba a los tres sub-agentes', () => {
@@ -96,13 +97,21 @@ describe('capacidades por modelo', () => {
 
   describe('dialectoValido — más laxo que esConocido, y a propósito', () => {
     it('acepta un modelo de OpenRouter que NO está en el catálogo', () => {
-      // `deepseek/deepseek-chat` y `google/gemini-2.5-flash` no están tabulados
-      // en capabilities.ts y sí tienen precio desde la migración 021. Si la
-      // validación de escritura exigiera `esConocido`, estrenar un modelo
+      // El dialecto valida la FORMA del id, no que el modelo esté tabulado. Si
+      // la validación de escritura exigiera `esConocido`, estrenar un modelo
       // pediría un deploy — que es exactamente lo que H3 vino a matar.
+      expect(dialectoValido('anthropic/claude-opus-6', 'openrouter')).toBe(true);
+      expect(esConocido('anthropic/claude-opus-6', 'openrouter')).toBe(false);
+    });
+
+    it('el dialecto NO opina sobre el proveedor: para eso está la lista blanca', () => {
+      // `deepseek/deepseek-chat` es un id de OpenRouter perfectamente formado, y
+      // `dialectoValido` dice que sí — correctamente. Lo que lo detiene es la
+      // lista blanca de `providers/allowlist.ts`, que es una frontera de DATOS
+      // (dónde se procesa la conversación), no de sintaxis. Confundir las dos
+      // puertas es lo que dejó entrar esas corridas al ledger.
       expect(dialectoValido('deepseek/deepseek-chat', 'openrouter')).toBe(true);
-      expect(dialectoValido('google/gemini-2.5-flash', 'openrouter')).toBe(true);
-      expect(esConocido('deepseek/deepseek-chat', 'openrouter')).toBe(false);
+      expect(modeloPermitido('deepseek/deepseek-chat', 'openrouter')).toBe(false);
     });
 
     it('rechaza el par que el proveedor contesta con 400', () => {

@@ -37,7 +37,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { ProviderName } from '@abraxa/db';
 import { modelosConocidos } from '../capabilities';
+import { modeloPermitido } from '../providers/allowlist';
 import { PRECIO_DE_PISO } from './compute';
 
 const DIR_MIGRACIONES = join(dirname(fileURLToPath(import.meta.url)), '../../../../migrations');
@@ -67,9 +69,22 @@ interface FilaSembrada {
  */
 function filasSembradas(dir = DIR_MIGRACIONES): FilaSembrada[] {
   const filas: FilaSembrada[] = [];
+  const borradas = new Set<string>();
 
   for (const archivo of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
     const sql = readFileSync(join(dir, archivo), 'utf8');
+
+    // Los DELETE se acumulan aparte y se aplican al final. Se leen en el mismo
+    // barrido —y en orden— porque lo que importa no es lo que se sembró alguna
+    // vez, sino lo que queda VIVO en la base: una semilla insertada por la 021
+    // y borrada por la 028 no está en producción, y una prueba que la contara
+    // estaría midiendo el archivo en vez del esquema.
+    if (/DELETE\s+FROM\s+app\.model_pricing/i.test(sql)) {
+      const tuplaBorrada = /\(\s*'(anthropic|openrouter|local)'\s*,\s*'([^']+)'\s*\)/gi;
+      const bloque = sql.slice(sql.search(/DELETE\s+FROM\s+app\.model_pricing/i));
+      for (const m of bloque.matchAll(tuplaBorrada)) borradas.add(`${m[1]}::${m[2]}`);
+    }
+
     // Sólo los bloques que insertan en model_pricing.
     if (!/INSERT\s+INTO\s+app\.model_pricing/i.test(sql)) continue;
 
@@ -91,16 +106,24 @@ function filasSembradas(dir = DIR_MIGRACIONES): FilaSembrada[] {
     }
   }
 
-  return filas;
+  return filas.filter((f) => !borradas.has(`${f.provider}::${f.model}`));
 }
 
 describe('semillas de precio vs. catálogo de capacidades', () => {
   const filas = filasSembradas();
 
   it('el parseo encuentra las semillas (si no, todo lo demás es un falso verde)', () => {
-    // Guardia del guardián: una prueba que no lee nada pasa siempre.
-    expect(filas.length).toBeGreaterThanOrEqual(10);
+    // Guardia del guardián: una prueba que no lee nada pasa siempre. Se
+    // comprueban las tres cosas que el parser tiene que saber hacer, porque si
+    // falla cualquiera de ellas el resto de la suite miente en verde.
+    expect(filas.length).toBeGreaterThanOrEqual(8);
+    // 1. lee los INSERT de la 021…
     expect(filas.some((f) => f.model === 'claude-opus-5')).toBe(true);
+    // 2. …y también los de migraciones posteriores (la 025)…
+    expect(filas.some((f) => f.model === 'claude-sonnet-4-6')).toBe(true);
+    // 3. …y APLICA los DELETE (la 028), que es lo que hace que estas filas
+    //    reflejen el esquema desplegado y no el historial de los archivos.
+    expect(filas.some((f) => f.model === 'deepseek/deepseek-chat')).toBe(false);
   });
 
   it('TODO modelo del catálogo tiene precio sembrado para anthropic', () => {
@@ -133,6 +156,28 @@ describe('semillas de precio vs. catálogo de capacidades', () => {
     // hoy caiga en 'unpriced'. La 021 siembra dos filas de Sonnet 5 justo por
     // esto: la introductoria arranca en 2026-01-01, no en septiembre.
     expect(modelosConocidos().filter((m) => !vigentes.has(m))).toEqual([]);
+  });
+
+  it('NINGUNA semilla viva queda fuera de la lista blanca de proveedores', () => {
+    // Sembrar un precio es afirmar que ese proveedor está autorizado a procesar
+    // conversaciones de clientes. Ésa es la afirmación que hizo parecer
+    // soportados a DeepSeek y Google: eran los únicos modelos no-Anthropic
+    // nombrados en todo el repositorio, sembrados con precio, y el propio
+    // paquete los citaba como razón para dejar pasar ids no-Anthropic.
+    //
+    // Con las semillas de la 021 y sin el DELETE de la 028, esta línea falla
+    // con ['openrouter/deepseek/deepseek-chat', 'openrouter/google/gemini-2.5-flash'].
+    const fuera = filas
+      .filter((f) => !modeloPermitido(f.model, f.provider as ProviderName))
+      .map((f) => `${f.provider}/${f.model}`);
+
+    expect(
+      fuera,
+      `Estas semillas de app.model_pricing están fuera de la lista blanca de ` +
+        `providers/allowlist.ts. Un precio sembrado hace parecer soportado a un ` +
+        `proveedor, y cada proveedor abierto hay que declararlo en el tratamiento ` +
+        `de datos. Bórralas en una migración nueva o abre la lista a propósito.`,
+    ).toEqual([]);
   });
 
   it('el precio de piso sigue siendo el MÁS CARO de lo sembrado', () => {
