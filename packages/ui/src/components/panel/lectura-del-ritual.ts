@@ -102,7 +102,11 @@ export function llamadaDelPanel(
       titulo: 'Tu Ritual está completo',
       texto: `${quien} ya conoce tu negocio de punta a punta. Tu Mapa de Negocio está listo.`,
       boton: 'Ver tu Mapa de Negocio',
-      href: '/ritual',
+      // A `/mapa`, no a `/ritual`. El botón se llama «Ver tu Mapa de Negocio» y
+      // llevaba de vuelta a la entrevista que el emprendedor ACABA de terminar
+      // —el único enlace del panel que prometía una cosa y hacía otra—. El mapa
+      // es la pantalla de H11 y desde el panel no había forma de llegar a ella.
+      href: '/mapa',
     };
   }
 

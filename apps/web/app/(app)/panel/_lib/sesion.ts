@@ -110,7 +110,18 @@ export async function quienEntra(): Promise<QuienEntra | null> {
  */
 async function contextoDe(userEmail: string, tenantSlug: string): Promise<TenantContext | null> {
   try {
-    const tenancy = tryPort('tenancy');
+    // Un port se registra como EFECTO de importar el paquete que lo publica, y
+    // `apps/web` no importa `@abraxa/tenancy` en ninguna parte —lo hace
+    // `apps/api`, que es otro proceso—. Así que `tryPort` devolvía `null`
+    // siempre, este archivo se rendía antes de preguntar nada, y el panel salía
+    // genérico para todo el mundo, incluido quien tenía el Ritual al 100%.
+    //
+    // Se importa a demanda: si nadie lo registró, se registra aquí.
+    let tenancy = tryPort('tenancy');
+    if (!tenancy) {
+      await import('@abraxa/tenancy');
+      tenancy = tryPort('tenancy');
+    }
     if (!tenancy) return null;
     return await tenancy.contextFor({ userEmail, tenantSlug });
   } catch {
