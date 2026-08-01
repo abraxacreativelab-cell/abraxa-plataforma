@@ -1,4 +1,4 @@
-import type { Foto, Mapa, Turno, Vista } from '../lib/tipos';
+import type { Ayuda, Foto, Mapa, Turno, Vista } from '../lib/tipos';
 
 /**
  * Datos de ejemplo para la vista previa. **No hay motor detrás**: es un
@@ -17,17 +17,63 @@ const t = (role: Turno['role'], content: string, fase: Turno['fase'] = 'dolor'):
   fase,
 });
 
+/**
+ * La ayuda de la fase esencial, tal como la manda el servidor.
+ *
+ * Copiada a mano de `packages/onboarding/src/interview/ayudas.ts` porque esto
+ * es un storyboard sin motor: la pantalla de verdad la recibe del servidor y
+ * jamás la escribe. Si estas dos se separan, la que manda es la del paquete.
+ */
+export const AYUDA_CATEGORIA: Ayuda = {
+  clave: 'categoria',
+  titulo: 'Toca la que más se parezca',
+  opciones: [
+    { etiqueta: 'Taquería o restaurante', valor: 'Es una taquería / restaurante' },
+    { etiqueta: 'Consultorio o salud', valor: 'Es un consultorio o algo de salud' },
+    { etiqueta: 'Tienda o retail', valor: 'Es una tienda / retail' },
+    { etiqueta: 'Servicios profesionales', valor: 'Doy servicios profesionales' },
+    { etiqueta: 'Belleza o estética', valor: 'Es de belleza / estética' },
+    { etiqueta: 'Oficio o reparación', valor: 'Es un oficio o reparación' },
+  ],
+  multiple: false,
+  abierta: true,
+  ejemplos: [],
+};
+
+export const AYUDA_DOLORES: Ayuda = {
+  clave: 'dolores',
+  titulo: 'Piensa en el peor sábado del año',
+  opciones: [],
+  multiple: false,
+  abierta: true,
+  ejemplos: [
+    'Los sábados me llegan 20 mensajes y contesto hasta la noche; ya perdí pedidos',
+    'No sé cuánto me queda al mes: junto los tickets y nunca los sumo',
+    'Cuando me enfermo no cotiza nadie y la semana se me cae completa',
+  ],
+};
+
+export const AYUDA_AGENTE: Ayuda = {
+  clave: 'agente',
+  titulo: 'O escoge uno de estos',
+  opciones: ['Sol', 'Tadeo', 'Nica', 'Lupita', 'Emi'].map((n) => ({ etiqueta: n, valor: n })),
+  multiple: false,
+  abierta: true,
+  ejemplos: [],
+};
+
 export const VISTA: Vista = {
   fase: 'dolor',
-  faseIndice: 4,
+  faseIndice: 5,
   fasesTotales: 7,
-  progreso: 57,
+  progreso: 71,
   tituloDeFase: 'Dónde se rompe',
   status: 'activa',
   agente: 'Aura',
   turnos: 11,
   checkpointAt: AT,
   faltante: ['al menos un hueco que TÚ detectaste atacando su proceso y que él no había pedido'],
+  ayuda: AYUDA_DOLORES,
 };
 
 export const CONVERSACION: Turno[] = [

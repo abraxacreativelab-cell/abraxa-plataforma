@@ -14,6 +14,8 @@ import type { EstadoNegocio, Fase } from '../types';
 
 const NEGOCIO_COMPLETO: EstadoNegocio = {
   agente: 'Aura',
+  categoria: 'Es una panadería',
+  equipo: 'Somos de 2 a 5',
   giro: 'panadería',
   nicho: 'cafeterías',
   etapa: 'operando',
@@ -78,7 +80,8 @@ describe('criterio #6 — una fase no avanza sin sus datos', () => {
 
   it('avanza cuando la fase reúne todo', () => {
     const cruda =
-      '[DATO:giro=taller][DATO:nicho=flotillas][DATO:etapa=operando][DATO:tamano=30 al mes][FASE_COMPLETA:identidad]';
+      '[DATO:categoria=Es un taller][DATO:equipo=Somos de 2 a 5][DATO:giro=taller]' +
+      '[DATO:etapa=operando][FASE_COMPLETA:identidad]';
     const r = aplicarTurno('identidad', {}, cruda);
 
     expect(r.fase).toBe('modelo');
@@ -143,25 +146,27 @@ describe('el avance no depende de que el modelo emita el marcador', () => {
       {
         fase: 'identidad',
         cruda:
-          '[DATO:giro=taquería][DATO:nicho=oficinistas][DATO:etapa=operando][DATO:tamano=80 al día]',
+          '[DATO:categoria=Es una taquería][DATO:equipo=Somos de 2 a 5]' +
+          '[DATO:giro=taquería de suadero][DATO:etapa=operando]',
       },
       {
         fase: 'modelo',
         cruda:
-          '[DATO:modelo_ingreso=venta en mostrador][DATO:ticket=120][DATO:margen=40%][LISTA:canales=whatsapp, mostrador]',
+          '[DATO:nicho=oficinistas][DATO:modelo_ingreso=venta en mostrador][DATO:ticket=120]' +
+          '[DATO:margen=40%][LISTA:canales=whatsapp, mostrador]',
       },
       {
         fase: 'proceso',
         cruda:
           '[PASO:llegan|de boca en boca][PASO:piden|en el mostrador][PASO:pagan|efectivo][LISTA:herramientas=libreta]',
       },
+      { fase: 'gente', cruda: '[DATO:equipo_detalle=él cocina y dos ayudantes despachan]' },
       {
         fase: 'dolor',
         cruda:
           '[DOLOR:pierde pedidos del WhatsApp|ventas][DOLOR:no sabe qué se vende más|direccion]' +
           '[HITO:ventas|Los pedidos de WhatsApp entran solos|hoy se le pierden]',
       },
-      { fase: 'gente', cruda: '[DATO:equipo=él y dos ayudantes]' },
     ];
 
     let estado: EstadoNegocio = {};
@@ -186,8 +191,9 @@ describe('el avance no depende de que el modelo emita el marcador', () => {
 
   it('dice exactamente qué falta, en palabras que el agente puede usar', () => {
     expect(faltantesDe('modelo', { ticket: '500' })).toEqual([
+      'a quién le vende (su nicho o tipo de cliente)',
       'cómo gana dinero exactamente',
-      'qué margen le deja, aunque sea aproximado',
+      'qué margen le deja, aunque sea aproximado o un "no lo sé"',
       'por dónde le llegan los clientes hoy',
     ]);
   });
@@ -207,7 +213,7 @@ describe('el avance no depende de que el modelo emita el marcador', () => {
   });
 });
 
-describe('criterio #8 — la fase 4 saca algo que él no pidió', () => {
+describe('criterio #8 — la fase del dolor saca algo que él no pidió', () => {
   it('no cierra la fase de dolor si sólo se recogieron quejas', () => {
     const conDolores: EstadoNegocio = {
       dolores: [{ texto: 'me falta tiempo' }, { texto: 'cobro tarde' }],
@@ -218,7 +224,7 @@ describe('criterio #8 — la fase 4 saca algo que él no pidió', () => {
     ]);
   });
 
-  it('un hito nacido en la fase 4 se marca como del abogado del diablo', () => {
+  it('un hito nacido en la fase del dolor se marca como del abogado del diablo', () => {
     const r = aplicarTurno(
       'dolor',
       { dolores: [{ texto: 'uno' }, { texto: 'dos' }] },
@@ -227,7 +233,8 @@ describe('criterio #8 — la fase 4 saca algo que él no pidió', () => {
 
     expect(r.estado.hitos?.[0]?.origen).toBe('abogado_del_diablo');
     expect(r.avanzo).toBe(true);
-    expect(r.fase).toBe('gente');
+    // 'dolor' es ahora la última fase de preguntas: cerrarla entrega el mapa.
+    expect(r.fase).toBe('sintesis');
   });
 
   it('el mismo hito en otra fase NO se atribuye al abogado del diablo', () => {

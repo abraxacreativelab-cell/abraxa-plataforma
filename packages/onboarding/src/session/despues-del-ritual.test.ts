@@ -64,7 +64,7 @@ afterEach(() => {
 /** Deja el Ritual COMPLETADO, como lo dejaría un invitado del evento. */
 async function ritualTerminado(): Promise<ReturnType<typeof ctxDePrueba>> {
   const ctx = ctxDePrueba();
-  agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO, PROCESO, DOLOR, GENTE, ENTREGA);
+  agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO, PROCESO, GENTE, DOLOR, ENTREGA);
 
   await iniciar(ctx);
   for (const dicho of [
@@ -72,8 +72,8 @@ async function ritualTerminado(): Promise<ReturnType<typeof ctxDePrueba>> {
     'pan artesanal',
     'cobro por pedido semanal',
     'me escriben por WhatsApp',
+    'mi hermano entrega los lunes',
     'los domingos se me juntan',
-    'estoy solo',
   ]) {
     await responder(ctx, dicho);
   }
