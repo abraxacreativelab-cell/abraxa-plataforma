@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { loadMap, type BusinessMap } from '@abraxa/areas';
-import { Badge, Button, Card, EmptyState, Icon } from '@abraxa/ui';
+import { Badge, Button, Card, EmptyState, Icon, LoadError } from '@abraxa/ui';
 import { contextoDelMapa, motivoSinContexto } from './context';
 import { mapaDemo } from './demo';
 import { AreaCardView } from './ui/area-card';
@@ -50,8 +50,39 @@ export default async function Page() {
   const ctx = await contextoDelMapa();
 
   if (ctx) {
-    const map = await loadMap(ctx);
-    return <Mapa map={map} editable demo={null} />;
+    // ── Por qué esto va dentro de un `try` ───────────────────────────────────
+    //
+    // Porque ésta es LA pantalla a la que llega el invitado al terminar el
+    // Ritual, y una excepción aquí es la pantalla de error de Next: fondo
+    // blanco, «Application error», y veinte minutos de conversación tirados en
+    // el último metro. Cualquier cosa —la base sin responder, una migración que
+    // no se aplicó en este entorno, un requisito raro— tiene que degradar a algo
+    // que se pueda leer y que ofrezca a dónde ir.
+    //
+    // El mensaje NO dice qué se rompió. No porque se esconda, sino porque el
+    // detalle sólo le sirve a quien puede arreglarlo, y ése no es él.
+    try {
+      const map = await loadMap(ctx);
+      return <Mapa map={map} editable demo={null} />;
+    } catch {
+      return (
+        <main className="mx-auto w-full max-w-2xl px-6 py-24">
+          <LoadError
+            description={
+              'No pudimos armar tu mapa en este momento. Es cosa nuestra, no tuya, y no se ' +
+              'perdió nada de lo que trabajaste. Vuelve a cargar en un minuto.'
+            }
+          />
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Mientras tanto, tu agente sigue disponible:{' '}
+            <Link href="/ritual" className="underline underline-offset-4 hover:text-foreground">
+              seguir la conversación
+            </Link>
+            .
+          </p>
+        </main>
+      );
+    }
   }
 
   // ── Sin sesión verificada ────────────────────────────────────────────────
