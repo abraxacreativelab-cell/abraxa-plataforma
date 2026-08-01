@@ -58,7 +58,8 @@ export {
 
 // ── La máquina de estados ───────────────────────────────────────────────────
 export { aplicarTurno, type ResultadoDelTurno } from './interview/maquina';
-export { faltantesDe, puedeCerrar, requisitosDe } from './interview/cierre';
+export { faltantesDe, primerFaltante, puedeCerrar, requisitosDe } from './interview/cierre';
+export { ayudaDe, ayudaDelTurno, bloqueDeAyuda } from './interview/ayudas';
 export { FASES, FICHAS, indiceDeFase, progresoDe, siguienteFase } from './interview/fases';
 export {
   MARCADORES,
@@ -98,6 +99,30 @@ export {
 } from './synthesis/blueprint';
 export { bautizarAgente, sembrarBoveda, sembrarGiro } from './synthesis/entrega';
 
+// ── Leer su página, sin volverse el proxy de nadie ──────────────────────────
+export {
+  clasificarEnlace,
+  comoLoDiriaEl,
+  esHostPrivado,
+  esIpv4Privada,
+  esIpv6Privada,
+  extraerDeLaPagina,
+  hayTextoUtil,
+  jsonDeLaRespuesta,
+  leerPagina,
+  leerSuSitio,
+  normalizarUrl,
+  paraElModelo,
+  propuestasDe,
+  revisarUrl,
+  textoDe,
+  tituloDe,
+  type FalloDeLectura,
+  type MotivoRechazo,
+  type ResultadoDeLectura,
+  type Revision,
+} from './sitio';
+
 // ── El contrato que le falta a AreasPort. Lo implementa H11. ────────────────
 export {
   blueprintSink,
@@ -109,18 +134,23 @@ export {
 // ── Vocabulario ─────────────────────────────────────────────────────────────
 export type {
   AreaDelMapa,
+  AyudaDeRespuesta,
   BlueprintGuardado,
   Dolor,
   EstadoNegocio,
   EstadoSesion,
   Fase,
   Hito,
+  LecturaDelSitio,
   MapaDeNegocio,
+  OpcionRapida,
   PasoDelProceso,
   PropuestaDeArea,
+  PropuestaDelSitio,
   RequisitoDeArea,
   RespuestaDelRitual,
   SesionRitual,
+  TipoDeEnlace,
   TurnoTranscrito,
   VistaDelRitual,
 } from './types';

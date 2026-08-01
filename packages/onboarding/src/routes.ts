@@ -33,6 +33,7 @@ import { tieneMarcadores } from './interview/marcadores';
 import { log } from './logger';
 import { haySink } from './ports/blueprint-sink';
 import { fotoDelRitual, iniciar, pausar, responder } from './session/ritual';
+import { leerSuSitio } from './sitio';
 import { aplicarBlueprintsPendientes, blueprintVigente } from './synthesis/blueprint';
 
 export const router: Router = Router();
@@ -132,6 +133,40 @@ router.post(
 
     const r = await responder(await contextoDePeticion(req), texto, { turnoId });
     res.json({ ...r, mensaje: sinMarcadores(r.mensaje) });
+  }),
+);
+
+/**
+ * «Pégame tu página y te ahorro preguntas.»
+ *
+ * ── Lo que este endpoint NO hace, y es lo importante ───────────────────────
+ *
+ * No escribe NADA. Ni en la sesión, ni en el estado del negocio, ni en la
+ * bóveda. Lee una página, le pregunta al modelo qué dice y devuelve propuestas
+ * que el invitado tiene que confirmar. Cuando confirma, lo que viaja es un
+ * turno normal por `/ritual/turno` — o sea que las condiciones de cierre de
+ * `cierre.ts` se aplican igual que si lo hubiera tecleado.
+ *
+ * Esa separación es a propósito: un camino de escritura paralelo que llenara el
+ * estado desde una página web podría cerrar fases con datos que su dueño nunca
+ * vio, y "esto lo saqué de tu página" dejaría de ser cierto.
+ *
+ * Es también el único punto del Ritual que sale a internet, así que el guardia
+ * de SSRF vive completo en `sitio/url.ts` y `sitio/leer.ts`, con sus pruebas.
+ */
+router.post(
+  '/ritual/sitio',
+  manejar(async (req, res) => {
+    const body = req.body as { url?: unknown } | undefined;
+    const crudo = typeof body?.url === 'string' ? body.url.trim() : '';
+
+    // El tope es contra una URL de 2 MB, no contra un usuario: nada legítimo
+    // pasa de aquí, y un cuerpo enorme sólo sirve para hacer trabajar al proceso.
+    if (!crudo || crudo.length > 2000) {
+      throw new PlatformError('VALIDATION', 'Pégame la dirección de tu página o tu Instagram.');
+    }
+
+    res.json(await leerSuSitio(await contextoDePeticion(req), crudo));
   }),
 );
 
