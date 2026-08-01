@@ -78,32 +78,59 @@ export interface EstadoNegocio {
   /** El nombre que el emprendedor le puso a SU agente. */
   agente?: string;
 
-  // fase 1 — identidad
+  // fase 1 — lo esencial
+  /**
+   * La categoría gruesa del negocio, de un toque.
+   *
+   * Es el primer dato del Ritual desde el 2026-08-01 y existe justamente por
+   * eso: es lo único de la identidad de una empresa que se puede contestar con
+   * el pulgar. "Taquería o restaurante" no es el giro —eso lo cuenta él con sus
+   * palabras dos preguntas después— pero es suficiente para que el mapa deje de
+   * ser genérico si el invitado se sale en el minuto uno.
+   */
+  categoria?: string;
   giro?: string;
-  nicho?: string;
   /** idea | primeros_clientes | operando | creciendo */
   etapa?: string;
-  tamano?: string;
+  /**
+   * Cuánta gente son hoy, en cubetas: "solo yo", "2 a 5", "6 a 20", "más de 20".
+   *
+   * Vive en la fase 1 desde el 2026-08-01 —antes cerraba la fase de gente— y el
+   * motivo es de producto: el número de empleados se contesta con un botón y
+   * cambia el mapa (el área de Equipo nace abierta o con candado según esto).
+   * Un dato de un segundo que mueve el resultado va al principio, no al final.
+   */
+  equipo?: string;
 
   // fase 2 — modelo
+  nicho?: string;
   /** Cómo gana dinero: por proyecto, por mensualidad, por comisión… */
   modeloIngreso?: string;
   ticket?: string;
   margen?: string;
   /** Canales por los que le llegan clientes hoy. */
   canales?: string[];
+  /**
+   * Volumen de hoy: clientes al mes, ventas, lo que él use de medida.
+   *
+   * Dejó de ser condición de cierre el 2026-08-01. No se pierde —se sigue
+   * guardando cuando lo suelta, y sigue viajando al agente y al documento
+   * madre—; lo que se quitó es el poder de detener la entrevista, porque es el
+   * único dato de la fase que no se puede contestar con el pulgar y que además
+   * ya está implícito en el ticket y en el giro.
+   */
+  tamano?: string;
 
   // fase 3 — proceso
   recorrido?: PasoDelProceso[];
   herramientas?: string[];
 
-  // fase 4 — dolor
-  dolores?: Dolor[];
-
-  // fase 5 — gente
-  /** solo | equipo | contratando */
-  equipo?: string;
+  // fase 4 — gente
+  /** Quién hace qué, o qué sería lo primero que soltaría si pudiera pagarle a alguien. */
   equipoDetalle?: string;
+
+  // fase 5 — dolor
+  dolores?: Dolor[];
 
   // transversal
   hitos?: Hito[];
@@ -228,6 +255,48 @@ export interface BlueprintGuardado extends MapaDeNegocio {
 // Lo que devuelve un turno
 // ════════════════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════════════════
+// Las ayudas de respuesta
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Un botón de respuesta rápida. */
+export interface OpcionRapida {
+  /** Lo que se manda como si él lo hubiera escrito. */
+  valor: string;
+  /** Lo que se lee en el botón. Corto: cabe en un pulgar. */
+  etiqueta: string;
+}
+
+/**
+ * Lo que la pantalla le ofrece al invitado para contestar sin teclado.
+ *
+ * ── Por qué esto es un DATO y no una lista escondida en la UI ──────────────
+ *
+ * Porque hay dos lectores y tienen que ver lo mismo. La pantalla pinta los
+ * botones; el guion se los dice al modelo para que su pregunta sea la que esos
+ * botones contestan. Con la lista en el `.tsx`, el agente preguntaba una cosa y
+ * el invitado veía botones de otra —y el que se ve mal es el agente—.
+ *
+ * Una sola tabla (`interview/ayudas.ts`), dos consumidores.
+ */
+export interface AyudaDeRespuesta {
+  /** El dato que esta ayuda viene a llenar: `categoria`, `equipo`, `giro`… */
+  clave: string;
+  /** Encabezado corto arriba de los botones. */
+  titulo: string;
+  opciones: OpcionRapida[];
+  /** `true` si puede elegir varias (canales, herramientas). */
+  multiple: boolean;
+  /** `true` si además puede escribir lo suyo. Los botones ayudan, no encierran. */
+  abierta: boolean;
+  /**
+   * Ejemplos VISIBLES para una pregunta abierta. No son marcadores de posición:
+   * se leen, enseñan qué clase de respuesta sirve y se pueden tocar para usarlos
+   * como punto de partida.
+   */
+  ejemplos: string[];
+}
+
 export interface VistaDelRitual {
   fase: Fase;
   faseIndice: number;
@@ -242,6 +311,46 @@ export interface VistaDelRitual {
   checkpointAt: string | null;
   /** Qué le falta a la fase actual para cerrar. La UI lo puede enseñar. */
   faltante: string[];
+  /** Botones y ejemplos para el dato que se está pidiendo AHORA. */
+  ayuda: AyudaDeRespuesta | null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Leer su página
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Un dato que salió de su página y que él todavía no ha confirmado.
+ *
+ * Nada de esto entra al estado del negocio por su cuenta: se le enseña, lo
+ * corrige si hace falta y sólo entonces se manda como si lo hubiera dicho él.
+ * Un dato que el sistema da por cierto sin que el dueño lo vea es un dato que
+ * el dueño va a desmentir en la primera conversación con su agente.
+ */
+export interface PropuestaDelSitio {
+  /** `categoria`, `giro`, `nicho`, `canales`… */
+  clave: string;
+  /** Cómo se le nombra al invitado. */
+  etiqueta: string;
+  valor: string;
+}
+
+export type TipoDeEnlace = 'sitio' | 'red-social';
+
+export interface LecturaDelSitio {
+  /** La URL que de verdad se leyó, ya normalizada. */
+  url: string;
+  tipo: TipoDeEnlace;
+  /** `@lataqueriadelbarrio` cuando el enlace es de una red social. */
+  handle: string | null;
+  /** El nombre de la red: instagram, facebook, tiktok… */
+  red: string | null;
+  /** `true` si se sacó algo aprovechable. `false` NUNCA es un error en pantalla. */
+  sirvio: boolean;
+  /** Lo que se le va a enseñar para que lo confirme. Puede venir vacío. */
+  propuestas: PropuestaDelSitio[];
+  /** Lo que el agente le dice. Siempre digno, nunca "falló algo". */
+  mensaje: string;
 }
 
 export interface RespuestaDelRitual {

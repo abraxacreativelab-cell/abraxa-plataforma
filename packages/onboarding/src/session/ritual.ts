@@ -28,6 +28,7 @@
 import { PlatformError, usePort } from '@abraxa/db';
 import type { AgentRunResult, TenantContext } from '@abraxa/db';
 import { guionDelTurno, guionDespuesDelRitual, PROMPT_MAESTRO_BASE } from '../interview/guion';
+import { ayudaDelTurno } from '../interview/ayudas';
 import { FASES, FICHAS, indiceDeFase, progresoDe } from '../interview/fases';
 import { faltantesDe } from '../interview/cierre';
 import { aplicarTurno } from '../interview/maquina';
@@ -171,6 +172,11 @@ export function vistaDe(s: SesionRitual): VistaDelRitual {
     turnos: s.turnos,
     checkpointAt: s.checkpointAt,
     faltante: completada ? [] : faltantesDe(s.fase, s.estado),
+    // Los botones y ejemplos del dato que se está pidiendo. Viajan con CADA
+    // respuesta —no se piden aparte— porque cambian en cada turno y una
+    // segunda petición para traerlos los pintaría tarde, que en una pantalla
+    // que busca velocidad se ve peor que no tenerlos.
+    ayuda: completada ? null : ayudaDelTurno(s.fase, s.estado),
   };
 }
 
@@ -253,6 +259,7 @@ export async function fotoDelRitual(ctx: TenantContext, ahora = new Date()): Pro
         turnos: 0,
         checkpointAt: null,
         faltante: faltantesDe('bienvenida', {}),
+        ayuda: ayudaDelTurno('bienvenida', {}),
       },
       transcript: [],
       memoria: '',
@@ -611,6 +618,34 @@ async function correrTurno(
   // la fase 0 y lo que hace que el nombre viaje a toda la UI (criterio #3).
   if (r.estado.agente && r.estado.agente !== sesion.estado.agente) {
     await bautizarAgente(ctx, r.estado, null);
+  }
+
+  // ── El pago temprano: cerrar 'identidad' ya deja algo construido ──────────
+  //
+  // Ésta es la mitad de servidor del embudo invertido. Al cerrar la fase de lo
+  // esencial —categoría, cuántos son, giro y etapa: tres botones y una frase—
+  // se siembra lo mismo que antes sólo ocurría en la fase 6:
+  //
+  //   · `tenants.industry_type` y `stage`, que es lo que hace que el panel deje
+  //     de ser genérico y que H3 le inyecte contexto de empresa al agente;
+  //   · la definición del agente maestro, que a partir de aquí sabe a qué se
+  //     dedica su dueño en vez de ser el prompt de fábrica.
+  //
+  // Sin esto, "guardar y seguir después" mandaba al invitado a un panel que no
+  // sabía nada de él, y el gancho —ver sus áreas con candado y qué les falta—
+  // no existía hasta el final. Justo al revés de lo que pide el producto.
+  //
+  // Las dos escrituras son best-effort e idempotentes: son UPDATE por id y un
+  // upsert de definición, y el cierre las vuelve a hacer con más datos. Que
+  // fallen no puede tumbar un turno de la entrevista.
+  if (r.avanzo && sesion.fase === 'identidad') {
+    const anticipo = construirMapa(r.estado, await plantillasDeGiro());
+    await sembrarGiro(ctx, anticipo, r.estado);
+    await bautizarAgente(ctx, r.estado, anticipo);
+    log.info(
+      `fase esencial cerrada: se siembra el giro (${anticipo.industryType ?? 'sin plantilla'}) ` +
+        'para que su panel ya tenga de qué hablar.',
+    );
   }
 
   if (r.cierreDenegado) {

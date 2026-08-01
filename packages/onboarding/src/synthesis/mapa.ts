@@ -123,6 +123,7 @@ function lista(items: string[]): string | null {
  */
 export function resumenDelNegocio(e: EstadoNegocio, areas: AreaDelMapa[], hitos: Hito[]): string {
   const identidad = [
+    e.categoria ? `**Categoría:** ${e.categoria}` : null,
     e.giro ? `**Giro:** ${e.giro}` : null,
     e.nicho ? `**A quién le vende:** ${e.nicho}` : null,
     e.etapa ? `**Etapa:** ${e.etapa}` : null,
@@ -143,7 +144,7 @@ export function resumenDelNegocio(e: EstadoNegocio, areas: AreaDelMapa[], hitos:
   const dolores = (e.dolores ?? []).map((d) => d.texto);
 
   const gente = [
-    e.equipo ? `**Cómo trabaja:** ${e.equipo}` : null,
+    e.equipo ? `**Cuántos son:** ${e.equipo}` : null,
     e.equipoDetalle ? e.equipoDetalle : null,
   ].filter((x): x is string => x !== null);
 

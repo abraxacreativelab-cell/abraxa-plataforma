@@ -20,10 +20,15 @@ src/
   interview/         la entrevista — todo funciones puras, sin base ni red
     fases.ts           las 7 fases y el progreso
     cierre.ts          qué exige cada fase para poder avanzar   ← criterio #6
+    ayudas.ts          los botones y ejemplos de cada dato      ← el embudo invertido
     marcadores.ts      el canal lateral modelo → máquina        ← criterio #5
     maquina.ts         aplicarTurno(): la transición, pura      ← criterios #6 y #8
     guion.ts           lo que se le antepone al agente cada turno
     regreso.ts         el "esto es lo que ya sé de ti", sin modelo
+  sitio/             leer su página web — lo único que sale a internet
+    url.ts             qué se puede pedir, y el guardia de SSRF
+    leer.ts            bajarla sin colgarse ni seguir a la red de adentro
+    extraer.ts         qué dice, según el MODELO
   session/
     repositorio.ts     la sesión en la base. Nada en memoria.
     ritual.ts          el orquestador de un turno
@@ -36,6 +41,86 @@ src/
   ports/
     blueprint-sink.ts  EL CONTRATO QUE LE FALTA A AreasPort — leer abajo
 ```
+
+---
+
+## El embudo invertido (2026-08-01)
+
+Hasta esta fecha el Ritual preguntaba mucho y entregaba al final: quien se salía a los diez
+minutos se iba con las manos vacías y el producto se quedaba sin nada que construirle. Ahora es al
+revés, con una sola regla: **lo que se contesta con el pulgar va primero; lo que hay que pensar va
+después.**
+
+### El orden
+
+```
+bienvenida → identidad → modelo → proceso → gente → dolor → sintesis
+   bautizo    LO ESENCIAL
+```
+
+| Fase | Qué pide | Cómo se contesta |
+|---|---|---|
+| `bienvenida` | el nombre de su agente | 5 nombres a un toque, o el suyo |
+| `identidad` | categoría · cuántos son · giro · etapa | **3 botones y una frase** |
+| `modelo` | nicho · cómo cobra · ticket · margen · canales | 3 de 5 con botones |
+| `proceso` | recorrido de 3 pasos · herramientas | ejemplos + botones múltiples |
+| `gente` | quién hace qué, o qué soltaría primero | ejemplos |
+| `dolor` | 2 dolores + **1 hito que él no pidió** | ejemplos, y el agente ataca |
+| `sintesis` | — | el Mapa de Negocio |
+
+Tres movimientos, y cada uno tiene su razón:
+
+- **`equipo` (cuántos son) subió de `gente` a `identidad`.** Es un botón y cambia el mapa: el área
+  de Equipo nace abierta o con candado según esto. Un dato de un segundo que mueve el resultado va
+  al principio.
+- **`nicho` bajó de `identidad` a `modelo`.** Es una frase pensada y pertenece al lado comercial.
+- **`dolor` se movió al final**, pegada a la síntesis. Es la fase que da el "wow" —el hito que él
+  no había pedido— y ese wow aterriza mejor un minuto antes del mapa que cinco.
+
+`tamano` dejó de ser condición de cierre: se sigue guardando cuando lo suelta, pero ya no puede
+detener una entrevista, porque es el único dato de su fase que no se contesta con el pulgar y ya
+está implícito en el ticket.
+
+**Lo que NO cambió:** cada fase sigue teniendo condiciones de cierre duras y `[FASE_COMPLETA:x]`
+sigue siendo una petición que decide `puedeCerrar()`. Ir más rápido no es preguntar menos.
+
+### Las ayudas viven en `interview/ayudas.ts`, y tienen DOS lectores
+
+La pantalla las pinta (`VistaDelRitual.ayuda`) y el guion se las describe al modelo. Con la lista
+escondida en el `.tsx`, el agente preguntaba «¿en qué etapa va tu negocio?» y abajo aparecían
+botones de categorías — y el que se ve mal en esa foto es el agente, que es lo único que el
+producto tiene. Una tabla, dos consumidores, y `session/solo-con-el-pulgar.test.ts` lo fija.
+
+Qué ayuda toca en cada turno lo decide `primerFaltante(fase, estado)`: el mismo dato que el guion
+le pone al frente al agente. No se adivina del texto del modelo.
+
+### Leer su página — `src/sitio/`
+
+`POST /onboarding/ritual/sitio { url }`. **No escribe nada**: devuelve propuestas que el invitado
+corrige y confirma, y confirmarlas manda un turno normal por `/ritual/turno`. Un camino de
+escritura paralelo podría cerrar fases con datos que su dueño nunca vio.
+
+Es el único punto del Ritual que sale a internet, así que:
+
+| Puerta | Dónde |
+|---|---|
+| sólo `http:`/`https:` | `url.ts` |
+| IP privadas, loopback, link-local, metadatos, y las IPv4 mapeadas en IPv6 | `url.ts` |
+| decimal/octal/hexadecimal (`http://2130706433/`) | los normaliza `URL`, y se revisa después |
+| **el DNS que resuelve a una IP privada** | `leer.ts` · `dns.lookup(all)` antes de cada petición |
+| **la redirección a una IP privada** | `leer.ts` · `redirect: 'manual'`, cada salto revisado |
+| 8 s · 3 saltos · 512 KB | `leer.ts` |
+
+Queda un TOCTOU documentado en el encabezado de `leer.ts`: entre resolver y pedir, el DNS podría
+cambiar. Cerrarlo exige pedirle a la IP con `Host` a mano, lo que rompe TLS con SNI para medio
+internet. Se documenta, no se esconde.
+
+Los cuatro caminos que no funcionan —no contesta, no es una página, es una SPA en blanco, es un
+Instagram— **nunca son un error en pantalla**: cada uno tiene su frase, y la de la SPA importa más
+que ninguna porque Framer, Wix y Squarespace son la mitad de las páginas de negocio mexicanas y
+las tres devuelven 200 con cero texto.
+
+---
 
 **La mitad del paquete son funciones puras a propósito.** La máquina de estados y la síntesis no
 tocan base, red ni reloj, y por eso los criterios #4, #5, #6 y #8 se verifican en CI, en cada PR,
@@ -141,7 +226,9 @@ funcionando. **No se reescribió: se parametrizó.**
 | 5 | Los marcadores nunca se ven en pantalla | `interview/maquina.test.ts` + guardia en `routes.ts` |
 | 6 | Una fase no avanza si faltan sus datos | `interview/cierre.ts` · `maquina.test.ts` |
 | 7 | Al terminar puede usar al menos un área | `synthesis/catalogo.ts` — Ventas nunca nace bloqueada |
-| 8 | La fase 4 genera un hito que él no pidió | condición de cierre de `dolor` + `maquina.test.ts` |
+| 8 | La fase del dolor genera un hito que él no pidió | condición de cierre de `dolor` + `maquina.test.ts` |
+| — | **Sólo con el pulgar se llega al mapa** | `session/solo-con-el-pulgar.test.ts` |
+| — | **Salirse tras la fase 1 ya deja algo construido** | idem · giro sembrado + agente que lo conoce |
 
 El #2 no se simula con una bandera: la prueba **serializa la base a JSON, tira el cliente, el port
 del agente y la instancia entera**, y reconstruye el mundo desde cero — que es lo que le pasa a un
@@ -159,6 +246,7 @@ variable de módulo, esa prueba se cae.
 | `POST /onboarding/ritual/iniciar` | arranca, o produce el saludo de regreso |
 | `POST /onboarding/ritual/turno` | `{ texto }` |
 | `POST /onboarding/ritual/pausa` | "guardar y seguir después" |
+| `POST /onboarding/ritual/sitio` | `{ url }` → propuestas que él confirma. No escribe nada. |
 | `GET /onboarding/ritual/mapa` | el Mapa de Negocio vigente |
 | `POST /onboarding/ritual/proyectar-pendientes` | el barrido de H11 |
 
@@ -174,9 +262,20 @@ ese 403 es lo único que impide que el cliente A lea los datos del B.
 
 - **Progreso por fases cerradas**, no por mensajes: una barra que se mueve cada vez que escribes
   miente.
-- **"Guardar y seguir después" siempre a la vista.** No guarda nada — ya está todo guardado desde
-  el turno anterior; sólo deja escrito que se fue por su voluntad.
-- **El bautizo es un momento**, no un campo: una sola pregunta a pantalla completa.
+- **"Guardar y seguir después" SALE AL PANEL.** Antes se quedaba aquí escribiendo "guardado"
+  debajo del mismo compositor, que no es una salida: es una pantalla quieta, y quien quería irse se
+  iba del producto entero. Hoy manda a `/mapa` — la ruta que existe en `main`; `/panel` todavía no,
+  y por eso el destino vive en la constante `EL_PANEL` de `ritual.tsx`, para que el día que exista
+  sea una línea.
+- **El bautizo es un momento**, no un campo: una sola pregunta a pantalla completa, con cinco
+  nombres a un toque para que nadie se congele.
+- **Botones y ejemplos** (`componentes/ayudas.tsx`): un toque manda, salvo cuando se pueden elegir
+  varias; los ejemplos se tocan y caen en el campo para editarlos.
+- **La voz** (`lib/voz-del-ritual.ts`, sobre `apps/web/src/voz/`): narra cada pregunta al aparecer,
+  **se calla** al primer teclazo, al dictar y al mandar; el micrófono graba en el navegador y
+  transcribe en el servidor, que es lo único que funciona en iPhone. Es opcional, se recuerda,
+  arranca apagada y respeta `prefers-reduced-motion`. **Degrada en silencio**: 402, 501, 429 o un
+  micrófono denegado apagan la voz sin un solo error en pantalla — la pregunta ya está escrita.
 - **El Mapa de Negocio como cierre con peso**, con las áreas bloqueadas a la vista, con candado y
   con su promesa.
 

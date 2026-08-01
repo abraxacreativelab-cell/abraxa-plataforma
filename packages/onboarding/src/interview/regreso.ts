@@ -56,7 +56,7 @@ export function loQueRecuerdo(e: EstadoNegocio, maximo = 4): string[] {
       ? `Tu proceso empieza en "${e.recorrido?.[0]?.nombre}" y lleva ${e.recorrido?.length} pasos.`
       : null,
     (e.dolores?.length ?? 0) > 0 ? `Lo que más te pesa: ${e.dolores?.[0]?.texto}.` : null,
-    e.equipo ? `Trabajas ${e.equipo}.` : null,
+    e.equipo ? `En tu negocio son: ${e.equipo}.` : null,
   ];
 
   return candidatos.filter((x): x is string => x !== null).slice(0, maximo);

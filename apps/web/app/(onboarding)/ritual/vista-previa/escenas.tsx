@@ -7,8 +7,9 @@ import { Conversacion } from '../componentes/conversacion';
 import { MapaDeNegocio } from '../componentes/mapa-de-negocio';
 import { Progreso } from '../componentes/progreso';
 import { Regreso } from '../componentes/regreso';
+import { useVozDelRitual } from '../lib/voz-del-ritual';
 import type { Vista } from '../lib/tipos';
-import { CONVERSACION, FOTO_REGRESO, MAPA, VISTA } from './guion';
+import { AYUDA_AGENTE, CONVERSACION, FOTO_REGRESO, MAPA, VISTA } from './guion';
 
 /**
  * Los cuatro momentos del Ritual, con datos de ejemplo.
@@ -22,7 +23,7 @@ type Escena = (typeof ESCENAS)[number];
 
 const TITULOS: Record<Escena, string> = {
   bautizo: 'El bautizo',
-  entrevista: 'La fase 4 — abogado del diablo',
+  entrevista: 'La última fase — abogado del diablo',
   regreso: 'Vuelve al día siguiente',
   mapa: 'El cierre',
 };
@@ -36,6 +37,7 @@ const VISTA_BAUTIZO: Vista = {
   agente: null,
   turnos: 1,
   faltante: ['el nombre que le pone a su agente'],
+  ayuda: AYUDA_AGENTE,
 };
 
 const VISTA_FINAL: Vista = {
@@ -46,10 +48,14 @@ const VISTA_FINAL: Vista = {
   tituloDeFase: 'Tu Mapa de Negocio',
   status: 'completada',
   faltante: [],
+  ayuda: null,
 };
 
 export function Escenas() {
   const [escena, setEscena] = React.useState<Escena>('bautizo');
+  // La voz SÍ es la de verdad, aunque el resto sea un guion fijo: es la única
+  // forma de criticar el interruptor y el micrófono antes de tener una sesión.
+  const voz = useVozDelRitual();
   const nada = (): void => undefined;
   // `onEnviar` devuelve si el turno llegó: es lo que le permite al compositor
   // restaurar el texto cuando falla. En la vista previa no falla nunca, así que
@@ -86,7 +92,15 @@ export function Escenas() {
         <>
           <Progreso vista={VISTA_BAUTIZO} />
           <Conversacion turnos={CONVERSACION.slice(0, 1)} agente={null} pensando={false} />
-          <Compositor bautizo ocupado={false} pausada={false} onEnviar={siempreLlega} onPausar={nada} />
+          <Compositor
+            bautizo
+            ocupado={false}
+            pausada={false}
+            ayuda={VISTA_BAUTIZO.ayuda}
+            voz={voz}
+            onEnviar={siempreLlega}
+            onPausar={nada}
+          />
         </>
       ) : null}
 
@@ -98,6 +112,8 @@ export function Escenas() {
             bautizo={false}
             ocupado={false}
             pausada={false}
+            ayuda={VISTA.ayuda}
+            voz={voz}
             onEnviar={siempreLlega}
             onPausar={nada}
           />
@@ -113,6 +129,8 @@ export function Escenas() {
             bautizo={false}
             ocupado
             pausada={false}
+            ayuda={VISTA.ayuda}
+            voz={voz}
             onEnviar={siempreLlega}
             onPausar={nada}
           />

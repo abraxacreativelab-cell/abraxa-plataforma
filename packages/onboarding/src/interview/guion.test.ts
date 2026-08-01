@@ -9,6 +9,8 @@ import type { EstadoNegocio } from '../types';
 
 const AVANZADO: EstadoNegocio = {
   agente: 'Nova',
+  categoria: 'Es un estudio de yoga',
+  equipo: 'Somos de 2 a 5',
   giro: 'estudio de yoga',
   nicho: 'oficinistas con dolor de espalda',
   etapa: 'operando',
@@ -71,13 +73,48 @@ describe('el guion del turno', () => {
     expect(g).toContain('la fase no avanza aunque emitas [FASE_COMPLETA:modelo]');
   });
 
+  it('le pone la flecha al PRIMER faltante: ése es el que hay que preguntar', () => {
+    const g = guionDelTurno('modelo', { agente: 'Nova', giro: 'yoga' });
+    expect(g).toContain('→ a quién le vende');
+    expect(g).toContain('Pregunta AHORA por el primero de la lista');
+  });
+
+  it('le dice al modelo QUÉ BOTONES ve el invitado, para que su pregunta encaje', () => {
+    // Es la mitad de servidor del punto 2: la pantalla pinta lo mismo que aquí
+    // se declara, así que el agente no puede preguntar una cosa mientras abajo
+    // aparecen botones de otra.
+    const g = guionDelTurno('identidad', { agente: 'Nova' });
+    expect(g).toContain('LO QUE ÉL VE EN PANTALLA AHORA');
+    expect(g).toContain('Taquería o restaurante');
+    expect(g).toContain('No los enumeres');
+  });
+
+  it('los ejemplos de una pregunta abierta también viajan al modelo', () => {
+    const g = guionDelTurno('identidad', {
+      agente: 'Nova',
+      categoria: 'Es una taquería',
+      equipo: 'Solo yo',
+    });
+    expect(g).toContain('tacos de canasta en la Roma');
+    expect(g).toContain('No los repitas');
+  });
+
+  it('la fase esencial se corre ligero y en el orden del pulgar', () => {
+    const g = guionDelTurno('identidad', { agente: 'Nova' });
+    expect(g).toContain('fase rápida');
+    expect(g).toContain('[DATO:categoria=');
+    // El giro va DESPUÉS de los dos botones, no antes.
+    expect(g.indexOf('[DATO:categoria=')).toBeLessThan(g.indexOf('[DATO:giro='));
+    expect(g.indexOf('[DATO:equipo=')).toBeLessThan(g.indexOf('[DATO:giro='));
+  });
+
   it('cuando la fase ya tiene todo, le dice que cierre sin ceremonia', () => {
     const g = guionDelTurno('identidad', AVANZADO);
     expect(g).toContain('ESTA FASE YA TIENE TODO');
     expect(g).toContain('[FASE_COMPLETA:identidad]');
   });
 
-  it('la fase 4 no se suaviza', () => {
+  it('la fase del dolor no se suaviza', () => {
     const g = guionDelTurno('dolor', AVANZADO);
     expect(g).toContain('No preguntes "¿qué te duele?"');
     expect(g).toContain('Atácalo');

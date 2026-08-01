@@ -38,8 +38,14 @@ const ENVIO = 'b4f0a2d6-0f3e-4a51-9c77-2a1d6f0e5c33';
 const T0 = '2026-07-31T18:00:00.000Z';
 const AHORA = new Date('2026-07-31T18:01:40.000Z');
 
-/** Una respuesta que NO cierra la fase: el caso simple del reintento. */
-const SIGUE_EN_DOLOR = `Uf, cobrar a tiempo. ¿Y cuánto se te atrasan en promedio?
+/**
+ * Una respuesta que NO cierra la fase: el caso simple del reintento.
+ *
+ * La sesión de abajo va en 'gente', que desde el reordenamiento del 2026-08-01
+ * es la penúltima de preguntas. Falta su `equipo_detalle`, así que este turno
+ * anota algo y la fase sigue abierta — que es justo lo que la prueba necesita.
+ */
+const SIGUE_EN_GENTE = `Uf, cobrar a tiempo. ¿Y quién te ayuda con eso hoy?
 
 [DOLOR:le pagan tarde y persigue los cobros|direccion]`;
 
@@ -47,21 +53,23 @@ let db: ReturnType<typeof crearFakeDb>;
 let agente: AgenteFalso;
 let restaurar: () => void;
 
-/** El Ritual a media entrevista: fase 'dolor', 12 turnos, todo lo previo dicho. */
-function sesionEnDolor(): Fila {
+/** El Ritual a media entrevista: fase 'gente', 12 turnos, todo lo previo dicho. */
+function sesionEnGente(): Fila {
   const dijo = (role: 'user' | 'assistant', content: string): TurnoTranscrito => ({
     role,
     content,
     at: T0,
-    fase: 'dolor',
+    fase: 'gente',
   });
 
   return {
     id: '00000000-0000-4000-8000-0000000000aa',
     tenant_id: 'tenant-a',
-    phase: 'dolor',
+    phase: 'gente',
     state: {
       agente: 'Aura',
+      categoria: 'Es una panadería',
+      equipo: 'Somos de 2 a 5',
       giro: 'panadería artesanal',
       nicho: 'cafeterías independientes',
       etapa: 'operando',
@@ -77,7 +85,7 @@ function sesionEnDolor(): Fila {
       ],
       herramientas: ['whatsapp', 'libreta'],
     },
-    transcript: [dijo('assistant', 'Cuéntame qué es lo que más te pesa de la semana.')],
+    transcript: [dijo('assistant', '¿Y quién te ayuda hoy con la entrega?')],
     status: 'activa',
     turns: 12,
     checkpoint_at: T0,
@@ -88,7 +96,7 @@ function sesionEnDolor(): Fila {
 
 function montar(...guion: string[]): void {
   db = crearFakeDb({
-    onboarding_sessions: [sesionEnDolor()],
+    onboarding_sessions: [sesionEnGente()],
     tenants: [{ id: 'tenant-a', slug: 'tenant-a', name: 'Panadería' }],
     industry_templates: PLANTILLAS_DE_GIRO,
   });
@@ -108,7 +116,7 @@ const suyos = (t: TurnoTranscrito[]): TurnoTranscrito[] =>
 
 // ═════════════════════════════════════════════════════════════════════════════
 describe('el reenvío que el propio BFF pidió', () => {
-  beforeEach(() => montar(SIGUE_EN_DOLOR, 'no debería correr una segunda vez'));
+  beforeEach(() => montar(SIGUE_EN_GENTE, 'no debería correr una segunda vez'));
 
   it('no vuelve a aplicar el turno: mismo envío, mismo id', async () => {
     const ctx = ctxDePrueba();
@@ -139,28 +147,28 @@ describe('el reenvío que el propio BFF pidió', () => {
 
 // ═════════════════════════════════════════════════════════════════════════════
 describe('el reenvío cuando el turno abandonado SÍ cerró la fase', () => {
-  beforeEach(() => montar(DOLOR, GENTE, ENTREGA));
+  beforeEach(() => montar(GENTE, DOLOR, ENTREGA));
 
   it('no camina el Ritual dos fases con datos que nadie dio', async () => {
     const ctx = ctxDePrueba();
 
-    // El turno abandonado cerró 'dolor'. La fila quedó en 'gente'.
+    // El turno abandonado cerró 'gente'. La fila quedó en 'dolor'.
     await responder(ctx, TEXTO, { ahora: AHORA, turnoId: ENVIO });
-    expect((await cargarSesion(ctx))?.fase).toBe('gente');
+    expect((await cargarSesion(ctx))?.fase).toBe('dolor');
 
     // El reenvío del MISMO mensaje se procesa como si fuera la respuesta a la
-    // pregunta de la fase 5 — que nadie le ha hecho todavía. El modelo, que ve
-    // el guion de 'gente', contesta lo de 'gente', sella la fase y dispara la
-    // síntesis con datos que la emprendedora nunca dio.
+    // pregunta de la última fase — que nadie le ha hecho todavía. El modelo,
+    // que ve el guion de 'dolor', contesta lo de 'dolor', sella la fase y
+    // dispara la síntesis con datos que la emprendedora nunca dio.
     await responder(ctx, TEXTO, { ahora: AHORA, turnoId: ENVIO });
 
     const s = await cargarSesion(ctx);
-    expect(s?.fase).toBe('gente');
+    expect(s?.fase).toBe('dolor');
     expect(s?.status).toBe('activa');
     expect(suyos(s?.transcript ?? [])).toHaveLength(1);
 
     // Y ningún turno suyo quedó sellado en una fase en la que no habló.
-    expect(suyos(s?.transcript ?? []).every((t) => t.fase === 'dolor')).toBe(true);
+    expect(suyos(s?.transcript ?? []).every((t) => t.fase === 'gente')).toBe(true);
 
     // Sobre todo: no hay mapa. Llegar a la síntesis por un reenvío es entregarle
     // su Mapa de Negocio a alguien a quien le faltaba media entrevista.

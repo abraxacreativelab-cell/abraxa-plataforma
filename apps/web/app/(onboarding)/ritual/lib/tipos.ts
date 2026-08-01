@@ -27,6 +27,31 @@ export type Fase =
 export type EstadoSesion = 'activa' | 'pausada' | 'cerrando' | 'completada';
 export type AreaState = 'bloqueada' | 'disponible' | 'en_progreso' | 'activa';
 
+/** Un botón de respuesta rápida. Lo decide el guion, lo pinta la pantalla. */
+export interface OpcionRapida {
+  /** Lo que se manda como si él lo hubiera escrito. */
+  valor: string;
+  /** Lo que se lee en el botón. */
+  etiqueta: string;
+}
+
+/**
+ * Los botones y ejemplos del dato que se está pidiendo AHORA.
+ *
+ * Viene del servidor en cada respuesta, y no de una tabla en este `.tsx`, por
+ * una razón que se ve en la primera prueba: el agente tiene que preguntar
+ * exactamente lo que estos botones contestan. Las dos puntas leen
+ * `packages/onboarding/src/interview/ayudas.ts`.
+ */
+export interface Ayuda {
+  clave: string;
+  titulo: string;
+  opciones: OpcionRapida[];
+  multiple: boolean;
+  abierta: boolean;
+  ejemplos: string[];
+}
+
 export interface Vista {
   fase: Fase;
   faseIndice: number;
@@ -38,6 +63,25 @@ export interface Vista {
   turnos: number;
   checkpointAt: string | null;
   faltante: string[];
+  ayuda: Ayuda | null;
+}
+
+/** Un dato que salió de su página y que él todavía no confirma. */
+export interface PropuestaDelSitio {
+  clave: string;
+  etiqueta: string;
+  valor: string;
+}
+
+/** Lo que contesta `POST /ritual/api/sitio`. Nunca es un error. */
+export interface LecturaDelSitio {
+  url: string;
+  tipo: 'sitio' | 'red-social';
+  handle: string | null;
+  red: string | null;
+  sirvio: boolean;
+  propuestas: PropuestaDelSitio[];
+  mensaje: string;
 }
 
 export interface Turno {

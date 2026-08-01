@@ -115,6 +115,10 @@ const RUTAS: Array<[string, 'GET' | 'POST']> = [
   ['/onboarding/ritual/pausa', 'POST'],
   ['/onboarding/ritual/mapa', 'GET'],
   ['/onboarding/ritual/proyectar-pendientes', 'POST'],
+  // Leer su página sale a internet DESDE el servidor, así que es la ruta que
+  // menos puede abrirse con una cabecera inventada: sin sesión sería un proxy
+  // abierto para cualquiera con un `curl`.
+  ['/onboarding/ritual/sitio', 'POST'],
 ];
 
 const FORJADAS = {

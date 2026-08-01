@@ -26,6 +26,7 @@
  *  repita preguntas, que es el criterio #2.
  */
 import type { EstadoNegocio, Fase } from '../types';
+import { ayudaDelTurno, bloqueDeAyuda } from './ayudas';
 import { faltantesDe, requisitosDe } from './cierre';
 import { FASES, FICHAS, indiceDeFase } from './fases';
 
@@ -72,10 +73,12 @@ export function loQueYaSabes(e: EstadoNegocio): string {
     vinetas(
       'Identidad del negocio:',
       [
+        e.categoria ? `categoría: ${e.categoria}` : null,
         e.giro ? `giro: ${e.giro}` : null,
         e.nicho ? `a quién le vende: ${e.nicho}` : null,
         e.etapa ? `etapa: ${e.etapa}` : null,
         e.tamano ? `tamaño hoy: ${e.tamano}` : null,
+        e.equipo ? `cuántos son: ${e.equipo}` : null,
       ].filter((x): x is string => x !== null),
     ),
     vinetas(
@@ -98,10 +101,7 @@ export function loQueYaSabes(e: EstadoNegocio): string {
     ),
     vinetas(
       'Gente:',
-      [
-        e.equipo ? `cómo trabaja: ${e.equipo}` : null,
-        e.equipoDetalle ?? null,
-      ].filter((x): x is string => x !== null),
+      [e.equipoDetalle ?? null].filter((x): x is string => x !== null),
     ),
     vinetas(
       'Hitos que ya identificamos:',
@@ -131,13 +131,16 @@ const INSTRUCCIONES: Record<Fase, string> = {
   bienvenida: `
 Es el primer minuto de esta persona en el producto. Todo lo que pase aquí decide si se queda.
 
-1. Preséntate. Eres SU agente: vas a vivir dentro de su negocio, contestarle a sus clientes y
-   ayudarle a ordenarlo. Todavía no tienes nombre.
+**Sé BREVE. Tres o cuatro renglones en total.** Esta pantalla tiene que sentirse ligera, no una
+carta de bienvenida.
+
+1. Preséntate en una línea. Eres SU agente: vas a vivir dentro de su negocio, contestarle a sus
+   clientes y ayudarle a ordenarlo. Todavía no tienes nombre.
 2. **Pídele que te ponga uno.** No como un campo de un formulario: es un momento. Es la primera
    decisión que toma sobre su empresa aquí adentro.
-3. Dile que le vas a hacer unas preguntas sobre su negocio para entenderlo —unos 15 o 20
-   minutos— y que **puede parar cuando quiera y volver después**. Ese permiso hay que darlo
-   explícito, no dejarlo implícito.
+3. Dile, en media línea, que le vas a hacer unas preguntas rápidas —las primeras son de un toque—
+   y que **puede parar cuando quiera y volver después**. Ese permiso hay que darlo explícito.
+   NO le prometas "15 o 20 minutos": las primeras respuestas son botones y eso ya no es cierto.
 
 Cuando te dé un nombre, emítelo con [DATO:agente=ElNombre], úsalo desde ese momento en adelante
 y cierra la fase.
@@ -146,29 +149,45 @@ No hagas nada más en esta fase. No preguntes del negocio todavía.
 `,
 
   identidad: `
-Ahora quieres entender QUÉ es este negocio. Cuatro cosas, una pregunta a la vez:
+## Ésta es la fase rápida, y es la más importante del Ritual.
 
-- **A qué se dedica.** En sus palabras, no en categorías. → [DATO:giro=…]
-- **A quién le vende.** Si dice "a todo el mundo", insiste con un ejemplo del último cliente que
-  tuvo. → [DATO:nicho=…]
-- **En qué etapa va.** Idea, primeros clientes, operando, creciendo. → [DATO:etapa=…]
-- **De qué tamaño es hoy.** Clientes al mes, ventas, volumen, lo que le sirva de medida. Si no
-  quiere dar números, acepta un orden de magnitud. → [DATO:tamano=…]
+Con lo que salga de aquí ya se le puede construir su mapa. Si esta persona se sale después de
+esta fase, tiene que irse con algo hecho — así que **córrela ligero y sin ceremonia**.
 
-Si algo suena vago, pide un ejemplo concreto. "Doy consultoría" no es un giro; "ayudo a
-restaurantes chicos a controlar su inventario" sí.
+Cuatro cosas, una pregunta por mensaje, EN ESTE ORDEN:
+
+1. **De qué es su negocio**, en categoría gruesa. Se contesta con un botón. → [DATO:categoria=…]
+2. **Cuántos son hoy.** También botón: solo él, de 2 a 5, de 6 a 20, más de 20. → [DATO:equipo=…]
+3. **A qué se dedica**, ahora sí con sus palabras. Es la única de las cuatro que se escribe.
+   → [DATO:giro=…]
+4. **En qué punto va.** Idea, primeros clientes, ya opera, está creciendo. → [DATO:etapa=…]
+
+**Reglas de esta fase:**
+- Una línea por pregunta. Nada de preámbulos ni de "qué interesante". Aquí el valor es la
+  velocidad; ya habrá tiempo de conversar.
+- Marca el dato EN EL MISMO turno en que te lo dan. Los dos primeros llegan tal cual del botón.
+- En el giro sí insiste si suena vago: "doy consultoría" no es un giro; "ayudo a restaurantes
+  chicos a controlar su inventario" sí. Una repregunta, no tres.
+- Si al contestar el giro te suelta de paso a quién le vende o cuánto cobra, **márcalo también**
+  y no se lo vuelvas a preguntar después.
 `,
 
   modelo: `
-Aquí quieres entender **cómo entra el dinero**. Es la fase que más gente contesta a medias y la
-que más sirve después, porque de aquí salen los valores canónicos de su bóveda.
+Ya tiene su mapa en pie. Ahora quieres entender **cómo entra el dinero**, que es de donde salen
+los valores canónicos de su bóveda.
 
-- **Cómo cobra exactamente.** Por proyecto, por mensualidad, por comisión, por hora, por pieza.
+- **A quién le vende.** Si dice "a todo el mundo", insiste con el último cliente que tuvo.
+  → [DATO:nicho=…]
+- **Cómo cobra exactamente.** Por pieza, por proyecto, por mensualidad, por hora, por comisión.
   → [DATO:modelo_ingreso=…]
 - **Cuánto cobra en promedio.** El ticket. Si da un rango, quédate con el rango. → [DATO:ticket=…]
-- **Qué le queda.** Margen aproximado. Si no lo sabe —muy común— pregúntale qué le cuesta
-  entregar una venta y anota eso. Que no sepa su margen ES un dato. → [DATO:margen=…]
+- **Qué le queda.** Margen aproximado. **"No lo sé" es una respuesta válida y hay un botón para
+  darla**: si la toca, márcala tal cual y sigue. Que no sepa su margen ES un dato, y perseguirlo
+  es la forma más rápida de que se salga. → [DATO:margen=…]
 - **Por dónde le llegan los clientes hoy.** → [LISTA:canales=whatsapp, instagram, recomendación]
+
+Si de paso te dice su volumen —clientes al mes, ventas— márcalo con [DATO:tamano=…], pero **no
+lo preguntes tú**: no detiene esta fase y ya está implícito en el ticket.
 
 Si dice "depende", pregunta de qué depende. Esa respuesta suele ser el modelo de negocio real.
 `,
@@ -216,15 +235,20 @@ Las áreas válidas son: ventas, servicio, direccion, onboarding, rh, finanzas.
 
 **Esta fase no cierra hasta que salga al menos un hito que él NO había pedido.** Si sólo
 recogiste quejas que ya traía, no hiciste el trabajo: sigue atacando el proceso.
+
+Es la ÚLTIMA fase antes de entregarle su Mapa de Negocio, y está aquí a propósito: lo que
+descubras ahora es lo primero que va a leer en su mapa, un minuto después.
 `,
 
   gente: `
-La última tanda de preguntas, y es corta. Dile que ya casi.
+Una sola pregunta, y ya sabes cuántos son: te lo dijo en la fase 1 (está arriba, en lo que ya
+sabes). **No se lo vuelvas a preguntar.**
 
-- **¿Trabaja solo, con equipo, o va a contratar?** → [DATO:equipo=…]
-- Si hay equipo: cuántos y quién hace qué. → [DATO:equipo_detalle=…]
-- Si está solo: pregúntale qué sería lo primero que soltaría si pudiera pagarle a alguien. Esa
-  respuesta suele valer más que el organigrama de una empresa de 30.
+- Si trabaja SOLO: pregúntale **qué sería lo primero que soltaría** si mañana pudiera pagarle a
+  alguien. Esa respuesta suele valer más que el organigrama de una empresa de 30.
+- Si son varios: **quién hace qué**. No el organigrama completo: los dos o tres roles reales.
+
+Con lo que te conteste —aunque sea una línea— emite [DATO:equipo_detalle=…] y cierra la fase.
 `,
 
   sintesis: `
@@ -342,9 +366,20 @@ ${INSTRUCCIONES[fase].trim()}`);
   if (faltan.length > 0) {
     partes.push(`--- LO QUE FALTA PARA CERRAR ESTA FASE ---
 
-${faltan.map((f) => `  · ${f}`).join('\n')}
+${faltan.map((f, i) => `  ${i === 0 ? '→' : '·'} ${f}`).join('\n')}
 
-Hasta que no tengas eso, la fase no avanza aunque emitas [FASE_COMPLETA:${fase}]. Yo lo verifico.`);
+**Pregunta AHORA por el primero de la lista** (el de la flecha), no por otro y no por dos a la
+vez. Ése es el que la pantalla está ayudando a contestar.
+
+Hasta que no tengas todo eso, la fase no avanza aunque emitas [FASE_COMPLETA:${fase}]. Yo lo
+verifico.`);
+
+    // Lo que el invitado tiene ENFRENTE mientras el modelo escribe. Va aquí,
+    // pegado a lo que falta, porque describe justo el primer faltante: la
+    // pantalla y el guion leen la misma tabla (interview/ayudas.ts) y por eso
+    // no se pueden desincronizar.
+    const ayuda = bloqueDeAyuda(ayudaDelTurno(fase, estado));
+    if (ayuda) partes.push(`--- LO QUE ÉL VE EN PANTALLA AHORA ---\n\n${ayuda}`);
   } else if (fase !== 'sintesis') {
     partes.push(`--- ESTA FASE YA TIENE TODO ---
 
