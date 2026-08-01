@@ -53,8 +53,23 @@ import {
  *  de nuestro lado.
  */
 
-/** Dónde se recuerda la preferencia. Es del navegador, no del negocio. */
-const LLAVE = 'abraxa.ritual.voz';
+/**
+ * Dónde se recuerda la preferencia. Es del navegador, no del negocio.
+ *
+ * ── Por qué lleva `.v2` ────────────────────────────────────────────────────
+ *
+ * La versión anterior escribía `off` cuando el SERVIDOR fallaba de forma
+ * definitiva —un 501 sin llaves, un 402 sin pagar—. Eso dejó a los navegadores
+ * que probaron la voz antes de que las llaves llegaran al VPS con un `off`
+ * guardado que ya no corresponde a nada, y que es INDISTINGUIBLE de un apagado
+ * deliberado: no hay forma de curarlos leyendo el valor.
+ *
+ * Subir la llave los cura a todos de una vez. El precio es que quien apagó la
+ * voz a propósito la ve encendida una vez más y la vuelve a apagar; el precio de
+ * no hacerlo es que la voz nunca suene para quien la probó en el minuto
+ * equivocado, y que nadie entienda por qué.
+ */
+const LLAVE = 'abraxa.ritual.voz.v2';
 
 export type EstadoDeVoz = 'apagada' | 'encendida' | 'no-disponible';
 
@@ -236,10 +251,27 @@ export function useVozDelRitual(opciones: { contexto?: string } = {}): VozDelRit
           // "BUDGET_EXCEEDED" convertiría un detalle invisible en un producto
           // roto.
           if (FalloDeVoz.es(e) && e.definitivo) {
-            // No hay nada que reintentar hasta que alguien toque el servidor.
-            // Se apaga para la sesión y ni siquiera se vuelve a pedir.
+            // Se apaga para ESTA SESIÓN y no se vuelve a pedir: no hay nada que
+            // reintentar hasta que alguien toque el servidor.
             setEstado('no-disponible');
-            guardarPreferencia(false);
+
+            // Y NO se escribe en `localStorage`. Antes sí, y costó caro:
+            //
+            // «Definitivo» describe la RESPUESTA, no el mundo. Un 501 significa
+            // «este despliegue no tiene llaves» y un 402 «la factura está sin
+            // pagar» — dos estados del SERVIDOR, que cambian sin que el
+            // navegador se entere. Guardarlos como preferencia del usuario
+            // convertía una condición pasajera en una decisión permanente:
+            // quien probara la voz en el minuto equivocado la perdía PARA
+            // SIEMPRE en ese navegador, aunque el servidor ya funcionara.
+            //
+            // Pasó de verdad el 2026-08-01: se probó antes de que las llaves
+            // llegaran al VPS, el cliente escribió `off`, y desde entonces ese
+            // navegador no volvió a intentarlo ni una vez. Con el servidor
+            // sirviendo MP3 de 21 KB en 0.94 s.
+            //
+            // El olvido al recargar es la propiedad correcta: cada carga vuelve
+            // a preguntar, y en cuanto el servidor esté bien, la voz vuelve sola.
           }
         })
         .finally(() => setNarrando(false));
