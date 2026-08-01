@@ -190,8 +190,16 @@ describe('criterio #1 — un agente nuevo responde sin redeploy', () => {
     expect(agentId).toBeTruthy();
 
     // Y contesta. Sin commit, sin deploy, sin readdirSync de ningún YAML.
+    //
+    // El texto es el del doble de OPENROUTER, no el de Anthropic, y eso es
+    // justo lo que se quiere afirmar: el alta no trajo `provider`, así que cayó
+    // en la semilla del rol — que desde la migración 029 nace en OpenRouter, el
+    // único proveedor con llave. Si esta línea vuelve algún día a la respuesta
+    // de Anthropic, significa que un agente nuevo volvió a nacer apuntando a un
+    // proveedor sin llave, que es como el primer mensaje del Ritual de cada
+    // invitado moría con 502 PROVIDER_ERROR.
     const r = await svc.run(lupita, { role: 'sales', input: '¿a qué hora abren?' });
-    expect(r.text).toBe('Abrimos de 9 a 7.');
+    expect(r.text).toBe('Respuesta por OpenRouter.');
     expect(r.agentName).toBe('Chelo');
   });
 
