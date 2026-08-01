@@ -22,6 +22,7 @@
 import { tenantDb, notFound, PlatformError } from '@abraxa/db';
 import type { AgentRole, ProviderName, TenantContext } from '@abraxa/db';
 import { dialectoValido } from '../capabilities';
+import { modeloPermitido, razonDeBloqueo } from '../providers/allowlist';
 import type { AgentDefinition } from '../types';
 import { semillasPorDefecto } from './defaults';
 
@@ -193,6 +194,17 @@ export async function upsertDefinicion(
   // catálogo aquí devolvería a H3 al problema que vino a matar — estrenar un
   // modelo pediría un deploy. El riesgo de dinero de un modelo desconocido lo
   // cubre el piso de `pricing/compute.ts`, no esta validación.
+  // La lista blanca de proveedores, también al ESCRIBIR. La puerta que de
+  // verdad protege está en `service.ts` (donde se elige el modelo), pero dejar
+  // guardar una fila prohibida significa que el agente de ese rol queda muerto
+  // hasta que alguien lea el log: mejor rechazarla cuando alguien la escribe,
+  // que es cuando hay una persona esperando la respuesta.
+  if (!modeloPermitido(model, provider)) {
+    throw new PlatformError('VALIDATION', razonDeBloqueo(model, provider), {
+      details: { role: entrada.role, provider, model },
+    });
+  }
+
   if (!dialectoValido(model, provider)) {
     throw new PlatformError(
       'VALIDATION',

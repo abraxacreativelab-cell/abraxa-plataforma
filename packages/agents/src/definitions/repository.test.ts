@@ -51,8 +51,9 @@ describe('alta y lectura', () => {
     const d = await obtenerDefinicion(ctx, 'master');
     expect(d.name).toBe('Chelo');
     expect(d.role).toBe('master');
-    // Sin `provider` ni `model` explícitos, cae en la semilla del rol.
-    expect(d.provider).toBe('anthropic');
+    // Sin `provider` ni `model` explícitos, cae en la semilla del rol — que
+    // desde la migración 029 nace en OpenRouter, el único proveedor con llave.
+    expect(d.provider).toBe('openrouter');
     expect(d.model).toBe(semillasPorDefecto()[0]?.model);
   });
 });
@@ -72,7 +73,10 @@ describe('upsert idempotente', () => {
       role: 'sales',
       name: 'A',
       systemPrompt: 'p',
-      model: 'claude-sonnet-5',
+      // En el dialecto de OpenRouter, que es el proveedor de la semilla. Pasar
+      // aquí 'claude-sonnet-5' —el id de Anthropic— hoy se RECHAZA, y es lo
+      // correcto: el par (provider, model) es una sola decisión.
+      model: 'anthropic/claude-sonnet-5',
     });
 
     // H7 renombra al agente en el bautizo y no debería tocar nada más.
@@ -80,7 +84,7 @@ describe('upsert idempotente', () => {
 
     const d = await obtenerDefinicion(ctx, 'sales');
     expect(d.name).toBe('Chelo');
-    expect(d.model).toBe('claude-sonnet-5');
+    expect(d.model).toBe('anthropic/claude-sonnet-5');
   });
 });
 
@@ -166,19 +170,39 @@ describe('la combinación proveedor/modelo no se puede escribir rota', () => {
   });
 
   it('un modelo de OpenRouter que NO está en el catálogo también pasa', async () => {
-    // La validación mira el DIALECTO del id, no el catálogo. Si mirara el
-    // catálogo, estrenar un modelo pediría un deploy — el problema que H3 vino
-    // a matar. El riesgo de dinero de un modelo desconocido lo cubre el piso
-    // conservador del ledger, no esta puerta.
+    // La validación de DIALECTO mira la forma del id, no el catálogo. Si mirara
+    // el catálogo, estrenar un modelo pediría un deploy — el problema que H3
+    // vino a matar. El riesgo de dinero de un modelo desconocido lo cubre el
+    // piso conservador del ledger, no esta puerta.
+    //
+    // El ejemplo es un Claude que el catálogo todavía no tabula. Antes esta
+    // prueba usaba `deepseek/deepseek-chat`, y ese cambio es el punto: el
+    // dialecto sigue siendo laxo con el CATÁLOGO, pero la lista blanca de
+    // proveedores ya no deja pasar a quien procesa fuera de la declaración de
+    // datos. Son dos puertas distintas y las dos hacen falta.
     await upsertDefinicion(ctx, {
       role: 'analyst',
       name: 'Analista',
       systemPrompt: 'p',
       provider: 'openrouter',
-      model: 'deepseek/deepseek-chat',
+      model: 'anthropic/claude-opus-6',
     });
 
-    expect((await obtenerDefinicion(ctx, 'analyst')).model).toBe('deepseek/deepseek-chat');
+    expect((await obtenerDefinicion(ctx, 'analyst')).model).toBe('anthropic/claude-opus-6');
+  });
+
+  it('y un proveedor fuera de la lista blanca NO pasa, aunque el dialecto esté bien', async () => {
+    // `deepseek/deepseek-chat` es un id perfectamente formado de OpenRouter.
+    // Lo que lo detiene no es la forma: es dónde procesa.
+    await expect(
+      upsertDefinicion(ctx, {
+        role: 'analyst',
+        name: 'Analista',
+        systemPrompt: 'p',
+        provider: 'openrouter',
+        model: 'deepseek/deepseek-chat',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
   });
 
   it('cambiar sólo el nombre NO exige modelo: el proveedor no se movió', async () => {
@@ -224,7 +248,7 @@ describe('siembra de un cliente nuevo', () => {
       role: 'sales',
       name: 'Chelo',
       systemPrompt: 'mío',
-      model: 'claude-opus-5',
+      model: 'anthropic/claude-opus-4.8',
     });
 
     const segunda = await sembrarAgentes(ctx);
@@ -237,7 +261,7 @@ describe('siembra de un cliente nuevo', () => {
     // como venían de fábrica". H2 y H7 llaman a esto más de una vez, y un
     // emprendedor que ya bautizó a su agente no debe perderlo por eso.
     const sales = await obtenerDefinicion(ctx, 'sales');
-    expect(sales.model).toBe('claude-opus-5');
+    expect(sales.model).toBe('anthropic/claude-opus-4.8');
     expect(sales.name).toBe('Chelo');
     expect(sales.systemPrompt).toBe('mío');
   });
@@ -247,7 +271,9 @@ describe('las semillas', () => {
   it('los tres agentes de cara al cliente corren en Haiku 4.5', () => {
     const s = semillasPorDefecto();
     for (const rol of ['sales', 'service', 'social'] as const) {
-      expect(s.find((x) => x.role === rol)?.model).toBe('claude-haiku-4-5');
+      // Con el prefijo del vendor: es el dialecto de OpenRouter, el proveedor
+      // con el que nacen desde la 029.
+      expect(s.find((x) => x.role === rol)?.model).toBe('anthropic/claude-haiku-4.5');
     }
   });
 
