@@ -230,6 +230,8 @@ export async function ingestDocument(
   // ── 5. Crear los valores. TODOS en borrador ───────────────────────────────
   const valores: ValorPropuesto[] = [];
   const conflictos: ConflictoValor[] = [];
+  /** Claves que el documento menciona sin cifra, contra un número ya aprobado. */
+  const imprecisos: Array<{ key: string; dice: string | null }> = [];
   const db = tenantDb(ctx);
   let posicion = 0;
 
@@ -260,6 +262,31 @@ export async function ingestDocument(
         // El documento nuevo CONFIRMA lo aprobado. No hay nada que decidir, y
         // si venía marcado en conflicto, ese conflicto ya no existe.
         if (previo.conflict_at != null) await limpiarConflicto(ctx, previo.id);
+        continue;
+      }
+
+      // ── Un documento MENOS PRECISO no contradice a uno más preciso ──
+      //
+      // El documento trae la clave pero sin nada que aplicar: era un rango
+      // («de $800 a $900») o un pendiente («por definir»). Contra un valor
+      // aprobado que SÍ dice algo, eso no es una contradicción — es un
+      // documento que dice menos.
+      //
+      // Marcarlo como conflicto ponía al emprendedor a decidir entre $850 y
+      // nada, con un botón «Aceptar» que vaciaba el precio. No hay nada que
+      // decidir aquí: se deja lo aprobado y se avisa.
+      //
+      // La invariante que esto establece, y de la que depende la pantalla:
+      // TODA contradicción marcada trae con qué reemplazar la cifra. Sin ella,
+      // «Aceptar» puede significar «bórralo», que es justo lo que no puede
+      // significar. (`propuestaSinCifra` en values/service.ts sigue defendiendo
+      // las filas que la ingesta marcó ANTES de este arreglo.)
+      if (
+        (previo.value != null || previo.value_text != null) &&
+        v.value == null &&
+        !v.value_text
+      ) {
+        imprecisos.push({ key, dice: v.note?.trim() || null });
         continue;
       }
 
@@ -332,7 +359,28 @@ export async function ingestDocument(
     );
   }
 
-  if (cifras.length === 0 && valores.length === 0 && conflictos.length === 0 && legible) {
+  // Callarse esto sería peor que el defecto que cierra: el emprendedor vería
+  // que su documento habla de la consulta inicial y que en la bóveda no pasó
+  // nada, y no tendría manera de saber por qué.
+  if (imprecisos.length > 0) {
+    const detalle = imprecisos
+      .map((i) => (i.dice ? `{valor.${i.key}} («${i.dice}»)` : `{valor.${i.key}}`))
+      .join(', ');
+    const n = imprecisos.length;
+    avisos.push(
+      `Este documento menciona ${n} número${n === 1 ? '' : 's'} que ya habías aprobado, ` +
+        `pero sin una cifra única: ${detalle}. No se cambió nada —un texto más vago no ` +
+        'desmiente un número que tú aprobaste—. Si quieres cambiarlo, edítalo tú.',
+    );
+  }
+
+  if (
+    cifras.length === 0 &&
+    valores.length === 0 &&
+    conflictos.length === 0 &&
+    imprecisos.length === 0 &&
+    legible
+  ) {
     avisos.push(
       'No se encontraron cifras en el documento. Si trae precios, revisa que estén ' +
         'escritos como "- concepto: $1,500" o en una tabla.',

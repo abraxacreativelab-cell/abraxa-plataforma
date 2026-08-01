@@ -18,6 +18,9 @@ import {
   desactivarValor,
   editarValor,
   listarValores,
+  obtenerValor,
+  propuestaSinCifra,
+  resolverConflicto,
 } from './service';
 
 let h: Harness;
@@ -156,6 +159,115 @@ describe('aprobar y desactivar', () => {
     expect(await contarBorradores(h.a)).toBe(1);
     await aprobarValor(h.a, 'draft-1');
     expect(await contarBorradores(h.a)).toBe(0);
+  });
+});
+
+/**
+ * Aceptar una contradicción que no trae con qué reemplazar la cifra.
+ *
+ * Se siembra la fila YA MARCADA en vez de producirla con la ingesta a
+ * propósito: así es exactamente como están hoy en producción las filas que la
+ * ingesta marcó antes de este arreglo. Que el pipeline ya no las cree (la otra
+ * capa) no hace nada por las que ya existen — y el botón «Aceptar» sigue
+ * enfrente de ellas.
+ */
+describe('aceptar una contradicción SIN cifra', () => {
+  const CONFLICTO_VACIO = {
+    id: 'v-rango',
+    key: 'consulta_inicial',
+    label: 'Consulta inicial',
+    kind: 'money',
+    value: 850,
+    currency: 'MXN',
+    active: true,
+    approved_at: '2026-01-15T10:00:00.000Z',
+    approved_by: 'ana@empresa-a.mx',
+    // Lo que escribió `marcarConflicto` con una cifra que era un rango.
+    conflict_value: null,
+    conflict_value_text: null,
+    conflict_currency: 'MXN',
+    conflict_note: 'de $800 a $900 — según el caso',
+    conflict_doc_id: null,
+    conflict_at: '2026-07-31T10:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    h.db.sembrar('canonical_values', [valor(h.a.tenantId, CONFLICTO_VACIO)]);
+  });
+
+  it('se rechaza en vez de dejar el valor VIGENTE Y VACÍO', async () => {
+    await expect(resolverConflicto(h.a, 'v-rango', 'aceptar')).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+
+    const v = await obtenerValor(h.a, 'v-rango');
+    expect(v.value).toBe(850);
+    expect(v.active).toBe(true);
+    // Y nada se decidió, así que la contradicción sigue esperando.
+    expect(v.conflict_at).toBeTruthy();
+  });
+
+  it('el error cita el texto que el documento SÍ trajo y dice qué hacer', async () => {
+    // Un «no se puede» sin el texto del documento deja al emprendedor sin
+    // manera de saber qué número escribir.
+    await expect(resolverConflicto(h.a, 'v-rango', 'aceptar')).rejects.toThrow(
+      /de \$800 a \$900/,
+    );
+    await expect(resolverConflicto(h.a, 'v-rango', 'aceptar')).rejects.toThrow(
+      /rango, no un precio/i,
+    );
+    await expect(resolverConflicto(h.a, 'v-rango', 'aceptar')).rejects.toThrow(/descarta/i);
+  });
+
+  it('DESCARTAR sí funciona: la salida honesta existe y no se cerró', async () => {
+    const { row } = await resolverConflicto(h.a, 'v-rango', 'descartar');
+    expect(row.value).toBe(850);
+    expect(row.active).toBe(true);
+    expect(row.conflict_at).toBeNull();
+  });
+
+  it('escribir el número a mano también la resuelve', async () => {
+    // La otra salida que el mensaje de error ofrece. Si ésta no funcionara, el
+    // error sería un callejón sin salida.
+    const row = await editarValor(h.a, 'v-rango', { value: 875 });
+    expect(row.value).toBe(875);
+    expect(row.conflict_at).toBeNull();
+  });
+
+  it('el mismo predicado que apaga el botón es el que rechaza la escritura', async () => {
+    // La UI espeja esta regla para deshabilitar «Aceptar». Que sea UNA regla y
+    // no dos parecidas es lo que evita que se separen con el tiempo.
+    expect(propuestaSinCifra(await obtenerValor(h.a, 'v-rango'))).toBe(true);
+  });
+
+  it('una propuesta CON cifra no se toca: el arreglo no cerró de más', async () => {
+    h.db.sembrar('canonical_values', [
+      valor(h.a.tenantId, { ...CONFLICTO_VACIO, id: 'v-cifra', key: 'seguimiento', conflict_value: 900 }),
+    ]);
+    expect(propuestaSinCifra(await obtenerValor(h.a, 'v-cifra'))).toBe(false);
+
+    const { row } = await resolverConflicto(h.a, 'v-cifra', 'aceptar');
+    expect(row.value).toBe(900);
+    expect(row.active).toBe(true);
+  });
+
+  it('una propuesta con TEXTO pero sin número sigue siendo aceptable', async () => {
+    // `value_text` es con qué reemplazar. Un `date` o un `text` viven ahí.
+    h.db.sembrar('canonical_values', [
+      valor(h.a.tenantId, {
+        ...CONFLICTO_VACIO,
+        id: 'v-texto',
+        key: 'horario',
+        kind: 'text',
+        value: null,
+        value_text: 'Lunes a viernes',
+        conflict_value_text: 'Lunes a sábado',
+      }),
+    ]);
+    expect(propuestaSinCifra(await obtenerValor(h.a, 'v-texto'))).toBe(false);
+
+    const { row } = await resolverConflicto(h.a, 'v-texto', 'aceptar');
+    expect(row.value_text).toBe('Lunes a sábado');
   });
 });
 

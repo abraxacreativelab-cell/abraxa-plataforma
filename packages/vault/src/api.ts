@@ -29,6 +29,7 @@ export {
   contarConflictos,
   resolverConflicto,
   tieneConflicto,
+  propuestaSinCifra,
 } from './values/service';
 
 export {

@@ -61,6 +61,7 @@ export {
   contarConflictos,
   resolverConflicto,
   tieneConflicto,
+  propuestaSinCifra,
 } from './values/service';
 export { crearValorSchema, editarValorSchema, claveSchema, CLAVE_RE } from './values/schema';
 

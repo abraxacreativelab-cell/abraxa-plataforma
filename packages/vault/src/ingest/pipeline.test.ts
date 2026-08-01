@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { injectIntoPrompt } from '../agent-inject';
 import { listarDocumentos, obtenerDocumento } from '../documents/service';
 import { resolveVault } from '../resolver';
-import { ctxSoloLectura, montar, TENANT_A, type Harness } from '../testing/harness';
+import { ctxSoloLectura, montar, TENANT_A, valor, type Harness } from '../testing/harness';
 import {
   aprobarValor,
   contarConflictos,
@@ -433,6 +433,192 @@ describe('resolver la contradicción · la decide una persona', () => {
     expect(await contarConflictos(h.a)).toBe(1);
     const enConflicto = await listarValores(h.a, { soloConflictos: true });
     expect(enConflicto.map((v) => v.key)).toEqual(['consulta_inicial']);
+  });
+});
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Una propuesta SIN cifra no puede vaciar un precio aprobado.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * El defecto que esto cierra, entero:
+ *
+ *   `consulta_inicial` está aprobado en $850 y lo citan los agentes. Llega un
+ *   documento que dice «de $800 a $900 — según el caso». `money.ts` hace lo
+ *   correcto (regla 2: un rango no tiene valor único) y devuelve `value: null`.
+ *   Pero `mismoValor(850, null)` es `false`, así que el pipeline lo marcaba
+ *   como CONTRADICCIÓN con `conflict_value = NULL`.
+ *
+ *   La UI entonces decía «Un documento nuevo dice —» y ofrecía los dos botones
+ *   de siempre. El emprendedor pulsaba ACEPTAR —acababa de leer «decide tú cuál
+ *   se queda» y tenía el documento enfrente— y `resolverConflicto` escribía
+ *   `value: null` MÁS `active: true`. El $850 desaparecía sin historial (los
+ *   valores no tienen versiones), `formatVault` devolvía '', el agente dejaba
+ *   de saber el precio y la siguiente cotización salía diciendo
+ *   «El costo de la consulta inicial es de .» — con un ok verde y un
+ *   «Actualizado y propagado» de por medio.
+ *
+ * La asimetría que lo delataba: `crearValorSchema` prohíbe expresamente guardar
+ * un `money` sin número a mano, y esta ruta escribía exactamente eso.
+ */
+describe('un documento MENOS PRECISO no vacía lo que ya se aprobó', () => {
+  /** El mismo documento, pero con la consulta expresada como rango. */
+  const DOC_RANGO = DOC_PRECIOS.replace(
+    '$850 — incluye diagnóstico',
+    'de $800 a $900 — según el caso',
+  );
+
+  /** El mismo documento, pero con la consulta declarada pendiente. */
+  const DOC_PENDIENTE = DOC_PRECIOS.replace('$850 — incluye diagnóstico', 'por definir');
+
+  /** Aprueba `consulta_inicial` a $850 y devuelve su id. */
+  async function aprobada(): Promise<string> {
+    const r = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    const id = r.valores.find((v) => v.key === 'consulta_inicial')!.id;
+    await aprobarValor(h.a, id);
+    return id;
+  }
+
+  it('EL ESCENARIO DEL HALLAZGO: un rango jamás deja el precio vigente y VACÍO', async () => {
+    const id = await aprobada();
+    await ingestDocument(h.a, { content: DOC_RANGO }, { classifier: noopClassifier });
+
+    // Pulsar «Aceptar» tiene que fallar, diga lo que diga la pantalla: no hay
+    // ninguna cifra que aplicar. Da igual por cuál de las dos capas se caiga
+    // —no se marcó conflicto, o el conflicto no trae número—: las dos son
+    // VALIDATION y las dos dejan el $850 intacto.
+    await expect(resolverConflicto(h.a, id, 'aceptar')).rejects.toMatchObject({
+      code: 'VALIDATION',
+    });
+
+    // Y lo único que de verdad importa: el precio sigue ahí.
+    const vigente = await obtenerValor(h.a, id);
+    expect(vigente.value).toBe(850);
+    expect(vigente.active).toBe(true);
+
+    // El agente y las plantillas siguen sabiéndolo. Sin esto, la cotización
+    // sale con «El costo de la consulta inicial es de .».
+    expect((await resolveVault(h.a))?.values['valor.consulta_inicial']).toBe('$850');
+    expect(await injectIntoPrompt(h.a, 'Eres el asistente.')).toContain('$850');
+  });
+
+  it('un rango NO se marca como contradicción: no contradice, sólo es más vago', async () => {
+    const id = await aprobada();
+    const r = await ingestDocument(h.a, { content: DOC_RANGO }, { classifier: noopClassifier });
+
+    expect(r.conflictos).toHaveLength(0);
+    expect(await contarConflictos(h.a)).toBe(0);
+    expect((await obtenerValor(h.a, id)).conflict_at).toBeNull();
+  });
+
+  it('pero se dice en los avisos, con lo que el documento traía', async () => {
+    // Callárselo sería peor que el defecto: el emprendedor creería que su
+    // documento no decía nada de la consulta inicial.
+    await aprobada();
+    const r = await ingestDocument(h.a, { content: DOC_RANGO }, { classifier: noopClassifier });
+
+    const texto = r.avisos.join(' ');
+    expect(texto).toContain('{valor.consulta_inicial}');
+    expect(texto).toMatch(/sin una cifra única/i);
+    expect(texto).toContain('$800');
+  });
+
+  it('un «por definir» tampoco borra un precio aprobado', async () => {
+    const id = await aprobada();
+    const r = await ingestDocument(h.a, { content: DOC_PENDIENTE }, { classifier: noopClassifier });
+
+    expect(r.conflictos).toHaveLength(0);
+    expect((await obtenerValor(h.a, id)).value).toBe(850);
+    expect((await resolveVault(h.a))?.values['valor.consulta_inicial']).toBe('$850');
+  });
+
+  it('una contradicción DE VERDAD sigue marcándose: esto no apagó la función', async () => {
+    // El riesgo de este arreglo es cerrar de más. $900 contra $850 sí es una
+    // contradicción y tiene que seguir pidiendo decisión.
+    const id = await aprobada();
+    const r = await ingestDocument(
+      h.a,
+      { content: DOC_PRECIOS.replace('$850', '$900') },
+      { classifier: noopClassifier },
+    );
+
+    expect(r.conflictos).toHaveLength(1);
+    const { row } = await resolverConflicto(h.a, id, 'aceptar');
+    expect(row.value).toBe(900);
+    expect(row.active).toBe(true);
+  });
+
+  it('LA INVARIANTE: toda contradicción marcada trae con qué reemplazar', async () => {
+    // De esto depende la pantalla: si un conflicto puede no traer cifra,
+    // «Aceptar» puede significar «bórralo».
+    //
+    // El documento mezcla los tres casos a propósito — un rango, un pendiente
+    // y una cifra de verdad — para que el barrido no pase por vacío: tiene que
+    // quedar EXACTAMENTE una contradicción, la que sí trae número.
+    h.db.sembrar('canonical_values', [
+      valor(h.a.tenantId, {
+        id: 'v-texto',
+        key: 'horario',
+        label: 'Horario',
+        kind: 'text',
+        value: null,
+        value_text: 'Lunes a viernes',
+        active: true,
+        approved_at: '2026-01-15T10:00:00.000Z',
+        approved_by: h.a.userEmail,
+        // `sembrar` escribe la fila cruda, sin los defaults del DDL: hay que
+        // poner el `null` a mano o quedaría `undefined`, que no es lo que
+        // devuelve Postgres.
+        conflict_at: null,
+      }),
+    ]);
+
+    // `consulta_inicial` a $850 y `seguimiento` a $600, los dos aprobados.
+    const r0 = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    for (const clave of ['consulta_inicial', 'seguimiento']) {
+      await aprobarValor(h.a, r0.valores.find((v) => v.key === clave)!.id);
+    }
+
+    const r = await ingestDocument(
+      h.a,
+      {
+        content: [
+          '- **Consulta inicial** (consulta_inicial): de $800 a $900 — según el caso',
+          '- seguimiento: $700',
+          '- horario: por definir',
+        ].join('\n'),
+      },
+      { classifier: noopClassifier },
+    );
+
+    // Sólo la cifra de verdad pide decisión.
+    expect(r.conflictos.map((c) => c.key)).toEqual(['seguimiento']);
+
+    const marcados = (await listarValores(h.a)).filter((v) => v.conflict_at != null);
+    expect(marcados).toHaveLength(1);
+    for (const v of marcados) {
+      expect(
+        v.conflict_value != null || v.conflict_value_text != null,
+        `«${v.key}» quedó marcado en conflicto sin nada que aplicar`,
+      ).toBe(true);
+    }
+
+    // Y el de texto, que vive fuera de la columna `value`, tampoco se marcó.
+    expect((await obtenerValor(h.a, 'v-texto')).conflict_at).toBeNull();
+  });
+
+  it('un rango sobre un BORRADOR sigue sobrescribiendo: nadie respondió por él', async () => {
+    // La regla protege lo aprobado, no lo propuesto.
+    const r1 = await ingestDocument(h.a, { content: DOC_PRECIOS }, { classifier: noopClassifier });
+    const id = r1.valores.find((v) => v.key === 'consulta_inicial')!.id;
+
+    await ingestDocument(h.a, { content: DOC_RANGO }, { classifier: noopClassifier });
+
+    const fila = await obtenerValor(h.a, id);
+    expect(fila.value).toBeNull();
+    expect(fila.active).toBe(false);
+    // Y el texto del documento queda a la vista, que es la única pista que hay.
+    expect(fila.note).toContain('$800');
   });
 });
 
