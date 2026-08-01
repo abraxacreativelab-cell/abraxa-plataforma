@@ -84,6 +84,126 @@ describe('upsert idempotente', () => {
   });
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+//  El par (provider, model) — hallazgo del 2026-07-31
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('la combinación proveedor/modelo no se puede escribir rota', () => {
+  it('cambiar SÓLO el proveedor se rechaza en vez de heredar el modelo anterior', async () => {
+    // Ésta es la reproducción exacta del hallazgo. Antes, la línea de abajo
+    // guardaba provider='openrouter' con model='claude-haiku-4-5' —un id que en
+    // OpenRouter no existe— sin una sola queja, y el cliente final dejaba de
+    // recibir respuesta en el siguiente mensaje: 400 en cada intento.
+    await upsertDefinicion(ctx, {
+      role: 'sales',
+      name: 'Ventas',
+      systemPrompt: 'p',
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+    });
+
+    await expect(
+      upsertDefinicion(ctx, {
+        role: 'sales',
+        name: 'Ventas',
+        systemPrompt: 'p',
+        provider: 'openrouter',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+
+    // Y la fila anterior quedó intacta: un upsert que se rechaza no escribe.
+    const d = await obtenerDefinicion(ctx, 'sales');
+    expect(d.provider).toBe('anthropic');
+    expect(d.model).toBe('claude-haiku-4-5');
+  });
+
+  it('el mensaje dice qué falta, no sólo que algo falló', async () => {
+    await upsertDefinicion(ctx, {
+      role: 'sales',
+      name: 'V',
+      systemPrompt: 'p',
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+    });
+
+    await expect(
+      upsertDefinicion(ctx, { role: 'sales', name: 'V', systemPrompt: 'p', provider: 'openrouter' }),
+    ).rejects.toThrow(/modelo/i);
+  });
+
+  it('escribir el par roto a mano también se rechaza', async () => {
+    await expect(
+      upsertDefinicion(ctx, {
+        role: 'sales',
+        name: 'V',
+        systemPrompt: 'p',
+        provider: 'openrouter',
+        model: 'claude-haiku-4-5',
+      }),
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('el cambio de proveedor CON modelo explícito sí pasa: es el criterio #2', async () => {
+    await upsertDefinicion(ctx, {
+      role: 'sales',
+      name: 'V',
+      systemPrompt: 'p',
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+    });
+
+    await upsertDefinicion(ctx, {
+      role: 'sales',
+      name: 'V',
+      systemPrompt: 'p',
+      provider: 'openrouter',
+      model: 'anthropic/claude-haiku-4.5',
+    });
+
+    const d = await obtenerDefinicion(ctx, 'sales');
+    expect(d.provider).toBe('openrouter');
+    expect(d.model).toBe('anthropic/claude-haiku-4.5');
+  });
+
+  it('un modelo de OpenRouter que NO está en el catálogo también pasa', async () => {
+    // La validación mira el DIALECTO del id, no el catálogo. Si mirara el
+    // catálogo, estrenar un modelo pediría un deploy — el problema que H3 vino
+    // a matar. El riesgo de dinero de un modelo desconocido lo cubre el piso
+    // conservador del ledger, no esta puerta.
+    await upsertDefinicion(ctx, {
+      role: 'analyst',
+      name: 'Analista',
+      systemPrompt: 'p',
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-chat',
+    });
+
+    expect((await obtenerDefinicion(ctx, 'analyst')).model).toBe('deepseek/deepseek-chat');
+  });
+
+  it('cambiar sólo el nombre NO exige modelo: el proveedor no se movió', async () => {
+    await upsertDefinicion(ctx, {
+      role: 'sales',
+      name: 'V',
+      systemPrompt: 'p',
+      provider: 'openrouter',
+      model: 'anthropic/claude-haiku-4.5',
+    });
+
+    // Mismo provider explícito, sin model. Hereda, y está bien que herede.
+    await upsertDefinicion(ctx, {
+      role: 'sales',
+      name: 'Chelo',
+      systemPrompt: 'p',
+      provider: 'openrouter',
+    });
+
+    const d = await obtenerDefinicion(ctx, 'sales');
+    expect(d.name).toBe('Chelo');
+    expect(d.model).toBe('anthropic/claude-haiku-4.5');
+  });
+});
+
 describe('siembra de un cliente nuevo', () => {
   it('crea los cinco roles', async () => {
     const { creados } = await sembrarAgentes(ctx);

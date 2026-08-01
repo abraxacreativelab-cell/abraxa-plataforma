@@ -159,28 +159,92 @@ export const CAPS_CONSERVADORAS: ModelCapabilities = {
 };
 
 /**
- * Capacidades de un modelo.
+ * ── El dialecto de ids de cada proveedor ────────────────────────────────────
  *
- * En OpenRouter los ids vienen con prefijo de proveedor
- * (`anthropic/claude-haiku-4.5`) y con punto en vez de guion. Se normaliza,
- * porque el modelo de abajo es el mismo y sus límites también.
+ * Cada proveedor nombra al MISMO modelo de forma distinta, y mandarle el id del
+ * otro es un 400 garantizado:
+ *
+ *   anthropic   `claude-haiku-4-5`             — sin prefijo, guiones
+ *   openrouter  `anthropic/claude-haiku-4.5`   — `vendor/modelo`, puntos
+ *   local       lo que el runtime propio use   — no lo conocemos, no opinamos
+ *
+ * `canonizarModelo` traduce un id al nombre del catálogo, o devuelve `null` si
+ * el id NO PERTENECE al dialecto del proveedor. Ese `null` es el punto: antes,
+ * `capsFor` hacía hit directo en `CATALOGO[model]` sin mirar el proveedor, así
+ * que la pareja rota (`provider='openrouter'`, `model='claude-haiku-4-5'`)
+ * respondía `esConocido() === true` y ninguna señal se encendía — hasta que
+ * OpenRouter contestaba `400 not a valid model ID` en CADA mensaje de ese rol.
+ *
+ * `local` queda exento a propósito: el día que Santiago corra modelos propios
+ * no sabemos si los va a nombrar `mi-llama` o `meta-llama/Llama-3-8B`, y
+ * adivinarlo aquí sería inventar una regla para bloquear algo que todavía no
+ * existe.
  */
-export function capsFor(model: string, provider: ProviderName = 'anthropic'): ModelCapabilities {
-  const directo = CATALOGO[model];
-  if (directo) return directo;
+export function canonizarModelo(model: string, provider: ProviderName): string | null {
+  // Un id vacío o de puro espacio no es de nadie. Se ataja aquí y no más
+  // abajo porque si no `''` pasaría el dialecto de Anthropic (no trae barra) y
+  // `'x/'` el de OpenRouter (trae barra) — dos ids degenerados que ninguna capa
+  // rechazaba y que el proveedor contesta con 400.
+  const id = model.trim();
+  if (id.length === 0) return null;
+
+  const corte = id.indexOf('/');
 
   if (provider === 'openrouter') {
-    const sinPrefijo = model.includes('/') ? (model.split('/')[1] ?? model) : model;
+    // Sin `vendor/` no es un id de OpenRouter. Ni siquiera se busca.
+    if (corte === -1) return null;
+    // Y con la barra al principio o al final tampoco: `'/x'` no tiene vendor y
+    // `'x/'` no tiene modelo.
+    const vendor = id.slice(0, corte);
+    const sinPrefijo = id.slice(corte + 1);
+    if (vendor.length === 0 || sinPrefijo.length === 0) return null;
     // `claude-haiku-4.5` → `claude-haiku-4-5`
-    const normalizado = sinPrefijo.replace(/\./g, '-');
-    const porNombre = CATALOGO[normalizado];
-    if (porNombre) return porNombre;
+    return sinPrefijo.replace(/\./g, '-');
   }
 
+  if (provider === 'local') return id;
+
+  // Anthropic directo: un id con `vendor/` es de otro proveedor.
+  return corte === -1 ? id : null;
+}
+
+/**
+ * `true` si el id RESPETA el dialecto del proveedor, esté o no en el catálogo.
+ *
+ * Es la validación que usa la escritura de `app.agent_definitions`, y es MÁS
+ * LAXA que `esConocido()` a propósito: `deepseek/deepseek-chat` no está en el
+ * catálogo de capacidades y aun así es un id perfectamente válido de OpenRouter
+ * —de hecho tiene fila de precio desde la migración 021—. Exigir `esConocido()`
+ * para escribir una definición devolvería a H3 al problema que vino a matar:
+ * estrenar un modelo requeriría un deploy.
+ */
+export function dialectoValido(model: string, provider: ProviderName): boolean {
+  return canonizarModelo(model, provider) !== null;
+}
+
+/**
+ * Capacidades de un modelo.
+ *
+ * Un id que no corresponde al dialecto del proveedor NO resuelve al catálogo:
+ * cae al perfil conservador, que es lo que corresponde a algo de lo que no
+ * sabemos nada.
+ */
+export function capsFor(model: string, provider: ProviderName = 'anthropic'): ModelCapabilities {
+  const canon = canonizarModelo(model, provider);
+  if (canon !== null) {
+    const directo = CATALOGO[canon];
+    if (directo) return directo;
+  }
   return CAPS_CONSERVADORAS;
 }
 
-/** `true` si el modelo está en el catálogo (no cayó al perfil conservador). */
+/**
+ * `true` si el modelo está en el catálogo PARA ESE PROVEEDOR (no cayó al perfil
+ * conservador).
+ *
+ * El proveedor no es decorativo: `esConocido('claude-haiku-4-5', 'openrouter')`
+ * es `false`, porque ese id no existe en OpenRouter aunque el modelo sí.
+ */
 export function esConocido(model: string, provider: ProviderName = 'anthropic'): boolean {
   return capsFor(model, provider) !== CAPS_CONSERVADORAS;
 }

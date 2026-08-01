@@ -5,17 +5,24 @@
  *
  *      1. definición    ← fila de app.agent_definitions   (no un YAML del disco)
  *      2. presupuesto   ← lanza ANTES de gastar           (no degrada en silencio)
- *      3. llave         ← del tenant, o de la plataforma
- *      4. prompt        ← fila + bóveda + contexto
- *      5. caché         ← ¿el prefijo llega al mínimo del modelo?
- *      6. loop          ← proveedor + tools, hasta 10 vueltas
- *      7. costo         ← tokens reales × precio vigente
- *      8. ledger        ← se escribe SIEMPRE, éxito o error
+ *      3. precio        ← lanza ANTES de gastar si el modelo es conocido y no
+ *                         tiene precio vigente            (si no, el tope es ciego)
+ *      4. llave         ← del tenant, o de la plataforma
+ *      5. prompt        ← fila + bóveda + contexto
+ *      6. caché         ← ¿el prefijo llega al mínimo del modelo?
+ *      7. loop          ← proveedor + tools, hasta 10 vueltas
+ *      8. costo         ← tokens reales × precio vigente
+ *      9. ledger        ← se escribe SIEMPRE, éxito o error
  *
  *  El orden no es casual. El presupuesto va en el paso 2 porque un tope que se
- *  revisa después de llamar al modelo no es un tope. Y el ledger va en el 8
+ *  revisa después de llamar al modelo no es un tope. Y el ledger va en el 9
  *  incluso cuando la llamada falló, porque los tokens de una respuesta que
  *  reventó a medio camino ya se van a facturar igual.
+ *
+ *  El paso 3 llegó con la auditoría del 2026-07-31 y es del mismo linaje que el
+ *  2: el precio se resuelve ANTES de llamar al modelo porque una corrida que
+ *  vuelve sin precio no se puede cobrar contra el tope. Ver el comentario largo
+ *  de `pricing/compute.ts`.
  */
 import type {
   AgentPort,
@@ -26,7 +33,8 @@ import type {
   TenantContext,
   Usage,
 } from '@abraxa/db';
-import { capsFor } from './capabilities';
+import { PlatformError } from '@abraxa/db';
+import { capsFor, esConocido } from './capabilities';
 import { cargarHistorial, guardarTurno } from './conversation/store';
 import { obtenerDefinicion, upsertDefinicion } from './definitions/repository';
 import { verificarPresupuesto } from './ledger/budget';
@@ -92,16 +100,64 @@ export function createAgentService(opciones: OpcionesServicio = {}): AgentPort {
       // forma de saber por qué.
       const limites = await verificarPresupuesto(ctx);
 
-      // ── 3. La llave. Del cliente si la tiene; si no, la de la plataforma. ─
+      // ── 3. El precio. También antes de gastar. ───────────────────────────
+      // Se resuelve aquí y no después del loop por una razón de dinero: una
+      // corrida que vuelve sin precio se registra en `unpriced`, y aunque el
+      // piso conservador impide que el tope se quede ciego, un modelo que
+      // NOSOTROS decimos conocer y que no tiene precio capturado es un error de
+      // operación, no una condición normal. Se dice a la primera, sin quemar un
+      // token, y con el nombre exacto de la fila que falta.
+      //
+      // Un modelo DESCONOCIDO sí pasa: estrenar un modelo sin deploy es la
+      // promesa entera de H3 (la fila de DB manda). Ése lo cubre el piso.
+      //
+      // ── Las tres condiciones, y por qué cada una ───────────────────────
+      //
+      // `falloDePrecio` separa "no hay fila" de "no pude preguntar". El
+      // `.catch(() => null)` original las colapsaba en el mismo `null`, y una
+      // puerta que lance sobre ese `null` convierte un timeout de PostgREST en
+      // un corte TOTAL del motor para todos los tenants a la vez. El precio
+      // protege el dinero; la disponibilidad vale más que la precisión de un
+      // renglón. Fail-OPEN aquí, igual que el rate limit de budget.ts.
+      //
+      // `provider === 'anthropic'` acota la puerta al único proveedor cuyo
+      // precio DEBE estar sembrado. OpenRouter reporta el costo real de la
+      // llamada (`usage.cost`), así que sus filas de la 021 son respaldo y
+      // varias combinaciones legítimas nunca se sembraron: exigir precio ahí
+      // rompería configuraciones que hoy funcionan. `local` no factura tokens.
+      let falloDePrecio = false;
+      const precio = await pricing.lookup(def.provider, def.model).catch((err) => {
+        falloDePrecio = true;
+        log.warn(`no se pudo leer el precio de ${def.provider}/${def.model}: ${String(err)}`);
+        return null;
+      });
+
+      if (
+        precio === null &&
+        !falloDePrecio &&
+        def.provider === 'anthropic' &&
+        esConocido(def.model, def.provider)
+      ) {
+        throw new PlatformError(
+          'VALIDATION',
+          `El modelo '${def.model}' de ${def.provider} está en el catálogo de capacidades ` +
+            `pero NO tiene precio vigente en app.model_pricing. Sin precio, su consumo no ` +
+            `se puede cobrar contra el tope del plan. Captura la fila y vuelve a intentar ` +
+            `(revísalo con el guion check-pricing del paquete).`,
+          { details: { provider: def.provider, model: def.model, role: def.role } },
+        );
+      }
+
+      // ── 4. La llave. Del cliente si la tiene; si no, la de la plataforma. ─
       const apiKey = await dameLlave(ctx, def.provider, def.keyRef);
 
-      // ── 4. El prompt. Fila + bóveda + contexto del tenant. ───────────────
+      // ── 5. El prompt. Fila + bóveda + contexto del tenant. ───────────────
       const system = await componerPrompt(ctx, {
         base: def.systemPrompt,
         systemSuffix: i.systemSuffix,
       });
 
-      // ── 5. Caché. Se mide el prefijo COMPLETO: tools + system. ───────────
+      // ── 6. Caché. Se mide el prefijo COMPLETO: tools + system. ───────────
       const toolsPedidas = i.tools ?? def.tools;
       const specs = toolRegistry.specs(toolsPedidas);
       const cache = decidirCache(system, specs, def.model, def.provider);
@@ -129,7 +185,7 @@ export function createAgentService(opciones: OpcionesServicio = {}): AgentPort {
       const caps = capsFor(def.model, def.provider);
       const maxOutputTokens = Math.min(limites.maxOutputTokens, caps.maxOutputTokens);
 
-      // ── 6. El loop ───────────────────────────────────────────────────────
+      // ── 7. El loop ───────────────────────────────────────────────────────
       let usage: RawUsage = USAGE_CERO;
       let iteraciones = 0;
       let texto = '';
@@ -149,6 +205,20 @@ export function createAgentService(opciones: OpcionesServicio = {}): AgentPort {
           maxOutputTokens,
           cachePrefix: cache.pedirCache,
           executor,
+          // El acumulado se copia AQUÍ, vuelta por vuelta, y no de `r.usage` al
+          // final. Es lo único que hace verdadera la promesa de abajo: si el
+          // proveedor revienta en la iteración 5, `r` nunca existe y `r.usage`
+          // tampoco — pero estas cuatro asignaciones ya ocurrieron y el consumo
+          // real llega al ledger. Antes se escribían ceros y ~$0.32 de tokens
+          // facturables desaparecían del tope.
+          //
+          // `iteraciones` viaja con el consumo por la misma razón: una fila con
+          // 120,000 tokens e `iterations = 0` es incoherente, y apaga la única
+          // columna que hace visible a un agente dándose de topes.
+          onUsage: (_delta, acumulado, vuelta) => {
+            usage = acumulado;
+            iteraciones = vuelta;
+          },
         });
 
         usage = r.usage;
@@ -161,14 +231,13 @@ export function createAgentService(opciones: OpcionesServicio = {}): AgentPort {
         // No se re-lanza todavía: primero se registra el consumo. Un error del
         // proveedor a media generación ya quemó tokens que se van a facturar, y
         // un ledger que sólo anota los éxitos subestima el gasto justo cuando
-        // algo anda mal.
+        // algo anda mal. `usage` trae lo acumulado hasta la vuelta que falló.
       }
 
-      // ── 7. El costo. Tokens reales × precio vigente. ─────────────────────
-      const precio = await pricing.lookup(def.provider, def.model).catch(() => null);
-      const costo: CostoCalculado = calcularCosto(usage, precio);
+      // ── 8. El costo. Tokens reales × precio vigente (resuelto en el 3). ──
+      const costo: CostoCalculado = calcularCosto(usage, precio, def.provider);
 
-      // ── 8. El ledger. Siempre. ───────────────────────────────────────────
+      // ── 9. El ledger. Siempre. ───────────────────────────────────────────
       await registrarConsumo(ctx, {
         role: def.role,
         agentDefinitionId: def.id,

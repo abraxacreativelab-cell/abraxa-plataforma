@@ -1,4 +1,3 @@
-#!/usr/bin/env tsx
 /**
  * ════════════════════════════════════════════════════════════════════════════
  *  Criterio #4 — MEDIR el caché contra la API real. No asumirlo.

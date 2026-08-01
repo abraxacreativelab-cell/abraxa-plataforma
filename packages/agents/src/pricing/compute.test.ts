@@ -79,6 +79,37 @@ describe('cálculo de costo', () => {
     // es el camino por el que se cobra mal durante meses sin enterarse.
   });
 
+  it('…pero contra el TOPE cuenta el piso, no el 0 (hallazgo 2026-07-31)', () => {
+    // El 0 honesto de arriba era, además, un tope apagado: gastoDesde() sumaba
+    // ceros y verificarPresupuesto() comparaba 0 contra el límite del plan.
+    // `budgetedUsd` es la respuesta a la OTRA pregunta.
+    const r = calcularCosto(usage({ inputTokens: 500_000, outputTokens: 500_000 }), null);
+
+    // 500k × $10/Mtok + 500k × $50/Mtok = 5.00 + 25.00
+    expect(r.budgetedUsd).toBeCloseTo(30, 6);
+    // Y el costo sigue intacto: son dos números, no uno reinterpretado.
+    expect(r.costUsd).toBe(0);
+  });
+
+  it('con precio, costo y presupuestado son el MISMO número', () => {
+    // El piso sólo aparece cuando no hay con qué calcular. Si divergieran
+    // teniendo precio, el tope estaría cobrando algo distinto de lo que reporta.
+    const conPrecio = calcularCosto(usage({ inputTokens: 1_000_000 }), HAIKU);
+    expect(conPrecio.budgetedUsd).toBe(conPrecio.costUsd);
+
+    const delProveedor = calcularCosto(usage({ providerCostUsd: 0.0042 }), null);
+    expect(delProveedor.budgetedUsd).toBe(delProveedor.costUsd);
+  });
+
+  it("un modelo 'local' sin precio tiene piso 0: no factura tokens", () => {
+    // El piso protege del gasto que no vemos. Un runtime propio no genera
+    // gasto, así que cobrarle un piso sería cortar el servicio por dinero que
+    // nadie está pagando.
+    const r = calcularCosto(usage({ inputTokens: 1_000_000 }), null, 'local');
+    expect(r.budgetedUsd).toBe(0);
+    expect(r.source).toBe('unpriced');
+  });
+
   it('redondea a los 6 decimales de numeric(12,6) del ledger', () => {
     const r = calcularCosto(usage({ inputTokens: 1 }), HAIKU);
     // Que la API reporte un número y la base guarde otro, aunque difieran en el

@@ -19,8 +19,9 @@
  *  pueden estar contestando con definiciones distintas después de un cambio, y
  *  ese bug es de los que no se reproducen en desarrollo.
  */
-import { tenantDb, notFound } from '@abraxa/db';
+import { tenantDb, notFound, PlatformError } from '@abraxa/db';
 import type { AgentRole, ProviderName, TenantContext } from '@abraxa/db';
+import { dialectoValido } from '../capabilities';
 import type { AgentDefinition } from '../types';
 import { semillasPorDefecto } from './defaults';
 
@@ -117,6 +118,28 @@ export interface EntradaUpsert {
  * `provider` y `model` son opcionales: al crear caen en la semilla del rol; al
  * actualizar, omitirlos CONSERVA lo que ya había. Cambiar el nombre del agente
  * no debería resetear su modelo.
+ *
+ * ── La excepción, y por qué existe (auditoría 2026-07-31) ───────────────────
+ *
+ * Conservar el valor previo es correcto para CADA columna por separado y
+ * peligroso para el PAR `(provider, model)`, porque los dos son la misma
+ * decisión escrita en dos lugares. Cambiar sólo `provider` heredaba el `model`
+ * anterior y fabricaba la combinación rota sin que nadie la escribiera:
+ *
+ *   provider='openrouter'  +  model='claude-haiku-4-5'   ← ese id no existe en
+ *                                                          OpenRouter
+ *
+ * La fila se guardaba sin una queja. El costo salía en el SIGUIENTE mensaje del
+ * cliente final: `400 not a valid model ID`, `PROVIDER_ERROR` no reintentable,
+ * y una conversación muerta por cada mensaje de ese rol hasta que alguien
+ * leyera el log.
+ *
+ * Por eso cambiar de proveedor EXIGE `model` explícito. No es una molestia
+ * gratuita: es que la respuesta correcta no se puede adivinar —el mismo modelo
+ * se llama distinto en cada proveedor— y adivinar mal se paga con silencio.
+ *
+ * @throws PlatformError('VALIDATION') si se cambia de proveedor sin decir el
+ *         modelo, o si el id no pertenece al dialecto del proveedor.
  */
 export async function upsertDefinicion(
   ctx: TenantContext,
@@ -130,14 +153,63 @@ export async function upsertDefinicion(
     .eq('role', entrada.role)
     .limit(1);
 
+  // Esta lectura se tragaba su error, y las otras dos del archivo no. No era
+  // simetría: si la SELECT falla de forma transitoria, `previa` queda undefined
+  // y las líneas de abajo caen en la SEMILLA — o sea, un parpadeo de la base
+  // le resetea al cliente el proveedor y el modelo que él había elegido, en
+  // silencio y sin que nadie escribiera un cambio. Es la misma familia del
+  // hallazgo: una fila rota que nadie fabricó a propósito.
+  if (existente.error) throw existente.error;
+
   const previa = (existente.data as FilaCruda[] | null)?.[0];
+
+  const provider = (entrada.provider ??
+    previa?.provider ??
+    semilla?.provider ??
+    'anthropic') as ProviderName;
+
+  // Cambio de proveedor sin modelo: se rechaza en vez de heredar el previo.
+  if (
+    entrada.provider !== undefined &&
+    previa !== undefined &&
+    entrada.provider !== previa.provider &&
+    entrada.model === undefined
+  ) {
+    throw new PlatformError(
+      'VALIDATION',
+      `Para mover el agente '${entrada.role}' de ${previa.provider} a ${entrada.provider} ` +
+        `hay que decir también el modelo: el mismo modelo se llama distinto en cada ` +
+        `proveedor y heredar '${previa.model}' dejaría la fila en una combinación que el ` +
+        `proveedor rechaza con 400 en cada mensaje.`,
+      { details: { role: entrada.role, de: previa.provider, a: entrada.provider } },
+    );
+  }
+
+  const model = entrada.model ?? previa?.model ?? semilla?.model ?? 'claude-haiku-4-5';
+
+  // El par, validado. Se comprueba el DIALECTO del id, no que el modelo esté en
+  // el catálogo: `deepseek/deepseek-chat` no está tabulado en capabilities.ts y
+  // aun así es un id legítimo de OpenRouter con precio desde la 021. Exigir
+  // catálogo aquí devolvería a H3 al problema que vino a matar — estrenar un
+  // modelo pediría un deploy. El riesgo de dinero de un modelo desconocido lo
+  // cubre el piso de `pricing/compute.ts`, no esta validación.
+  if (!dialectoValido(model, provider)) {
+    throw new PlatformError(
+      'VALIDATION',
+      `El modelo '${model}' no corresponde al proveedor '${provider}'. ` +
+        (provider === 'openrouter'
+          ? `OpenRouter nombra sus modelos 'vendor/modelo' (p. ej. 'anthropic/claude-haiku-4.5').`
+          : `Anthropic los nombra sin prefijo de vendor (p. ej. 'claude-haiku-4-5').`),
+      { details: { role: entrada.role, provider, model } },
+    );
+  }
 
   const fila = {
     role: entrada.role,
     name: entrada.name,
     system_prompt: entrada.systemPrompt,
-    provider: entrada.provider ?? previa?.provider ?? semilla?.provider ?? 'anthropic',
-    model: entrada.model ?? previa?.model ?? semilla?.model ?? 'claude-haiku-4-5',
+    provider,
+    model,
     tools: entrada.tools ?? previa?.tools ?? semilla?.tools ?? [],
     key_ref: entrada.keyRef !== undefined ? entrada.keyRef : (previa?.key_ref ?? null),
     enabled: entrada.enabled ?? previa?.enabled ?? true,

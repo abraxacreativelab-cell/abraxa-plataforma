@@ -12,7 +12,7 @@ H6, que llama a `AgentPort`) ni construye el Ritual de Fundación (H7, que usa
 |---|---|
 | **Handoff** | `docs/handoffs/H3-agents.md` |
 | **Montado en** | `apps/api` → `/agents` (H1 ya lo cableó) |
-| **Migraciones** | `020`–`024` |
+| **Migraciones** | `020`–`027` |
 | **Contratos** | `packages/db/ports.ts` |
 
 ---
@@ -51,8 +51,53 @@ Aquí la fila guarda los tokens: un precio equivocado es un `UPDATE`, no un dato
 perdido.
 
 Un modelo sin precio **no se cobra a un número inventado**: se marca
-`cost_source='unpriced'`, se registra con costo 0, y
-`src/bin/check-pricing.ts` lo saca a la luz.
+`cost_source='unpriced'` y se registra con costo 0.
+
+### 3. …y ese 0 honesto apagaba el tope *(hallazgo del 2026-07-31)*
+
+El `0` de `unpriced` era correcto para la contabilidad y catastrófico para el
+presupuesto: `gastoDesde()` sumaba ceros, el tope comparaba `0 >= 5.00` y
+**siempre dejaba pasar**. Un tenant de plan free podía quemar cientos de dólares
+reales con `GET /agents/budget` reportando `gastadoUsd: 0`. La única señal era un
+`log.warn` por corrida.
+
+No se arregla inventando un precio —ése es el pecado de GARDEN—. Se arregla
+separando las dos preguntas, que nunca fueron la misma:
+
+| Columna | Pregunta | Cuando no hay precio |
+|---|---|---|
+| `cost_usd` | ¿cuánto costó? | `0`, marcado, y **recalculable** |
+| `budgeted_usd` | ¿cuánto cuenta al tope? | el **piso** conservador |
+
+El piso es el modelo más caro del catálogo (`PRECIO_DE_PISO`, Fable 5). Falla
+hacia caro a propósito: cortar el servicio de más se atiende con una llamada;
+una factura de $500 en un plan de $5, no.
+
+Y por delante hay una puerta más: si el modelo **está en el catálogo** de
+`capabilities.ts` y no tiene precio vigente, la corrida se rechaza con
+`VALIDATION` **antes** de llamar al proveedor. Un modelo que decimos conocer sin
+precio es un error de operación, no una condición normal. Un modelo
+*desconocido* sí corre —estrenar modelo sin deploy es la promesa entera de H3—
+y de ése se encarga el piso.
+
+Dos guardianes impiden que el hueco vuelva:
+
+- **`src/pricing/seeds.test.ts`** cruza el catálogo del código contra las
+  semillas de `migrations/` y **rompe el build**. Corre en `npm test`, o sea en
+  CI, sin base.
+- **`npm run check:pricing`** corre contra la base real y ve lo que la prueba no
+  puede ver: los modelos que los **clientes** pusieron en sus filas. Va en el
+  despliegue, después de `npm run migrate`.
+
+> **La migración 021 decía tener esa prueba desde el primer día.** No existía —
+> y por eso `claude-sonnet-4-6` vivió meses en el catálogo sin precio. La frase
+> sigue escrita en `migrations/021_model_pricing.sql` y en el `COMMENT ON` de
+> `cost_source` de la `023`, y **no se puede borrar**: las dos ya están
+> aplicadas, y `scripts/migrate.mjs:88-98` aborta el despliegue entero si el
+> checksum de una migración aplicada cambia. Los `COMMENT ON` de la `025` y la
+> `026` pisan ese texto en la base viva; el encabezado de la `025` deja la nota.
+> Un comentario que promete un guardián inexistente es peor que no tener
+> guardián: hace que nadie lo busque.
 
 ---
 
@@ -88,17 +133,26 @@ y eso está probado (`service.test.ts`, criterio #7).
 ```
 1. definición    ← fila de app.agent_definitions   (no un YAML del disco)
 2. presupuesto   ← lanza ANTES de gastar           (no degrada en silencio)
-3. llave         ← del tenant, o de la plataforma
-4. prompt        ← fila + bóveda + contexto del tenant
-5. caché         ← ¿el prefijo llega al mínimo del modelo?
-6. loop          ← proveedor + tools, hasta 10 vueltas
-7. costo         ← tokens reales × precio vigente
-8. ledger        ← se escribe SIEMPRE, éxito o error
+3. precio        ← lanza ANTES de gastar si el modelo es conocido y no tiene precio
+4. llave         ← del tenant, o de la plataforma
+5. prompt        ← fila + bóveda + contexto del tenant
+6. caché         ← ¿el prefijo llega al mínimo del modelo?
+7. loop          ← proveedor + tools, hasta 10 vueltas
+8. costo         ← tokens reales × precio vigente
+9. ledger        ← se escribe SIEMPRE, éxito o error
 ```
 
-El paso 2 va antes que el 6 porque un tope que se revisa después de llamar al
-modelo no es un tope. El 8 corre aunque el 6 haya reventado, porque los tokens
-de una respuesta que falló a media generación ya se van a facturar.
+Los pasos 2 y 3 van antes que el 7 porque un tope que se revisa después de
+llamar al modelo no es un tope, y un precio que se busca después tampoco sirve
+para aplicarlo. El 9 corre aunque el 7 haya reventado, porque los tokens de una
+respuesta que falló a media generación ya se van a facturar.
+
+Y **se registran los de verdad**, no cero. El acumulado del loop se empuja hacia
+afuera vuelta por vuelta (`agentLoop({ onUsage })`): si el proveedor devuelve
+529 en la quinta iteración, las cuatro anteriores ya se contabilizaron. Antes
+vivían en una variable local que se iba con la excepción, así que el ledger
+escribía `input_tokens=0` y ~$0.32 ya facturables desaparecían del tope — y como
+un 529 es reintentable, cada reintento repetía la fuga.
 
 ---
 
@@ -150,7 +204,7 @@ pena *pedir* el caché. La verificación es `cache_read_input_tokens > 0` contra
 la API real:
 
 ```bash
-ANTHROPIC_API_KEY=sk-... npx tsx packages/agents/src/bin/measure-cache.ts
+ANTHROPIC_API_KEY=sk-... npm run measure:cache --workspace packages/agents
 ```
 
 ---
@@ -164,18 +218,61 @@ ANTHROPIC_API_KEY=sk-... npx tsx packages/agents/src/bin/measure-cache.ts
 | `022` | `agent_messages` — historial del agente |
 | `023` | `usage_ledger` — consumo real, con tokens crudos |
 | `024` | `agent_plan_limits` *(tenantless)* + `agent_budget_overrides` |
+| `025` | precio de `claude-sonnet-4-6`, el que faltaba + recálculo hacia atrás |
+| `026` | `usage_ledger.budgeted_usd` — lo que cuenta contra el tope |
+| `027` | CHECK cruzado `(provider, model)` en `agent_definitions` |
+
+---
+
+## El par `(provider, model)` *(hallazgo del 2026-07-31)*
+
+Cada proveedor nombra al **mismo** modelo distinto, y mandarle el id del otro es
+un 400 garantizado:
+
+| Proveedor | Dialecto | Ejemplo |
+|---|---|---|
+| `anthropic` | sin prefijo de vendor | `claude-haiku-4-5` |
+| `openrouter` | `vendor/modelo` | `anthropic/claude-haiku-4.5` |
+| `local` | lo que el runtime propio use | *no lo conocemos; no opinamos* |
+
+La 020 le puso `CHECK` a `provider` y dejó `model` como texto libre, así que la
+**combinación** nunca se validó. Peor: `upsertDefinition` la fabricaba sola —
+cambiar sólo `provider` heredaba el `model` anterior y dejaba la fila en el par
+roto, sin una queja. El costo aparecía en el siguiente mensaje del cliente
+final: `400 not a valid model ID` en cada intento, hasta que alguien leyera el
+log.
+
+Cerrado en dos capas, porque ninguna basta sola:
+
+- **Código** — cambiar de proveedor **exige `model` explícito**, y el par se
+  valida antes del upsert (`dialectoValido`). Es la capa que da un mensaje
+  entendible y evoluciona sin migración.
+- **Base** — el `CHECK` de la `027`. Es la que sobrevive a un `psql` a mano y al
+  próximo camino de escritura que alguien agregue sin acordarse de validar.
+
+La validación mira el **dialecto**, no el catálogo: `deepseek/deepseek-chat` no
+está tabulado en `capabilities.ts` y es un id perfectamente legítimo con precio
+desde la `021`. Exigir catálogo devolvería a H3 al YAML de disco de GARDEN.
+
+Y `esConocido()` ya considera el proveedor: antes hacía *hit* directo en el
+catálogo ignorándolo, así que el par roto respondía `true` y ninguna señal se
+encendía.
 
 ---
 
 ## Guiones
 
 ```bash
-# ¿Cachea de verdad? (necesita ANTHROPIC_API_KEY)
-npx tsx packages/agents/src/bin/measure-cache.ts
-
 # ¿Algún modelo en uso sin precio capturado? (necesita base)
-npx tsx packages/agents/src/bin/check-pricing.ts
+#   → correr en cada despliegue, después de `npm run migrate`
+npm run check:pricing --workspace packages/agents
+
+# ¿Cachea de verdad? (necesita ANTHROPIC_API_KEY)
+npm run measure:cache --workspace packages/agents
 ```
+
+Los dos se compilan con `esbuild --bundle` y corren con `node`; no dependen de
+`tsx`.
 
 ---
 
