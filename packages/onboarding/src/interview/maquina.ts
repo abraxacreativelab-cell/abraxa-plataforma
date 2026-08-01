@@ -58,6 +58,8 @@ const CAMPOS: Record<string, keyof EstadoNegocio> = {
   agente: 'agente',
   nombre_agente: 'agente',
   nombreAgente: 'agente',
+  categoria: 'categoria',
+  categoría: 'categoria',
   giro: 'giro',
   nicho: 'nicho',
   etapa: 'etapa',

@@ -42,12 +42,30 @@
 /// <reference path="./tables.d.ts" />
 import { registerPort } from '@abraxa/db';
 import { areasPort } from './port';
+import { registrarSink } from './services/blueprint';
 
 // Registrado al importar el paquete. `apps/api` lo importa al arrancar, y
 // `(app)/layout.tsx` de H5 lo encuentra con `tryPort('areas')` — que es como el
 // sidebar deja de usar su mock y empieza a pintar áreas de verdad, sin que H5
 // cambie una línea.
 registerPort('areas', areasPort);
+
+/**
+ * El paso 2 de los tres que `packages/onboarding/src/ports/blueprint-sink.ts`
+ * le dejó anotados a este carril: **registrarlo**.
+ *
+ * Sin esta línea, un Ritual que se cierra guarda su blueprint con `applied_at`
+ * en NULL y el emprendedor llega al panel sin una sola área suya. Eso es
+ * exactamente lo que estaba pasando en producción.
+ *
+ * `void` y no `await`: un módulo no puede esperar a nadie para terminar de
+ * cargarse. La resolución es un `import()` de un paquete que ya está en el
+ * grafo, o sea un microtask, y quien de verdad importa —el cierre del Ritual—
+ * ocurre muchos turnos de evento después. Y si aun así llegara antes, no se
+ * pierde nada: el blueprint queda pendiente y `leerFilasSembrando()` lo
+ * proyecta en la primera carga del mapa. Dos redes, no una.
+ */
+void registrarSink();
 
 export { router } from './routes';
 export { meta } from './meta';
@@ -85,6 +103,21 @@ export {
   seedTenant,
   unlockArea,
 } from './services/areas';
+export {
+  NOMBRE_DEL_SINK,
+  aplicarBlueprintDelRitual,
+  proyectarBlueprint,
+  registrarSink,
+} from './services/blueprint';
+export {
+  type BlueprintDelRitual,
+  hitosQueFaltan,
+  leerBlueprint,
+  planDeArea,
+  planDeProyeccion,
+  traducirRequisito,
+  traducirRequisitos,
+} from './domain/blueprint';
 export {
   LIMITE_HITOS,
   createMilestone,

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { PlatformError } from '@abraxa/db';
 import { areaOnboarding, type OnboardingView } from '@abraxa/areas';
-import { contextoDelMapa, motivoSinContexto } from '../context';
+import { contextoDelMapa, motivoSinContextoTexto } from '../context';
 
 /**
  * Las acciones del mini-onboarding de un área.
@@ -28,7 +28,7 @@ async function correr(
   ) => Promise<{ view: OnboardingView; degraded?: string | null }>,
 ): Promise<RespuestaAccion> {
   const ctx = await contextoDelMapa();
-  if (!ctx) return { ok: false, error: motivoSinContexto(), view: null };
+  if (!ctx) return { ok: false, error: motivoSinContextoTexto(), view: null };
 
   try {
     const { view, degraded } = await trabajo(ctx);

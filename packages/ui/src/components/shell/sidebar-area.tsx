@@ -6,6 +6,7 @@ import type { AreaSummary } from '@abraxa/db/ports';
 import { Icon } from '../primitives/icon';
 import { cn } from '../../lib/cn';
 import { accentForArea } from '../../lib/accent';
+import { sinJerga } from '../../lib/castellano';
 import { toolsForArea } from '../registry/tool-registry';
 import { isNavigable } from '../nav/resolve-areas';
 
@@ -26,6 +27,8 @@ export interface SidebarAreaProps {
   /** Qué hace falta para desbloquearla, si se sabe. */
   requirement?: string;
   brand?: string | null;
+  /** Posición en la barra. Escalona la entrada. */
+  indice?: number;
   onNavigate?: () => void;
 }
 
@@ -41,12 +44,16 @@ export function SidebarArea({
   pathname,
   requirement,
   brand,
+  indice = 0,
   onNavigate,
 }: SidebarAreaProps) {
   const abierta = isNavigable(area);
   const { vars } = accentForArea(area.slug, brand);
   const tools = abierta ? toolsForArea(area.tools, area.access) : [];
   const destino = tools[0]?.href ?? `/${area.slug}`;
+  // El requisito lo escribe quien sea dueño del área, no H5. La aduana es lo
+  // que impide que un «Falta: H2 · packages/tenancy» aterrice bajo un candado.
+  const falta = sinJerga(requirement);
 
   const contenido = (
     <>
@@ -92,7 +99,10 @@ export function SidebarArea({
   const clasesBase = 'flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors';
 
   return (
-    <li style={vars as React.CSSProperties}>
+    <li
+      className="entra"
+      style={{ ...(vars as React.CSSProperties), '--entra-i': indice } as React.CSSProperties}
+    >
       {abierta ? (
         <Link
           href={destino}
@@ -149,9 +159,9 @@ export function SidebarArea({
 
       {/* Qué falta para abrirla. Sin esto el candado es una puerta cerrada sin
           letrero, y no invita a nada. */}
-      {!abierta && requirement && (
-        <p className="ml-[2.85rem] mt-1 text-[11px] leading-snug text-muted-foreground/45">
-          Se abre cuando {requirement}.
+      {!abierta && falta && (
+        <p className="ml-[2.85rem] mt-1 text-pretty text-[11px] leading-snug text-muted-foreground/45">
+          Se abre cuando {falta}.
         </p>
       )}
     </li>

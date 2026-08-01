@@ -49,11 +49,11 @@ import type {
   TenantAreaRow,
 } from '../domain/types';
 import { readSignals, seedAreas } from '../data/rpc';
+import { COLUMNAS_AREA, LIMITE_AREAS } from '../data/tablas';
+import { proyectarBlueprint } from './blueprint';
 import { listMilestones } from './milestones';
 
-/** Tope de áreas por empresa. No es una paginación: es un techo de cordura.
- *  Un mapa con doscientas áreas no es un mapa, es una lista de pendientes. */
-export const LIMITE_AREAS = 60;
+export { LIMITE_AREAS };
 
 // ════════════════════════════════════════════════════════════════════════════
 // Permisos — consumiendo el modelo de H2, sin duplicarlo
@@ -82,9 +82,6 @@ export function accessFor(ctx: TenantContext, areaSlug: string): AreaAccess | nu
 // Lectura de filas
 // ════════════════════════════════════════════════════════════════════════════
 
-const COLUMNAS =
-  'tenant_id, area_slug, state, label, icon, blurb, tools, requirements, progress, unlocked_at, position';
-
 function comoLista(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : [];
 }
@@ -92,7 +89,7 @@ function comoLista(raw: unknown): string[] {
 async function leerFilas(ctx: TenantContext): Promise<TenantAreaRow[]> {
   const { data, error } = await tenantDb(ctx)
     .from('tenant_areas')
-    .select(COLUMNAS)
+    .select(COLUMNAS_AREA)
     .order('position', { ascending: true })
     .limit(LIMITE_AREAS);
 
@@ -103,24 +100,46 @@ async function leerFilas(ctx: TenantContext): Promise<TenantAreaRow[]> {
 }
 
 /**
- * Las filas del mapa, sembrando la primera vez.
+ * Las filas del mapa, creándolas la primera vez.
  *
  * Criterio 1 del handoff: *"un tenant nuevo nace con sus áreas sembradas según
- * su giro"*. El §3 dice que quien crea el estado inicial es H7 (el Ritual), y
- * eso sigue siendo lo correcto — pero H7 no ha aterrizado, y un mapa vacío no
- * es un estado válido del producto: es una pantalla en blanco.
+ * su giro"*. Y hay DOS orígenes posibles para ese estado inicial, en este orden
+ * de prioridad:
  *
- * Sembrar en la primera lectura resuelve las dos cosas a la vez. Es idempotente
- * (`areas_seed_tenant` no duplica ni pisa el avance), así que cuando H7 llame
- * a `POST /areas/seed` en el ritual, esto simplemente no encuentra nada que
- * hacer. No hay una segunda vía de creación: hay una sola función, llamada
- * desde dos lados.
+ *  1. EL BLUEPRINT DEL RITUAL, si lo hay. Es el mapa que el agente decidió con
+ *     los datos de SU negocio y le narró en el último turno: «Ventas y
+ *     marketing», «Servicio y atención», con la promesa escrita para él. Ese es
+ *     el pago de 20 minutos de preguntas y es lo que tiene que ver al llegar.
+ *  2. EL CATÁLOGO DEL GIRO, si no. Un mapa genérico pero real, para quien
+ *     todavía no ha hecho el Ritual.
+ *
+ * ── Por qué la proyección se dispara AQUÍ y no sólo al cerrar el Ritual ─────
+ *
+ * Porque al cerrar el Ritual también se dispara —`ritual.ts` llama a
+ * `aplicarBlueprint`— y aun así no fue suficiente: la empresa que terminó su
+ * Ritual el 2026-08-01 tenía el blueprint guardado con `applied_at` en NULL,
+ * porque cuando cerró NO HABÍA SINK REGISTRADO. Un cierre que ocurre una sola
+ * vez no puede ser la única oportunidad de proyectar; si lo fuera, esa empresa
+ * se habría quedado con el panel genérico para siempre y la única salida sería
+ * volver a entrevistar a su dueño.
+ *
+ * Con esto, se recupera sola la próxima vez que alguien de esa empresa entre a
+ * cualquier pantalla del producto. Sin guiones que correr y sin avisarle a nadie.
+ *
+ * ── Y por qué no cuesta una consulta por carga ─────────────────────────────
+ *
+ * Porque sólo entra cuando el mapa está VACÍO. En cuanto hay una fila —o sea,
+ * desde la segunda carga— este bloque no se ejecuta. `listAreas()` corre en el
+ * layout de cada página del producto y no puede permitirse un viaje más.
  */
 async function leerFilasSembrando(ctx: TenantContext): Promise<TenantAreaRow[]> {
   const filas = await leerFilas(ctx);
   if (filas.length > 0) return filas;
 
-  await seedAreas(ctx);
+  // El mapa que el Ritual prometió. Si no hay Ritual —o si H7 no está montado—
+  // devuelve `false` sin lanzar y se cae al catálogo del giro.
+  if (!(await proyectarBlueprint(ctx))) await seedAreas(ctx);
+
   return leerFilas(ctx);
 }
 
@@ -201,6 +220,7 @@ async function escribirEstado(
 
 function aTarjeta(r: Reconciliada, ctx: TenantContext): AreaCard {
   const access = accessFor(ctx, r.row.area_slug);
+  const tools = comoLista(r.row.tools);
   return {
     slug: r.row.area_slug,
     label: r.row.label || r.row.area_slug,
@@ -209,11 +229,15 @@ function aTarjeta(r: Reconciliada, ctx: TenantContext): AreaCard {
     state: r.state,
     access,
     blurb: r.row.blurb ?? '',
-    tools: comoLista(r.row.tools),
+    tools,
     missing: r.missing,
     ratio: r.ratio,
     unlockedAt: r.row.unlocked_at,
     navigable: navegable(r.state, access),
+    // Un área sin herramientas es un área cuya pantalla todavía no existe. Hoy
+    // le pasa a Finanzas, Operaciones, RH, Onboarding, Inventario y Marketing:
+    // seis de las nueve del catálogo de la 090.
+    enConstruccion: tools.length === 0,
   };
 }
 
@@ -249,7 +273,14 @@ async function cargarAreas(
 export async function listAreas(ctx: TenantContext): Promise<AreaSummary[]> {
   const { areas } = await cargarAreas(ctx);
   return areas.map(
-    ({ missing: _m, ratio: _r, unlockedAt: _u, navigable: _n, ...resumen }) => resumen,
+    ({
+      missing: _m,
+      ratio: _r,
+      unlockedAt: _u,
+      navigable: _n,
+      enConstruccion: _c,
+      ...resumen
+    }) => resumen,
   );
 }
 
@@ -274,9 +305,24 @@ export async function getArea(ctx: TenantContext, areaSlug: string): Promise<Are
 /**
  * Siembra el mapa. Idempotente. La llama H7 al terminar el ritual, y también
  * la primera lectura si el mapa está vacío.
+ *
+ * ── Y REPROYECTA el blueprint después, que no es un detalle ────────────────
+ *
+ * `areas_seed_tenant` refresca desde el catálogo `label`, `blurb`, `tools` y
+ * `position` de cada área que ya existe (su `ON CONFLICT DO UPDATE`), y eso es
+ * correcto para la mecánica: así una herramienta nueva aparece sin migrar a
+ * nadie. Pero pisa las PALABRAS: «Ventas y marketing», que el agente escribió
+ * para este negocio, volvería a ser «Ventas».
+ *
+ * O sea que sembrar dos veces le degradaría el mapa al único cliente que hizo
+ * el Ritual completo — en silencio, y sin que ninguna prueba de la siembra se
+ * quejara. Volver a superponer el blueprint deja las dos cosas: la mecánica
+ * fresca del catálogo y las palabras que se le prometieron.
  */
 export async function seedTenant(ctx: TenantContext): Promise<{ created: number }> {
-  return { created: await seedAreas(ctx) };
+  const created = await seedAreas(ctx);
+  await proyectarBlueprint(ctx);
+  return { created };
 }
 
 /**
@@ -410,7 +456,7 @@ export async function marcarActiva(ctx: TenantContext, areaSlug: string): Promis
 export async function unaFila(ctx: TenantContext, areaSlug: string): Promise<TenantAreaRow> {
   const { data, error } = await tenantDb(ctx)
     .from('tenant_areas')
-    .select(COLUMNAS)
+    .select(COLUMNAS_AREA)
     .eq('area_slug', areaSlug)
     .maybeSingle();
 

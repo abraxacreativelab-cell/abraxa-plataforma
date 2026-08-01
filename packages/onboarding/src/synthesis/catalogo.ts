@@ -64,10 +64,33 @@ function esIdea(e: EstadoNegocio): boolean {
   return /idea|arranc|empez|valid|pre-?lanz/.test(etapa);
 }
 
-/** ¿Va a haber más gente, hoy o pronto? */
+/**
+ * ¿Va a haber más gente, hoy o pronto?
+ *
+ * Lee dos vocabularios porque el dato llega de dos sitios. Desde el 2026-08-01
+ * la fase 1 lo pregunta con botones y lo que llega es una CUBETA — "Solo yo",
+ * "Somos de 2 a 5", "Somos más de 20"— donde no aparece ninguna de las palabras
+ * que este predicado buscaba. Sin el conteo, un negocio de 18 personas caía en
+ * "hoy estás tú" y el área de Equipo nacía con candado: exactamente al revés.
+ *
+ * Así que primero se miran los números —cualquiera mayor que 1— y sólo después
+ * las palabras, que siguen sirviendo para lo que se escribe a mano ("somos yo y
+ * mi socio", "voy a contratar a alguien").
+ */
 function conGente(e: EstadoNegocio): boolean {
-  const eq = (e.equipo ?? '').toLowerCase();
-  return /equipo|socio|emplead|contrat|asistent|becari/.test(eq);
+  const eq = (e.equipo ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (!eq) return false;
+
+  // "Solo yo" es explícito y gana sobre cualquier número que venga después
+  // (los rangos de los botones no lo traen, pero un "solo yo, 1 persona" sí).
+  if (/^\s*solo\s+yo/.test(eq)) return false;
+
+  if ((eq.match(/\d+/g) ?? []).some((n) => Number(n) > 1)) return true;
+
+  return /equipo|socio|emplead|contrat|asistent|becari|somos/.test(eq);
 }
 
 /** Un paso del recorrido que ocurre DESPUÉS de cobrar. */

@@ -75,7 +75,7 @@ afterEach(() => {
   __clearPorts();
 });
 
-/** Lleva el Ritual hasta 'gente': a un solo mensaje de la síntesis. */
+/** Lleva el Ritual hasta 'dolor': a un solo mensaje de la síntesis. */
 async function hastaElBordeDeLaSintesis(): Promise<void> {
   const ctx = ctxDePrueba();
   agente.guion(...ENTREVISTA_COMPLETA);
@@ -83,7 +83,7 @@ async function hastaElBordeDeLaSintesis(): Promise<void> {
   for (const dicho of HASTA_GENTE) await responder(ctx, dicho);
 
   const s = await cargarSesion(ctx);
-  if (s?.fase !== 'gente') throw new Error(`el andamio esperaba 'gente' y quedó en '${s?.fase}'`);
+  if (s?.fase !== 'dolor') throw new Error(`el andamio esperaba 'dolor' y quedó en '${s?.fase}'`);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

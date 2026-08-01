@@ -294,7 +294,13 @@ describe('criterio 5 — cambiar `requirements` en datos cambia el comportamient
 
     const a = (await loadMap(dueño())).areas.find((x) => x.slug === 'servicio');
     expect(a?.state).toBe('bloqueada');
-    expect(a?.missing).toEqual(['hay un requisito que este sistema no sabe leer (avísanos)']);
+    // Se queda cerrada Y lo dice, pero sin jerga: al emprendedor no le toca
+    // enterarse de que existe un "requisito ilegible". Le toca saber que la
+    // falla es nuestra. Es el hallazgo #5 del ensayo, aplicado también aquí.
+    expect(a?.missing).toEqual([
+      'terminemos de ajustar cómo se abre — es cosa nuestra, y aquí te avisamos',
+    ]);
+    expect(a?.missing.join(' ')).not.toMatch(/requisito|sistema|packages|migraci/i);
   });
 
   it('un requisito roto en un área no tumba el resto del mapa', async () => {
