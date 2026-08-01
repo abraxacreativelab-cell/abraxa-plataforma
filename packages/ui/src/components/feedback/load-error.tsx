@@ -3,11 +3,14 @@
 import { Button } from '../primitives/button';
 import { Icon } from '../primitives/icon';
 import { cn } from '../../lib/cn';
+import { sinJerga } from '../../lib/castellano';
 import { FAILURE_COPY, type LoadFailure } from './failure';
 
 export interface LoadErrorProps {
   failure?: LoadFailure;
-  /** Sobrescribe el texto generado a partir de la causa. */
+  /** Sobrescribe el texto generado a partir de la causa. Pasa por la aduana de
+   *  `sinJerga()`: quien la escribe suele tener el diagnóstico técnico a mano y
+   *  es la tentación más fácil del repo. */
   description?: string;
   onRetry?: () => void;
   className?: string;
@@ -43,7 +46,7 @@ export function LoadError({ failure, description, onRetry, className }: LoadErro
       </p>
 
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-        {description ?? copy.texto}
+        {sinJerga(description, copy.texto) ?? copy.texto}
         {failure?.status ? <span className="tabular ml-1 opacity-60">({failure.status})</span> : null}
       </p>
 
