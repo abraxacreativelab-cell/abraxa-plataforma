@@ -68,14 +68,17 @@ async function reenviar(accion: string | undefined, cuerpo: unknown): Promise<Ne
   const identidad = await identidadDeLaSesion();
   if (!identidad) {
     // 401 y no 500: no es que algo se haya roto, es que no hay quién esté
-    // entrando. La pantalla distingue los dos casos y dice cuál es.
+    // entrando.
+    //
+    // El mensaje se pinta TAL CUAL en la burbuja de error del Ritual, así que
+    // no lleva nombres de carriles ni rutas del repo: la sesión se pudo haber
+    // caducado a media entrevista y lo que esa persona necesita saber es que
+    // vuelva a entrar, no quién debía el módulo.
     return NextResponse.json(
       {
         error: {
           code: 'UNAUTHENTICATED',
-          message:
-            'No hay sesión verificada. El inicio de sesión lo entrega H2 (packages/tenancy); ' +
-            'hasta entonces el Ritual no puede saber de qué empresa es quien entra.',
+          message: 'Tu sesión se cerró. Vuelve a entrar y sigues justo donde te quedaste.',
         },
       },
       { status: 401 },

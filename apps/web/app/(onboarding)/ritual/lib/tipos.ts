@@ -87,9 +87,28 @@ export interface RespuestaDelRitual {
   mapa: Mapa | null;
 }
 
-/** Por qué la pantalla no puede hablar con su API. */
+/**
+ * Por qué la pantalla no puede arrancar el Ritual.
+ *
+ * ── El detalle NO se le enseña a nadie (auditoría del 2026-07-31) ──────────
+ *
+ * En vivo, `/ritual` renderizaba una caja monoespaciada con
+ * «identidadDeLaSesion() → null · lo cablea H2 · apps/web/app/(onboarding)/
+ * ritual/lib/sesion.ts». Un invitado no sabe qué es H2 ni tiene ese repo: lo
+ * único que lee es que el producto está a medio hacer. El diagnóstico sirve
+ * —muchísimo— pero en el LOG del servidor, que es donde lo busca quien puede
+ * hacer algo con él.
+ */
 export interface Impedimento {
-  /** `sesion` = falta H2. `puerto` = falta un port. `red` = la API no contesta. */
-  tipo: 'sesion' | 'puerto' | 'red' | 'desconocido';
-  mensaje: string;
+  /**
+   * `sesion`  = no hay quién esté entrando.
+   * `empresa` = hay sesión y no se pudo resolver ni crear su empresa.
+   * `puerto`  = falta un carril del que depende el Ritual.
+   * `red`     = la API no contesta.
+   */
+  tipo: 'sesion' | 'empresa' | 'puerto' | 'red' | 'desconocido';
+  /** Para el log del servidor. NUNCA se pinta. */
+  detalle: string;
+  /** A dónde manda el botón de entrar, si es que hay por dónde entrar hoy. */
+  entrada?: string | null;
 }

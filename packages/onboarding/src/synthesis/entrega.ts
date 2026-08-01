@@ -192,13 +192,52 @@ export async function bautizarAgente(
   const nombre = estado.agente?.trim();
   if (!nombre) return;
 
+  // ── Las cifras van AQUÍ, y no es redundancia con la bóveda ────────────────
+  //
+  // El bloque «DATOS VIGENTES DE LA BÓVEDA» que H3 inyecta en cada corrida sólo
+  // trae valores con `active = true`, y todo lo que sale del Ritual entra en
+  // BORRADOR: así lo declara `VaultPort.ingestDocument()` y así lo hace su
+  // pipeline. Medido en vivo el 2026-07-31: con los 8 valores del Ritual
+  // sembrados, el bloque de la bóveda llegó al modelo con UNA línea, y era un
+  // valor de prueba viejo.
+  //
+  // No se puede arreglar desde aquí: el port no recibe una bandera de `active`
+  // y activarlos es de la bóveda. Lo que sí se puede —y es lo que de verdad le
+  // importa a su dueño— es que su agente sepa cuánto cobra. Se escribe en la
+  // definición del agente, que es de este carril, y deja de depender de que
+  // alguien apruebe una lista de borradores antes de poder preguntarle nada.
+  //
+  // El día que la bóveda active los valores del Ritual, esto sigue siendo
+  // correcto: dirían lo mismo, y el bloque de la bóveda gana porque va después.
+  const numeros = [
+    estado.ticket ? `cobra en promedio ${estado.ticket}` : null,
+    estado.margen ? `le deja un margen de ${estado.margen}` : null,
+    estado.tamano ? `hoy es de este tamaño: ${estado.tamano}` : null,
+    estado.etapa ? `va en la etapa: ${estado.etapa}` : null,
+  ].filter((x): x is string => x !== null);
+
   const contexto = [
     estado.giro ? `Este negocio se dedica a: ${estado.giro}.` : null,
     estado.nicho ? `Le vende a: ${estado.nicho}.` : null,
     estado.modeloIngreso ? `Gana dinero así: ${estado.modeloIngreso}.` : null,
+    numeros.length > 0
+      ? `Sus números, tal como te los dio: ${numeros.join('; ')}. Cítalos exactos; no los redondees.`
+      : null,
+    (estado.canales?.length ?? 0) > 0
+      ? `Sus clientes le llegan por: ${(estado.canales ?? []).join(', ')}.`
+      : null,
+    (estado.recorrido?.length ?? 0) > 0
+      ? `El recorrido de su cliente, como él lo contó: ${(estado.recorrido ?? [])
+          .map((p, i) => `${i + 1}) ${p.nombre}${p.como ? ` (${p.como})` : ''}`)
+          .join(' → ')}.`
+      : null,
+    (estado.herramientas?.length ?? 0) > 0
+      ? `Con lo que trabaja hoy: ${(estado.herramientas ?? []).join(', ')}.`
+      : null,
     (estado.dolores?.length ?? 0) > 0
       ? `Lo que más le pesa a su dueño: ${(estado.dolores ?? []).map((d) => d.texto).join('; ')}.`
       : null,
+    estado.equipo ? `Su gente: ${estado.equipo}.` : null,
     mapa && mapa.areas.length > 0
       ? `Áreas activas o disponibles hoy: ${mapa.areas
           .filter((a) => a.estado !== 'bloqueada')
