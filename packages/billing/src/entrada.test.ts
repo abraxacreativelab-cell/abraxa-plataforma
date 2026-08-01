@@ -35,18 +35,31 @@ import { RUTA_DE_ENTRADA } from '../../auth/src/identidad';
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const leer = (ruta: string): string => readFileSync(join(RAIZ, ruta), 'utf8');
 
+/**
+ * El archivo SIN comentarios.
+ *
+ * Estas pantallas llevan comentarios largos que explican por qué existe la
+ * puerta de entrada — y esos comentarios contienen la palabra «Entrar». Sin
+ * quitarlos, una prueba de `toContain('Entrar')` seguiría verde después de que
+ * alguien borrara el botón y dejara la explicación: exactamente la regresión
+ * que esto existe para atrapar.
+ */
+const leerSinComentarios = (ruta: string): string =>
+  leer(ruta)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
 const LAYOUT = 'apps/web/app/(public)/layout.tsx';
 const LANDING = 'apps/web/app/(public)/page.tsx';
 const GRACIAS = 'apps/web/app/(public)/gracias/page.tsx';
 
 describe('la puerta de entrada existe', () => {
   it('el encabezado público dice «Entrar»', () => {
-    const fuente = leer(LAYOUT);
-    expect(fuente).toContain('Entrar');
+    expect(leerSinComentarios(LAYOUT)).toContain('Entrar');
   });
 
   it('la landing también la ofrece junto al formulario', () => {
-    const fuente = leer(LANDING);
+    const fuente = leerSinComentarios(LANDING);
     expect(fuente).toContain('¿Ya tienes cuenta?');
     expect(fuente).toContain('Entrar');
   });
@@ -56,10 +69,13 @@ describe('la puerta de entrada existe', () => {
    * mueve la pantalla de entrada, `RUTA_DE_ENTRADA` cambia y estas pantallas
    * la siguen solas.
    */
-  it('las dos apuntan a RUTA_DE_ENTRADA y no a una cadena inventada', () => {
+  it('las tres apuntan a RUTA_DE_ENTRADA y no a una cadena inventada', () => {
     for (const ruta of [LAYOUT, LANDING, GRACIAS]) {
-      expect(leer(ruta), ruta).toContain('RUTA_DE_ENTRADA');
-      expect(leer(ruta), ruta).toContain('packages/auth/src/identidad');
+      const fuente = leerSinComentarios(ruta);
+      expect(fuente, ruta).toContain('href={RUTA_DE_ENTRADA}');
+      expect(fuente, ruta).toContain('packages/auth/src/identidad');
+      // Nadie escribe la ruta a mano: si H18 la mueve, se mueven las tres.
+      expect(fuente, ruta).not.toContain('"/api/auth/signin"');
     }
     expect(RUTA_DE_ENTRADA).toBe('/api/auth/signin');
   });
@@ -72,8 +88,7 @@ describe('la puerta de entrada existe', () => {
    */
   it('ninguna pantalla pública enlaza /entrar, que todavía no existe', () => {
     for (const ruta of [LAYOUT, LANDING, GRACIAS]) {
-      expect(leer(ruta), ruta).not.toContain('href="/entrar"');
-      expect(leer(ruta), ruta).not.toContain("href='/entrar'");
+      expect(leerSinComentarios(ruta), ruta).not.toContain('/entrar');
     }
   });
 
@@ -81,11 +96,16 @@ describe('la puerta de entrada existe', () => {
    * `/api/auth/signin` es un Route Handler que devuelve HTML, no una página del
    * App Router. Con `<Link>` el router de cliente intentaría una carga RSC de
    * algo que no lo es; hace falta una navegación de documento completa.
+   *
+   * Se comprueba por lo que NO puede aparecer —`<Link … RUTA_DE_ENTRADA>`— y no
+   * por la forma exacta del `<a>`, que depende de cómo parta las líneas
+   * Prettier y cambiaría con cualquier reformateo.
    */
   it('se enlaza con <a> — <Link> no sirve para un Route Handler', () => {
     for (const ruta of [LAYOUT, LANDING, GRACIAS]) {
-      expect(leer(ruta), ruta).toContain('<a\n');
-      expect(leer(ruta), ruta).not.toContain('<Link href={RUTA_DE_ENTRADA}');
+      const fuente = leerSinComentarios(ruta);
+      expect(fuente, ruta).not.toMatch(/<Link[^>]*RUTA_DE_ENTRADA/);
+      expect(fuente, ruta).toMatch(/<a\s[^>]*href=\{RUTA_DE_ENTRADA\}/);
     }
   });
 });
@@ -97,8 +117,7 @@ describe('/gracias dice la verdad', () => {
    * escribe en consola. Cualquier copy que mande a esperar un correo es falso.
    */
   it('no promete ningún correo', () => {
-    const fuente = leer(GRACIAS);
-    const visible = fuente.slice(fuente.indexOf('export default function'));
+    const visible = leerSinComentarios(GRACIAS);
 
     expect(visible).not.toContain('te llega un correo');
     expect(visible).not.toContain('¿Y si no llega el correo?');
@@ -106,9 +125,9 @@ describe('/gracias dice la verdad', () => {
   });
 
   it('manda a entrar con Google, que sí funciona siempre', () => {
-    const fuente = leer(GRACIAS);
-    expect(fuente).toContain('Tu espacio ya está listo.');
-    expect(fuente).toContain('Entrar con Google');
+    const visible = leerSinComentarios(GRACIAS);
+    expect(visible).toContain('Tu espacio ya está listo.');
+    expect(visible).toContain('Entrar con Google');
   });
 
   /**
@@ -119,6 +138,6 @@ describe('/gracias dice la verdad', () => {
    * pantalla y se evita con una línea de copy.
    */
   it('avisa de usar el mismo correo del pago', () => {
-    expect(leer(GRACIAS)).toContain('Usa el mismo correo con el que pagaste');
+    expect(leerSinComentarios(GRACIAS)).toContain('Usa el mismo correo con el que pagaste');
   });
 });
