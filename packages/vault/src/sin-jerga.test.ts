@@ -426,3 +426,48 @@ describe('qué mensaje de error se le puede enseñar al cliente', () => {
     expect(mensajeEsParaElCliente('PORT_NOT_IMPLEMENTED')).toBe(false);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// El catálogo, bien escrito
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Las 109 cadenas del catálogo por giro salen TAL CUAL en /direccion: son los
+ * títulos y las pistas de «qué le falta a tu negocio». El seed de la 033 se
+ * escribió entero sin un solo acento —«Cotizacion», «Politica de envios»,
+ * «diseno»— y así se veía en producción. La 034 lo arregla; esto vigila que no
+ * vuelva, ni en la migración ni en el respaldo en memoria.
+ *
+ * No comprueba ortografía: comprueba que ciertas palabras concretas, que
+ * SIEMPRE llevan tilde o eñe, no aparezcan sin ella.
+ */
+describe('el catálogo por giro está escrito con acentos', () => {
+  const SIN_TILDE =
+    /\b(Cotizacion|Politica|Garantia|Direccion|Menu|Envios|nomina|minimo|estandar|cafeteria|boveda|numeros|produccion|operacion|atencion|facturacion|penalizacion|prestacion|contratacion|resenas|diseno|linea)\b/g;
+
+  function textoVisible(fuente: string): string {
+    return fuente
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('--'))
+      .join('\n');
+  }
+
+  it('la migración 034 no deja una sola palabra sin su tilde', () => {
+    const ruta = join(RAIZ, 'migrations', '034_catalogo_con_acentos.sql');
+    const cuerpo = textoVisible(readFileSync(ruta, 'utf8'));
+    expect([...new Set(cuerpo.match(SIN_TILDE) ?? [])]).toEqual([]);
+  });
+
+  it('y de verdad reescribe los cinco giros', () => {
+    const ruta = join(RAIZ, 'migrations', '034_catalogo_con_acentos.sql');
+    const cuerpo = readFileSync(ruta, 'utf8');
+    for (const giro of ['servicios', 'comercio', 'restaurante', 'agencia', 'general']) {
+      expect(cuerpo, `falta el giro ${giro}`).toContain(`WHERE id = '${giro}'`);
+    }
+  });
+
+  it('el respaldo en memoria tampoco', () => {
+    const fuente = soloTexto(readFileSync(join(AQUI, 'industry', 'catalog.ts'), 'utf8'));
+    expect([...new Set(fuente.match(SIN_TILDE) ?? [])]).toEqual([]);
+  });
+});
