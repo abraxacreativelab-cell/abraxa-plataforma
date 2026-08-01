@@ -123,26 +123,118 @@ export function esIpv4Privada(ip: string): boolean {
   return false;
 }
 
+/**
+ * Los ocho grupos de una IPv6, ya expandidos. `null` si no es una IPv6.
+ *
+ * ── POR QUÉ ESTO EXISTE, y no una regex sobre el texto ──────────────────────
+ *
+ * Porque el texto MIENTE. Una versión anterior de este archivo buscaba
+ * `::ffff:127.0.0.1` con una regex de decimal punteado y su comentario presumía
+ * haber cerrado «la evasión que se le olvida a todo el mundo». Cerraba una forma
+ * que en producción NO LLEGA NUNCA: el serializador de WHATWG escribe las IPv6
+ * en HEXADECIMAL.
+ *
+ *     new URL('http://[::ffff:127.0.0.1]/').hostname  ===  '[::ffff:7f00:1]'
+ *
+ * Ninguna regex de dígitos y puntos casa con `7f00:1`, así que los siete
+ * objetivos privados pasaban con las tres envolturas. Se explotó de verdad
+ * durante la auditoría: un `http.Server` en 127.0.0.1 fue leído entero.
+ *
+ * Y sus 44 pruebas estaban en verde, porque le pasaban a la función la cadena
+ * ESCRITA A MANO en vez de la que produce `new URL()`. Verde arriba, agujero
+ * abajo.
+ *
+ * La lección, que vale más que el arreglo: **no se decide sobre la forma de un
+ * texto cuando se puede decidir sobre el valor.** Aquí se expande la dirección a
+ * sus 8 grupos de 16 bits y se mira lo que ES, no cómo se escribió.
+ */
+function gruposIpv6(ip: string): number[] | null {
+  const v = ip.toLowerCase().split('%')[0] ?? ''; // `%eth0` es el scope, no la dirección
+  if (!v || !v.includes(':')) return null;
+
+  // Una IPv4 en la cola (`::ffff:127.0.0.1`) vale por dos grupos. Se convierte
+  // primero, para que a partir de aquí todo sea hexadecimal uniforme.
+  let texto = v;
+  const cola = /((?:\d{1,3}\.){3}\d{1,3})$/.exec(texto);
+  if (cola?.[1]) {
+    const o = octetos(cola[1]);
+    if (!o) return null;
+    const alto = ((o[0] << 8) | o[1]).toString(16);
+    const bajo = ((o[2] << 8) | o[3]).toString(16);
+    texto = texto.slice(0, cola.index) + alto + ':' + bajo;
+  }
+
+  const partes = texto.split('::');
+  if (partes.length > 2) return null; // `::` sólo puede aparecer una vez
+
+  const trozo = (s: string): number[] | null => {
+    if (s === '') return [];
+    const out: number[] = [];
+    for (const g of s.split(':')) {
+      if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+      out.push(Number.parseInt(g, 16));
+    }
+    return out;
+  };
+
+  const izq = trozo(partes[0] ?? '');
+  if (!izq) return null;
+
+  if (partes.length === 1) return izq.length === 8 ? izq : null;
+
+  const der = trozo(partes[1] ?? '');
+  if (!der) return null;
+
+  const faltan = 8 - izq.length - der.length;
+  if (faltan < 0) return null;
+  return [...izq, ...Array<number>(faltan).fill(0), ...der];
+}
+
+/** La IPv4 que envuelve una IPv6, si envuelve alguna. Decide por VALOR, no por forma. */
+function ipv4Envuelta(g: number[]): string | null {
+  const comoIpv4 = (): string => {
+    const a = g[6] ?? 0;
+    const b = g[7] ?? 0;
+    return `${a >> 8}.${a & 0xff}.${b >> 8}.${b & 0xff}`;
+  };
+
+  const cerosHasta = (n: number): boolean => g.slice(0, n).every((x) => x === 0);
+
+  // ::ffff:a.b.c.d — IPv4 mapeada. La forma que de verdad llega desde `new URL()`.
+  if (cerosHasta(5) && g[5] === 0xffff) return comoIpv4();
+  // ::a.b.c.d — IPv4 compatible (obsoleta, pero el kernel la sigue enrutando).
+  if (cerosHasta(6) && (g[6] !== 0 || g[7] !== 0)) return comoIpv4();
+  // 64:ff9b::a.b.c.d — NAT64.
+  if (g[0] === 0x64 && g[1] === 0xff9b && cerosHasta(6) === false && g.slice(2, 6).every((x) => x === 0)) {
+    return comoIpv4();
+  }
+  // 2002:a.b.c.d:: — 6to4: la IPv4 va en los grupos 1 y 2, no en la cola.
+  if (g[0] === 0x2002) {
+    const a = g[1] ?? 0;
+    const b = g[2] ?? 0;
+    return `${a >> 8}.${a & 0xff}.${b >> 8}.${b & 0xff}`;
+  }
+  return null;
+}
+
 /** ¿Esta IPv6 —sin corchetes— apunta a algo que no es la internet pública? */
 export function esIpv6Privada(ip: string): boolean {
-  const v = ip.toLowerCase().split('%')[0] ?? ''; // `%eth0` es el scope, no la dirección
-  if (!v) return true;
+  const g = gruposIpv6(ip);
+  // Si no se puede entender, se rechaza. Una dirección que no sabemos leer no se
+  // pide: fallar cerrado cuesta una página que no se leyó; fallar abierto cuesta
+  // la red interna.
+  if (!g) return true;
 
-  if (v === '::1' || v === '::') return true;
+  if (g.every((x) => x === 0)) return true; // ::
+  if (g.slice(0, 7).every((x) => x === 0) && g[7] === 1) return true; // ::1
 
-  // IPv4 mapeada o compatible: la que se le olvida a todo el mundo.
-  // `::ffff:127.0.0.1` es 127.0.0.1 con otro traje.
-  const mapeada = /^::(?:ffff:(?:0{1,4}:)?)?((?:\d{1,3}\.){3}\d{1,3})$/.exec(v);
-  if (mapeada?.[1]) return esIpv4Privada(mapeada[1]);
+  const envuelta = ipv4Envuelta(g);
+  if (envuelta) return esIpv4Privada(envuelta);
 
-  // NAT64 (64:ff9b::/96) y 6to4 (2002::/16) también pueden envolver una IPv4.
-  const nat64 = /^64:ff9b::((?:\d{1,3}\.){3}\d{1,3})$/.exec(v);
-  if (nat64?.[1]) return esIpv4Privada(nat64[1]);
-
-  if (/^f[cd]/.test(v)) return true; // fc00::/7 — únicas locales
-  if (/^fe[89ab]/.test(v)) return true; // fe80::/10 — link-local
-  if (/^ff/.test(v)) return true; // ff00::/8 — multicast
-  if (/^2002:/.test(v)) return true; // 6to4: puede envolver cualquier IPv4
+  const p = g[0] ?? 0;
+  if ((p & 0xfe00) === 0xfc00) return true; // fc00::/7 — únicas locales
+  if ((p & 0xffc0) === 0xfe80) return true; // fe80::/10 — link-local
+  if ((p & 0xff00) === 0xff00) return true; // ff00::/8 — multicast
 
   return false;
 }

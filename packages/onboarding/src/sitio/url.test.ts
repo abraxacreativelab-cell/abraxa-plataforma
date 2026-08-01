@@ -83,6 +83,51 @@ describe('hosts que jamás se piden', () => {
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  LA FORMA QUE DE VERDAD LLEGA — el agujero que estas pruebas no veían
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  //  Las de arriba le pasan a la función la cadena ESCRITA A MANO. `new URL()`
+  //  no produce esa forma nunca: serializa las IPv6 en HEXADECIMAL.
+  //
+  //      new URL('http://[::ffff:127.0.0.1]/').hostname === '[::ffff:7f00:1]'
+  //
+  //  Con 44 pruebas en verde, los siete objetivos privados pasaban con las tres
+  //  envolturas y un `http.Server` en 127.0.0.1 se pudo leer entero. Por eso
+  //  estas pruebas NO escriben el host: lo sacan de una `URL`, igual que el
+  //  código de producción.
+  describe('IPv6 tal como la serializa new URL(), no como se escribe', () => {
+    const objetivos = [
+      '::ffff:127.0.0.1', // loopback mapeado
+      '::ffff:169.254.169.254', // metadatos de la nube
+      '::ffff:10.0.0.1',
+      '::ffff:192.168.1.1',
+      '::ffff:172.16.0.1',
+      '::127.0.0.1', // IPv4 compatible (obsoleta, pero enrutada)
+      '64:ff9b::169.254.169.254', // NAT64
+    ];
+
+    for (const escrito of objetivos) {
+      it(`bloquea [${escrito}] aunque new URL lo reescriba en hexadecimal`, () => {
+        const host = new URL(`http://[${escrito}]/`).hostname;
+        // La prueba se cae sola si algún día el serializador cambia y deja de
+        // reescribirlo: entonces esta aserción sobra, pero no estorba.
+        expect(esHostPrivado(host), `${escrito} → ${host}`).toBe(true);
+      });
+    }
+
+    it('una IPv6 pública de verdad SIGUE pasando — no se cerró de más', () => {
+      expect(esHostPrivado(new URL('http://[2606:4700:4700::1111]/').hostname)).toBe(false);
+      expect(esHostPrivado(new URL('http://[2001:4860:4860::8888]/').hostname)).toBe(false);
+    });
+
+    it('lo que no se puede entender se rechaza: fallar cerrado', () => {
+      expect(esHostPrivado('[:::1]')).toBe(true);
+      expect(esHostPrivado('[1:2:3:4:5:6:7:8:9]')).toBe(true);
+      expect(esHostPrivado('[xyz::1]')).toBe(true);
+    });
+  });
+
   const permitidos = ['lataqueria.mx', 'instagram.com', '8.8.8.8', '172.32.0.1', '[2606:4700::1]'];
   for (const host of permitidos) {
     it(`deja pasar ${host}`, () => {
