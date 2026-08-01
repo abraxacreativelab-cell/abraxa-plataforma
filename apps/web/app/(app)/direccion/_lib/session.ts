@@ -1,4 +1,5 @@
 import { PlatformError, tryPort, type TenancyPort, type TenantContext } from '@abraxa/db';
+import { RUTA_DE_ENTRADA } from '../../../../../../packages/auth/src/identidad';
 
 /**
  * ════════════════════════════════════════════════════════════════════════════
@@ -14,34 +15,80 @@ import { PlatformError, tryPort, type TenancyPort, type TenantContext } from '@a
  *  desde una sesión verificada. Si el dato nunca sale del servidor, no hay
  *  header que falsificar.
  *
- *  ── Lo que todavía no existe y no es mío ───────────────────────────────────
+ *  ── Qué cambió el 2026-08-01, y por qué el ensayo lo exigía ────────────────
  *
- *  El contexto sale de `TenancyPort.contextFor()`, que implementa H2. Mientras
- *  H2 no aterrice, `tryPort('tenancy')` devuelve null y estas pantallas
- *  muestran un estado honesto en vez de inventarse un tenant.
+ *  Hasta hoy `correoDeLaSesion()` devolvía `null` con un `TODO(H2)`. La
+ *  consecuencia no era un hueco discreto: /direccion le enseñaba al invitado la
+ *  frase «Falta: H2 · packages/tenancy». Nombre de carril y ruta de paquete, en
+ *  la cara de alguien que vino a ver un producto.
  *
- *  Tampoco existe todavía la sesión de next-auth (es del shell de H5) ni una
- *  ruta BFF en `apps/web/app/api/**`, que no está asignada a ningún handoff en
- *  `.ownership.json`. Las dos cosas están anotadas en el PR.
+ *  Se cablearon las DOS piezas que faltaban, porque una sin la otra no sirve:
+ *
+ *   1. **La sesión** (§ `sesionVerificada`). Existe desde H18 y se lee con
+ *      `getServerSession(authOptions)`.
+ *
+ *   2. **El registro del port** (§ `puertoDeEmpresas`). Éste es el que nadie
+ *      había visto: `registerPort('tenancy', …)` corre como efecto de importar
+ *      `@abraxa/tenancy`, y en todo `apps/web` NADIE lo importaba. En el
+ *      proceso de Next `tryPort('tenancy')` era null SIEMPRE — con sesión o sin
+ *      ella, antes y después de que H2 mergeara. Cablear sólo la sesión habría
+ *      dejado la misma pantalla muerta con otro texto encima.
+ *
+ *  ── Y una regla nueva: aquí no sale jerga ──────────────────────────────────
+ *
+ *  `BovedaNoDisponible` ya no lleva "quién falta". Lleva lo que el cliente
+ *  necesita: qué pasó, en su idioma, y el botón que lo saca de ahí. El nombre
+ *  del carril, el del paquete y el mensaje técnico van al LOG del servidor, que
+ *  es donde sirven de algo.
  */
 
+/** Qué salió mal, en las cuatro formas que le importan a quien está mirando. */
+export type MotivoBoveda = 'sin-sesion' | 'sin-empresa' | 'sin-acceso' | 'no-disponible';
+
+/** El botón que saca al cliente del estado en que se quedó. Nunca un callejón. */
+export interface AccionSugerida {
+  texto: string;
+  href: string;
+}
+
+/**
+ * La bóveda no se puede leer, y se sabe por qué.
+ *
+ * `titulo` y `explicacion` se PINTAN: están escritos para el dueño de un
+ * negocio, no para quien programó esto. `pista` NO se pinta nunca — es la línea
+ * que se manda al log del servidor, para poder diagnosticar sin obligar al
+ * cliente a leer el diagnóstico.
+ */
 export class BovedaNoDisponible extends Error {
   constructor(
-    readonly motivo: string,
-    readonly quienFalta: string,
+    readonly motivo: MotivoBoveda,
+    readonly titulo: string,
+    readonly explicacion: string,
+    readonly accion: AccionSugerida | null = null,
+    readonly pista = '',
   ) {
-    super(motivo);
+    super(`${motivo}: ${titulo}`);
     this.name = 'BovedaNoDisponible';
   }
 }
 
+/** El estado "es culpa nuestra", que aparece desde dos sitios distintos. */
+function falloNuestro(pista = ''): BovedaNoDisponible {
+  return new BovedaNoDisponible(
+    'no-disponible',
+    'No pudimos abrir tu bóveda',
+    'Es un problema nuestro, no algo que hayas hecho mal. Vuelve a intentarlo en un momento.',
+    { texto: 'Reintentar', href: '/direccion' },
+    pista,
+  );
+}
+
 /**
- * Atajo SÓLO de desarrollo, para poder ver estas pantallas antes de que H2 y
- * H5 aterricen.
+ * Atajo SÓLO de desarrollo, para poder ver estas pantallas sin una sesión.
  *
  * Fail-closed por diseño: exige `NODE_ENV !== 'production'` **y** que alguien
- * haya puesto la variable a mano. En producción no hay forma de encenderlo,
- * ni por accidente ni por una variable de entorno mal copiada.
+ * haya puesto la variable a mano. En producción no hay forma de encenderlo, ni
+ * por accidente ni por una variable de entorno mal copiada.
  */
 function contextoDeDesarrollo(): TenantContext | null {
   if (process.env.NODE_ENV === 'production') return null;
@@ -64,62 +111,222 @@ function contextoDeDesarrollo(): TenantContext | null {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// La sesión
+// ════════════════════════════════════════════════════════════════════════════
+
+interface SesionDeNextAuth {
+  user?: { email?: string | null; tenantSlug?: string | null } | null;
+}
+
+/** Para no repetir el mismo aviso en cada render. Uno por proceso basta. */
+let yaAvisadoSinSesion = false;
+let yaAvisadoSinPuerto = false;
+
+/**
+ * Quién está mirando la pantalla, desde la cookie firmada.
+ *
+ * ── `authOptions` NO ES OPCIONAL ──────────────────────────────────────────
+ *
+ * `getServerSession()` sin ellas compila, no lanza y no escribe un solo log —y
+ * nunca ejecuta el callback `session`, que es quien pone `tenantSlug`. El
+ * síntoma es el peor posible: el invitado entra con Google, la aplicación le
+ * dice que no ha entrado, y no hay ni un error que buscar. Le pasó al Ritual
+ * (PR #27) y a la bandeja. Aquí se pasan desde la primera línea.
+ *
+ * ── Por qué los imports son dinámicos ─────────────────────────────────────
+ *
+ * Para que un fallo del módulo de sesión —falta `NEXTAUTH_SECRET`, el módulo de
+ * H18 cambió de sitio— degrade a "no hay sesión" en vez de tumbar el render
+ * entero. Falla CERRADO: cualquier error devuelve `null`, jamás un usuario
+ * inventado. Es el mismo patrón de `(app)/layout.tsx`.
+ */
+async function sesionVerificada(): Promise<{
+  userEmail: string;
+  tenantSlug: string | null;
+} | null> {
+  try {
+    const [{ getServerSession }, { authOptions }] = await Promise.all([
+      import('next-auth/next') as unknown as Promise<{
+        getServerSession: (o: unknown) => Promise<SesionDeNextAuth | null>;
+      }>,
+      import('../../../api/auth/opciones'),
+    ]);
+
+    const sesion = await getServerSession(authOptions);
+    const correo = sesion?.user?.email;
+    if (!correo) return null;
+
+    const slug = sesion.user?.tenantSlug;
+    return {
+      userEmail: correo.trim().toLowerCase(),
+      tenantSlug: slug && slug.length > 0 ? slug : null,
+    };
+  } catch (e) {
+    // Un `catch` mudo aquí sería indistinguible de «el invitado no ha entrado»,
+    // que es exactamente el fallo silencioso que nos costó el ensayo.
+    if (!yaAvisadoSinSesion) {
+      yaAvisadoSinSesion = true;
+      console.error(
+        `[direccion] no se pudo resolver la sesión: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// El registro de empresas
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * El `TenancyPort`, registrándolo si hace falta.
+ *
+ * ── El fallo que esto cierra ──────────────────────────────────────────────
+ *
+ * `registerPort('tenancy', tenancyPort)` es un efecto secundario de
+ * `packages/tenancy/src/index.ts`. Sólo corre si alguien importa el paquete, y
+ * el único que lo importa es `apps/api/src/packages.ts`. En el proceso de Next
+ * nadie lo hacía, así que `tryPort('tenancy')` devolvía null en TODAS las
+ * pantallas del producto —no sólo aquí— y cada una lo leía como "H2 todavía no
+ * aterriza". H2 llevaba días mergeado.
+ *
+ * ── Por qué el módulo profundo y no el barril ─────────────────────────────
+ *
+ * `@abraxa/tenancy` reexporta su router de Express desde `index.ts`. Arrastrar
+ * Express a la compilación de Next para conseguir un objeto de cuatro funciones
+ * es caro y arriesgado — es la misma razón por la que la bóveda publica
+ * `@abraxa/vault/api` aparte de su barril. `src/port.ts` es justo el port y sus
+ * servicios: cero Express.
+ *
+ * ── Por qué la ruta va en una constante y no escrita en el `import()` ─────
+ *
+ * Porque si se escribe literal, TypeScript mete el árbol de H2 en el proyecto
+ * de `apps/web`, y ahí se cae: `middleware/rbac.ts` usa `req.tenant`, que sólo
+ * existe con `packages/tenancy/src/express.d.ts` cargado, y ese `.d.ts` no
+ * entra en el `include` de la web. Son seis errores en código ajeno que no
+ * tengo permitido tocar y que además no están rotos — es el reflejo exacto de
+ * la mina conocida al revés ("packages/** no alcanza los tipos de next").
+ *
+ * Con la ruta en una constante, TypeScript no la resuelve y webpack sí: la
+ * pliega como constante y la empaqueta igual. Es el mismo recurso que ya usa
+ * `(app)/bandeja/api/bff.ts` con `RUTA_OPCIONES`.
+ *
+ * Se deja en el registro compartido (y no en una variable de aquí) para que la
+ * siguiente pantalla que llame `tryPort('tenancy')` en este proceso —el shell
+ * de `(app)/layout.tsx`, el mapa, las tareas— ya lo encuentre. Esta función
+ * arregla su carril y, de paso, deja de romper los ajenos.
+ */
+const RUTA_PORT_TENANCY: string = '../../../../../../packages/tenancy/src/port';
+
+async function puertoDeEmpresas(): Promise<TenancyPort | null> {
+  const registrado = tryPort('tenancy');
+  if (registrado) return registrado;
+
+  try {
+    const [{ registerPort }, modulo] = await Promise.all([
+      import('@abraxa/db'),
+      import(RUTA_PORT_TENANCY) as Promise<{ tenancyPort?: TenancyPort }>,
+    ]);
+
+    const impl = modulo.tenancyPort;
+    if (!impl) throw new Error('packages/tenancy/src/port no exportó `tenancyPort`.');
+
+    registerPort('tenancy', impl);
+    return tryPort('tenancy');
+  } catch (e) {
+    if (!yaAvisadoSinPuerto) {
+      yaAvisadoSinPuerto = true;
+      console.error(
+        `[direccion] no se pudo registrar el port de empresas: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// El contexto
+// ════════════════════════════════════════════════════════════════════════════
+
 /**
  * El contexto de quien está viendo la pantalla.
- * Lanza `BovedaNoDisponible` cuando falta una pieza, con el nombre de quién la
- * debe: la pantalla lo enseña tal cual en vez de un error genérico.
+ *
+ * Lanza `BovedaNoDisponible` cuando falta una pieza. La pantalla enseña el
+ * título y la explicación tal cual, con su botón: nunca un error genérico y
+ * nunca una tabla vacía que se lea como «no tienes datos».
  */
 export async function contextoActual(): Promise<TenantContext> {
   const dev = contextoDeDesarrollo();
   if (dev) return dev;
 
-  const tenancy = tryPort('tenancy');
+  const sesion = await sesionVerificada();
+  if (!sesion) {
+    // En producción el middleware ya manda a la entrada antes de llegar aquí.
+    // Esto es la segunda red, no la primera.
+    throw new BovedaNoDisponible(
+      'sin-sesion',
+      'Entra para ver tu bóveda',
+      'Aquí viven los números y los documentos de tu negocio, así que primero necesitamos saber quién eres.',
+      { texto: 'Entrar', href: `${RUTA_DE_ENTRADA}?callbackUrl=%2Fdireccion` },
+    );
+  }
+
+  const tenancy = await puertoDeEmpresas();
   if (!tenancy) {
-    throw new BovedaNoDisponible(
-      'Todavía no existe el registro de empresas y usuarios, así que no se puede ' +
-        'saber de qué negocio son estos datos.',
-      'H2 · packages/tenancy',
-    );
+    throw falloNuestro('tryPort("tenancy") sigue vacío tras intentar registrarlo.');
   }
 
-  const userEmail = await correoDeLaSesion();
-  if (!userEmail) {
-    throw new BovedaNoDisponible(
-      'No hay una sesión iniciada.',
-      'H5 · el shell y el inicio de sesión',
-    );
-  }
-
-  const tenantSlug = await empresaSeleccionada(userEmail, tenancy);
+  const tenantSlug = sesion.tenantSlug ?? (await empresaDelCorreo(sesion.userEmail, tenancy));
   if (!tenantSlug) {
     throw new BovedaNoDisponible(
-      'Tu cuenta todavía no está asociada a una empresa.',
-      'H7 · el Ritual de Fundación',
+      'sin-empresa',
+      'Todavía no tienes un negocio aquí',
+      'Tu bóveda se llena cuando nos cuentas a qué te dedicas. Son unos minutos, y de ahí sale todo lo demás.',
+      { texto: 'Crear mi negocio', href: '/ritual' },
     );
   }
 
   try {
-    return await tenancy.contextFor({ userEmail, tenantSlug });
+    return await tenancy.contextFor({ userEmail: sesion.userEmail, tenantSlug });
   } catch (e) {
     if (PlatformError.is(e) && e.code === 'FORBIDDEN') {
-      throw new BovedaNoDisponible('No tienes acceso a esta empresa.', '—');
+      throw new BovedaNoDisponible(
+        'sin-acceso',
+        'Esta bóveda no es tuya',
+        'Tu cuenta no tiene acceso a este negocio. Si crees que debería tenerlo, pídele a quien lo administra que te invite.',
+        null,
+        `contextFor negó ${sesion.userEmail} → ${tenantSlug}`,
+      );
     }
-    throw e;
+
+    // Cualquier otra cosa —la base caída, una variable sin poner— es un fallo
+    // nuestro y se cuenta como tal. El detalle va al log, no a la pantalla.
+    console.error(
+      `[direccion] contextFor falló para ${tenantSlug}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    throw falloNuestro();
   }
 }
 
 /**
- * El correo de la sesión.
+ * La empresa del correo, cuando la sesión no la trae.
  *
- * Cuando H5 monte next-auth, esto pasa a ser `(await getServerSession())?.user?.email`.
- * Hoy devuelve null y la pantalla lo dice. Lo que NO hace es leer un header
- * del navegador: eso convertiría el aislamiento entre clientes en una
- * sugerencia.
+ * Pasa en una ventana real: quien entró ANTES de tener empresa conserva un
+ * token sin `tenantSlug` hasta que caduca. Sin este rescate, un cliente con su
+ * negocio ya creado vería «todavía no tienes un negocio aquí» durante días.
  */
-async function correoDeLaSesion(): Promise<string | null> {
-  return null;
-}
-
-async function empresaSeleccionada(userEmail: string, tenancy: TenancyPort): Promise<string | null> {
-  return tenancy.primaryTenantSlugFor(userEmail);
+async function empresaDelCorreo(userEmail: string, tenancy: TenancyPort): Promise<string | null> {
+  try {
+    return await tenancy.primaryTenantSlugFor(userEmail);
+  } catch (e) {
+    console.error(
+      `[direccion] primaryTenantSlugFor falló: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return null;
+  }
 }
