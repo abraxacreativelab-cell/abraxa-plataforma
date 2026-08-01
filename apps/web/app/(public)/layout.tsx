@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { RUTA_DE_ENTRADA } from '../../../../packages/auth/src/identidad';
 
 /**
  * Layout del route group `(public)`. Dueño: H10 · packages/billing.
@@ -10,6 +11,27 @@ import Link from 'next/link';
  * El acento se queda en el neutro que define H5 (`--primary` por defecto). El
  * acento contextual distingue áreas DEL NEGOCIO del emprendedor, y aquí
  * todavía no tiene negocio.
+ *
+ * ── Por qué hay un "Entrar" y por qué apunta a donde apunta ────────────────
+ *
+ * El ensayo del 2026-07-31 buscó la palabra "Entrar" en el HTML de la landing
+ * y no aparecía ni una vez. El único camino hacia adentro era el formulario
+ * que va a Stripe, así que quien YA se dio de alta —o quien pagó ayer y hoy
+ * vuelve— no tenía por dónde volver a entrar. Una plataforma sin puerta de
+ * regreso pierde justo a los usuarios que ya convirtió.
+ *
+ * Va a `RUTA_DE_ENTRADA` (`/api/auth/signin`), la pantalla propia de NextAuth,
+ * y NO a `/entrar`: esa ruta está listada como pública en `identidad.ts` para
+ * que el día que exista no haya bucle, pero hoy NO EXISTE y enlazarla sería
+ * cambiar un 404 por otro. La de NextAuth es fea y es un botón que funciona.
+ *
+ * ── `<a>` y no `<Link>`, a propósito ───────────────────────────────────────
+ *
+ * `/api/auth/signin` no es una página del App Router: es un Route Handler que
+ * devuelve HTML. `<Link>` intentaría navegación de cliente y una carga RSC de
+ * algo que no lo es. Se necesita una navegación de documento completa, que es
+ * exactamente lo que hace un ancla normal. Es el mismo patrón que ya usa
+ * `app/(app)/ajustes/page.tsx`.
  */
 export default function GroupLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -22,12 +44,20 @@ export default function GroupLayout({ children }: { children: React.ReactNode })
           >
             ABRAXA
           </Link>
-          <Link
-            href="/#empezar"
-            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Empezar
-          </Link>
+          <nav className="flex items-center gap-4 sm:gap-6">
+            <Link
+              href="/#empezar"
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Empezar
+            </Link>
+            <a
+              href={RUTA_DE_ENTRADA}
+              className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              Entrar
+            </a>
+          </nav>
         </div>
       </header>
 
