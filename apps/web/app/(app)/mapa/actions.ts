@@ -11,7 +11,7 @@ import {
   unlockArea,
   updateMilestone,
 } from '@abraxa/areas';
-import { contextoDelMapa, motivoSinContexto } from './context';
+import { contextoDelMapa, motivoSinContextoTexto } from './context';
 
 /**
  * Las acciones del Mapa de Negocio.
@@ -37,7 +37,7 @@ async function conContexto(
   trabajo: (ctx: NonNullable<Awaited<ReturnType<typeof contextoDelMapa>>>) => Promise<unknown>,
 ): Promise<Resultado> {
   const ctx = await contextoDelMapa();
-  if (!ctx) return { ok: false, error: motivoSinContexto() };
+  if (!ctx) return { ok: false, error: motivoSinContextoTexto() };
 
   try {
     await trabajo(ctx);
@@ -85,7 +85,7 @@ export async function reordenarHitos(ids: string[]): Promise<Resultado> {
 /** Le pide al agente maestro que proponga el roadmap. No borra lo que ya hay. */
 export async function proponerRoadmap(): Promise<Resultado> {
   const ctx = await contextoDelMapa();
-  if (!ctx) return { ok: false, error: motivoSinContexto() };
+  if (!ctx) return { ok: false, error: motivoSinContextoTexto() };
 
   try {
     const r = await proposeMilestones(ctx);

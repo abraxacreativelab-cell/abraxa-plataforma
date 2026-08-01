@@ -46,6 +46,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 1,
         unlockedAt: hace(41),
         navigable: true,
+        enConstruccion: false,
       },
       {
         slug: 'operaciones',
@@ -60,6 +61,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 1,
         unlockedAt: hace(6),
         navigable: true,
+        enConstruccion: true,
       },
       {
         slug: 'direccion',
@@ -74,6 +76,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 1,
         unlockedAt: hace(2),
         navigable: true,
+        enConstruccion: false,
       },
       {
         slug: 'servicio',
@@ -88,6 +91,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 0.6,
         unlockedAt: null,
         navigable: false,
+        enConstruccion: false,
       },
       {
         slug: 'onboarding',
@@ -102,6 +106,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 0,
         unlockedAt: null,
         navigable: false,
+        enConstruccion: true,
       },
       {
         slug: 'finanzas',
@@ -116,6 +121,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 0.667,
         unlockedAt: null,
         navigable: false,
+        enConstruccion: true,
       },
       {
         slug: 'rh',
@@ -130,6 +136,7 @@ export function mapaDemo(): BusinessMap {
         ratio: 0,
         unlockedAt: null,
         navigable: false,
+        enConstruccion: true,
       },
     ],
     milestones: [

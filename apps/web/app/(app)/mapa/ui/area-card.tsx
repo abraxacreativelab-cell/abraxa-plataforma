@@ -38,14 +38,22 @@ const ETIQUETA: Record<Area['state'], { texto: string; variant: 'default' | 'sec
   bloqueada: { texto: 'Bloqueada', variant: 'outline' },
 };
 
-/** A dónde lleva la tarjeta: a la herramienta principal del área si el registro
- *  de H5 la conoce, y si no al mini-onboarding, que siempre existe. */
-function destino(area: Area): string {
+/**
+ * Las herramientas del área que de verdad existen hoy.
+ *
+ * `lookupTool` devuelve `null` para una clave que nadie registró, y el catálogo
+ * de la 090 tiene varias: `ventas:resumen`, `ventas:pipeline`, `direccion:tareas`
+ * y las dos de `servicio` apuntan a pantallas que todavía no se han construido.
+ * Filtrarlas aquí es lo que hace que la tarjeta no prometa una puerta que no
+ * está — y es también cómo se sabe que el área entera está en construcción.
+ */
+function herramientasReales(area: Area): Array<{ label: string; href: string }> {
+  const salida: Array<{ label: string; href: string }> = [];
   for (const clave of area.tools) {
-    const herramienta = lookupTool(clave);
-    if (herramienta?.href) return herramienta.href;
+    const h = lookupTool(clave);
+    if (h?.href) salida.push({ label: h.label, href: h.href });
   }
-  return `/mapa/${area.slug}`;
+  return salida;
 }
 
 function fecha(iso: string | null): string | null {
@@ -60,6 +68,18 @@ export function AreaCardView({ area }: { area: Area }) {
   const abierta = area.state !== 'bloqueada';
   const etiqueta = ETIQUETA[area.state];
   const desde = fecha(area.unlockedAt);
+
+  // El servidor ya dijo si el área trae herramientas (`enConstruccion`); aquí se
+  // AFINA con el registro, que es la única fuente que sabe cuáles existen de
+  // verdad. Las dos condiciones tienen que dar lo mismo para que la tarjeta no
+  // cambie de mensaje entre el render del servidor y el del navegador.
+  const herramientas = herramientasReales(area);
+  const enConstruccion = area.enConstruccion || herramientas.length === 0;
+
+  // El mini-onboarding SIEMPRE existe: son tres preguntas del guion del área y
+  // un primer resultado visible. Por eso un área abierta sin pantalla propia
+  // sigue llevando a algún sitio en vez de ser una tarjeta muerta.
+  const destino = herramientas[0]?.href ?? `/mapa/${area.slug}`;
 
   const contenido = (
     <Card
@@ -101,21 +121,30 @@ export function AreaCardView({ area }: { area: Area }) {
       <div className="mt-auto space-y-3">
         {abierta ? (
           <>
-            {area.tools.length > 0 && (
+            {herramientas.length > 0 && (
               <ul className="flex flex-wrap gap-1.5">
-                {area.tools.map((clave) => {
-                  const h = lookupTool(clave);
-                  return h ? (
-                    <li
-                      key={clave}
-                      className="rounded-sm border border-border/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
-                    >
-                      {h.label}
-                    </li>
-                  ) : null;
-                })}
+                {herramientas.map((h) => (
+                  <li
+                    key={h.href}
+                    className="rounded-sm border border-border/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+                  >
+                    {h.label}
+                  </li>
+                ))}
               </ul>
             )}
+
+            {/* Lo que se le debe, dicho en castellano. Ver `enConstruccion`. */}
+            {enConstruccion && (
+              <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground/80">
+                <Icon name="wrench" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Su pantalla todavía la estamos construyendo — es cosa nuestra, no tuya. Mientras
+                  tanto, tu agente puede dejarla lista contigo.
+                </span>
+              </p>
+            )}
+
             {desde && (
               <p className="text-xs text-muted-foreground/70">
                 <span className="eyebrow mr-2">Tuya desde</span>
@@ -126,10 +155,12 @@ export function AreaCardView({ area }: { area: Area }) {
         ) : (
           <>
             <Progreso ratio={area.ratio} />
-            <p className="text-xs leading-relaxed text-muted-foreground/80">
-              <span className="eyebrow mr-2">Se abre cuando</span>
-              {area.missing.join(' · ')}
-            </p>
+            {area.missing.length > 0 && (
+              <p className="text-xs leading-relaxed text-muted-foreground/80">
+                <span className="eyebrow mr-2">Se abre cuando</span>
+                {area.missing.join(' · ')}
+              </p>
+            )}
           </>
         )}
       </div>
@@ -142,7 +173,7 @@ export function AreaCardView({ area }: { area: Area }) {
           el requisito, no dando clic. */}
       {area.navigable ? (
         <Link
-          href={destino(area)}
+          href={destino}
           className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           {contenido}

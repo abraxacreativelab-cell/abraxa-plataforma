@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { loadMap, type BusinessMap } from '@abraxa/areas';
-import { Badge, Card, EmptyState, Icon } from '@abraxa/ui';
+import { Badge, Button, Card, EmptyState, Icon } from '@abraxa/ui';
 import { contextoDelMapa, motivoSinContexto } from './context';
 import { mapaDemo } from './demo';
 import { AreaCardView } from './ui/area-card';
@@ -48,13 +49,16 @@ export default async function Page() {
     return <Mapa map={mapaDemo()} editable={false} demo="datos de prueba · no es tu empresa" />;
   }
 
+  const motivo = motivoSinContexto();
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-24">
-      <EmptyState
-        icon="map"
-        title="Tu mapa de negocio todavía no puede cargarse"
-        description={motivoSinContexto()}
-      />
+      <EmptyState icon="map" title={motivo.titulo} description={motivo.descripcion}>
+        {motivo.accion && (
+          <Button asChild>
+            <Link href={motivo.accion.href}>{motivo.accion.texto}</Link>
+          </Button>
+        )}
+      </EmptyState>
     </main>
   );
 }
@@ -88,21 +92,18 @@ function Mapa({
         <h1 className="section-title mt-2 text-3xl font-light tracking-tight sm:text-4xl">
           Mapa de negocio
         </h1>
-        <p className="mt-3 max-w-prose text-pretty text-sm leading-relaxed text-muted-foreground">
-          {map.empty
-            ? 'Aquí va a vivir tu sistema completo conforme lo construyas.'
-            : `Tu empresa tiene ${construidas.length} ${
-                construidas.length === 1 ? 'área abierta' : 'áreas abiertas'
-              }${activas ? `, ${activas} ya funcionando` : ''}. Lo demás se abre solo, conforme avanzas.`}
-        </p>
+        {!map.empty && (
+          <p className="mt-3 max-w-prose text-pretty text-sm leading-relaxed text-muted-foreground">
+            Tu empresa tiene {construidas.length}{' '}
+            {construidas.length === 1 ? 'área abierta' : 'áreas abiertas'}
+            {activas > 0 ? `, ${activas} ya funcionando` : ''}. Lo demás se abre solo, conforme
+            avanzas.
+          </p>
+        )}
       </header>
 
       {map.empty ? (
-        <EmptyState
-          icon="map"
-          title="Tu mapa se está armando"
-          description="En cuanto tu empresa tenga giro, aquí aparecen sus áreas."
-        />
+        <MapaPorNacer />
       ) : (
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-10">
           <div className="space-y-10">
@@ -135,6 +136,81 @@ function Mapa({
 
       {!map.empty && <Senales map={map} />}
     </main>
+  );
+}
+
+/**
+ * Una empresa recién creada, sin una sola área todavía.
+ *
+ * ── Por qué esto NO es un `EmptyState` de una línea ────────────────────────
+ *
+ * Porque es el estado en que el invitado llega, y llegar a un recuadro punteado
+ * que dice «Tu mapa se está armando» es exactamente el «se pierde todo al llegar
+ * al panel» del ensayo. Un mapa vacío no es un error del que disculparse: es el
+ * minuto cero de un negocio, y el producto tiene UNA cosa que ofrecerle ahí —el
+ * Ritual— así que la ofrece, con el nombre de lo que va a recibir.
+ *
+ * Las cuatro áreas que se enseñan son las de la plantilla `general` de la 033,
+ * que es la que le toca a quien todavía no ha dicho a qué se dedica. No son un
+ * adorno: son la promesa concreta de lo que va a tener en veinte minutos, y son
+ * el mismo motor que las bloqueadas del mapa lleno — la curiosidad.
+ */
+function MapaPorNacer() {
+  const AREAS = [
+    { icon: 'target', label: 'Ventas', blurb: 'Cómo llega un cliente y cómo se cierra la venta.' },
+    { icon: 'wrench', label: 'Operaciones', blurb: 'Cómo se entrega lo que vendes.' },
+    { icon: 'wallet', label: 'Finanzas', blurb: 'Qué entra, qué sale y cuánto queda.' },
+    { icon: 'compass', label: 'Dirección', blurb: 'Los números y los documentos del negocio.' },
+  ];
+
+  return (
+    <Card className="p-8 sm:p-10">
+      <div className="mx-auto max-w-xl text-center">
+        <span className="glass-btn mx-auto grid h-12 w-12 place-items-center rounded-xl text-primary">
+          <Icon name="map" className="h-6 w-6" />
+        </span>
+        <h2 className="mt-5 text-xl font-light tracking-tight sm:text-2xl">
+          Tu mapa se dibuja contigo
+        </h2>
+        <p className="mt-3 text-pretty text-sm leading-relaxed text-muted-foreground">
+          Tu agente te va a hacer unas preguntas sobre tu negocio —a qué te dedicas, cómo cobras,
+          qué te quita el sueño— y con eso arma las áreas que TU negocio necesita. No es un
+          formulario: es una conversación, y al final esta pantalla es tuya.
+        </p>
+        <Button asChild className="mt-6">
+          <Link href="/ritual">Empezar con mi agente</Link>
+        </Button>
+      </div>
+
+      <div className="mt-10">
+        <div className="mb-4 flex items-baseline gap-3">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Lo que va a aparecer aquí
+          </h3>
+          <span className="hairline h-px flex-1" aria-hidden />
+        </div>
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {AREAS.map((a) => (
+            <li
+              key={a.label}
+              className="flex items-start gap-3 rounded-lg border border-dashed border-border/60 p-4"
+            >
+              <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border/60 text-muted-foreground">
+                <Icon name={a.icon} className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-medium leading-tight">{a.label}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground/80">{a.blurb}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 text-xs leading-relaxed text-muted-foreground/60">
+          Y las que tu giro pida además: inventario si vendes producto, atención a clientes si te
+          escriben todo el día, equipo cuando dejes de estar solo.
+        </p>
+      </div>
+    </Card>
   );
 }
 
