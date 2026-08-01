@@ -20,11 +20,9 @@
 import { PlatformError, tenantDb, tryPort } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import type { Milestone, MilestoneRow } from '../domain/types';
+import { COLUMNAS_HITO as COLUMNAS, LIMITE_HITOS } from '../data/tablas';
 
-/** Techo de cordura: un roadmap más largo que esto ya no se lee, se ignora. */
-export const LIMITE_HITOS = 100;
-
-const COLUMNAS = 'id, tenant_id, area_slug, title, description, position, done_at, generated_by, created_at';
+export { LIMITE_HITOS };
 
 function aHito(row: MilestoneRow): Milestone {
   return {
