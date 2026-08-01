@@ -44,6 +44,26 @@
  *
  *  El tipo del módulo se declara aquí, estructural: lo que cruza es JSON.
  */
+// ── Por qué esta referencia, y por qué apunta al archivo de OTRO carril ──────
+//
+// Cargar `@abraxa/onboarding` mete sus fuentes en el programa de TypeScript de
+// quien importe este paquete — y `apps/web` importa `@abraxa/areas` desde
+// `/mapa`. H7 declara sus tablas en `packages/onboarding/src/tables.d.ts`, pero
+// no lo referencia desde su `index.ts` (H9 y H11 sí lo hacen desde los suyos),
+// así que el programa de `apps/web` llega a sus archivos siguiendo un import y
+// NUNCA ve ese `.d.ts` suelto. Resultado medido: 8 errores de compilación en
+// archivos de H7, provocados por un cambio de este carril.
+//
+// La salida honesta NO es redeclarar `onboarding_sessions` aquí —eso diría que
+// esas tablas son de H11, y no lo son—. Es INCLUIR el archivo de H7 tal cual,
+// que es lo que la referencia hace. No duplica una línea, no transfiere
+// propiedad, y el día que H7 lo referencie desde su `index.ts` esto se vuelve
+// un include repetido, que no cuesta nada. Se anota en el PR.
+//
+// La regla de ESLint pide un `import` en su lugar, y no aplica: un `.d.ts` no se
+// puede importar sin renombrarlo a `.ts`.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="../../../onboarding/src/tables.d.ts" />
 import { PlatformError, tenantDb } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import {
@@ -55,8 +75,7 @@ import {
 } from '../domain/blueprint';
 import type { TenantAreaRow } from '../domain/types';
 import { readCatalogRules, readIndustry, seedAreas } from '../data/rpc';
-import { LIMITE_AREAS, COLUMNAS_AREA } from './areas';
-import { LIMITE_HITOS } from './milestones';
+import { COLUMNAS_AREA, LIMITE_AREAS, LIMITE_HITOS } from '../data/tablas';
 
 /** Quién aparece en `onboarding_blueprints.applied_by` y en los logs. */
 export const NOMBRE_DEL_SINK = '@abraxa/areas';
@@ -229,7 +248,9 @@ async function proyectarHitos(ctx: TenantContext, blueprint: BlueprintDelRitual)
   const nuevos = hitosQueFaltan(blueprint, existentes, ultima).slice(0, cupo);
   if (nuevos.length === 0) return 0;
 
-  const { error: fallo } = await tenantDb(ctx).from('tenant_milestones').insert(nuevos);
+  const { error: fallo } = await tenantDb(ctx)
+    .from('tenant_milestones')
+    .insert(nuevos.map((h) => ({ ...h })));
   if (fallo) {
     throw new PlatformError('INTERNAL', `No se pudo escribir el roadmap: ${fallo.message}`);
   }
