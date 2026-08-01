@@ -31,6 +31,8 @@
  *  gate de propiedad no me deja instalar si algún día hace falta otra.
  */
 
+import { SIGNIFICADO_EN_PAUSA } from '../copy';
+
 export const EMBEDDING_MODEL = 'text-embedding-3-small';
 export const EMBEDDING_DIMS = 1536;
 
@@ -57,12 +59,37 @@ export function isEmbeddingsAvailable(): boolean {
   return !!apiKey() && Date.now() >= cooldownHasta;
 }
 
-/** Estado legible para diagnóstico: `/vault/health`, runbook y pruebas. */
-export function embeddingsStatus(): { ok: boolean; reason: string; cooldownMs: number } {
-  if (!apiKey()) return { ok: false, reason: 'OPENAI_API_KEY ausente', cooldownMs: 0 };
+/**
+ * Estado del índice semántico. Tiene DOS textos y no es redundancia.
+ *
+ * `reason` es para diagnóstico —`/vault/health`, el runbook, las pruebas— y
+ * dice la verdad técnica: `OPENAI_API_KEY ausente`, `HTTP 429: …`.
+ *
+ * `paraElCliente` es para la pantalla. Hasta el 2026-08-01 no existía, y
+ * /direccion pintaba `reason` tal cual: el invitado del ensayo leyó
+ * «La búsqueda por significado está en pausa (OPENAI_API_KEY ausente)».
+ * Enseñarle a un cliente el nombre de una variable de entorno no le dice nada
+ * y le dice demasiado a la vez.
+ */
+export function embeddingsStatus(): {
+  ok: boolean;
+  reason: string;
+  paraElCliente: string;
+  cooldownMs: number;
+} {
+  if (!apiKey()) {
+    return {
+      ok: false,
+      reason: 'OPENAI_API_KEY ausente',
+      paraElCliente: SIGNIFICADO_EN_PAUSA,
+      cooldownMs: 0,
+    };
+  }
   const resta = cooldownHasta - Date.now();
-  if (resta > 0) return { ok: false, reason: cooldownMotivo, cooldownMs: resta };
-  return { ok: true, reason: '', cooldownMs: 0 };
+  if (resta > 0) {
+    return { ok: false, reason: cooldownMotivo, paraElCliente: SIGNIFICADO_EN_PAUSA, cooldownMs: resta };
+  }
+  return { ok: true, reason: '', paraElCliente: '', cooldownMs: 0 };
 }
 
 /** Reinicia el cortacircuito. Para las pruebas y para el backfill manual. */

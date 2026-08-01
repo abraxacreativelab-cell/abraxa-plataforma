@@ -40,6 +40,21 @@ export { resolveVault, getVaultValue, scopeToContext } from './resolver';
 export { injectIntoPrompt } from './agent-inject';
 export { interpolate, interpolateVerbose, renderTemplate, tokensUsados } from './render';
 export { formatVault, formatMoney, formatMoney2, KIND_LABEL } from './format';
+// ── Cómo le habla la bóveda a un cliente ────────────────────────────────────
+export {
+  ETIQUETA_DOC_TYPE,
+  ETIQUETA_CAMPO,
+  etiquetaDocType,
+  etiquetaKind,
+  etiquetaCampo,
+  mensajeEsParaElCliente,
+  jergaEn,
+  PATRONES_DE_JERGA,
+  BUSQUEDA_SOLO_POR_PALABRAS,
+  SIGNIFICADO_EN_PAUSA,
+  FALLO_NUESTRO,
+} from './copy';
+
 export {
   bumpVaultCache,
   notifyVaultChanged,

@@ -59,6 +59,22 @@ export { taxonomiaDe, listarGiros, type IndustryTemplate, type AreaTemplate } fr
 export { detectGapsDetallado, contarHuecos, type AreaGap } from './industry/gaps';
 export { loadTenantMeta } from './global-tables';
 
+// ── Cómo le habla la bóveda a un cliente ────────────────────────────────────
+export {
+  ETIQUETA_DOC_TYPE,
+  ETIQUETA_CAMPO,
+  etiquetaDocType,
+  etiquetaKind,
+  etiquetaCampo,
+  mensajeEsParaElCliente,
+  jergaEn,
+  PATRONES_DE_JERGA,
+  BUSQUEDA_SOLO_POR_PALABRAS,
+  SIGNIFICADO_EN_PAUSA,
+  FALLO_NUESTRO,
+} from './copy';
+
+
 export { canEditVault, hasArea, AREA_BOVEDA } from './rbac';
 
 export type {

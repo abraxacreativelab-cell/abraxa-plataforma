@@ -1,3 +1,4 @@
+/// <reference path="../../../../../../packages/tenancy/src/express.d.ts" />
 import { PlatformError, tryPort, type TenancyPort, type TenantContext } from '@abraxa/db';
 import { RUTA_DE_ENTRADA } from '../../../../../../packages/auth/src/identidad';
 
@@ -199,40 +200,41 @@ async function sesionVerificada(): Promise<{
  * `@abraxa/vault/api` aparte de su barril. `src/port.ts` es justo el port y sus
  * servicios: cero Express.
  *
- * ── Por qué la ruta va en una constante y no escrita en el `import()` ─────
+ * ── Por qué la ruta va ESCRITA y no en una constante ──────────────────────
  *
- * Porque si se escribe literal, TypeScript mete el árbol de H2 en el proyecto
- * de `apps/web`, y ahí se cae: `middleware/rbac.ts` usa `req.tenant`, que sólo
- * existe con `packages/tenancy/src/express.d.ts` cargado, y ese `.d.ts` no
- * entra en el `include` de la web. Son seis errores en código ajeno que no
- * tengo permitido tocar y que además no están rotos — es el reflejo exacto de
- * la mina conocida al revés ("packages/** no alcanza los tipos de next").
+ * Se intentó primero con la ruta en una constante —el recurso de
+ * `(app)/bandeja/api/bff.ts` y de `(onboarding)/ritual/lib/sesion.ts`— para
+ * que TypeScript no siguiera el módulo. Webpack NO la pliega: contesta
+ * «Critical dependency: the request of a dependency is an expression», arma un
+ * módulo de contexto cuyo patrón por defecto sólo casa con `./…`, y una ruta
+ * que empieza con `../` no casa nunca. O sea: compila, no avisa en rojo, y
+ * falla en la primera petición real. (Los dos archivos citados llevan esa
+ * misma advertencia en `main` hoy — anotado en el PR, no son míos.)
  *
- * Con la ruta en una constante, TypeScript no la resuelve y webpack sí: la
- * pliega como constante y la empaqueta igual. Es el mismo recurso que ya usa
- * `(app)/bandeja/api/bff.ts` con `RUTA_OPCIONES`.
+ * Escrita literal, webpack la resuelve. Lo que rompe entonces es TypeScript:
+ * mete el árbol de H2 en el proyecto de `apps/web` y ahí `middleware/rbac.ts`
+ * usa `req.tenant`, que sólo existe con `packages/tenancy/src/express.d.ts`
+ * cargado — y ese `.d.ts` no entra en el `include` de la web. Es la mina
+ * conocida ("packages/** no alcanza los tipos de next") vista por el otro
+ * lado. Se arregla con el `/// <reference>` de la primera línea de este
+ * archivo: carga la declaración y ya. Cero archivos ajenos tocados.
  *
  * Se deja en el registro compartido (y no en una variable de aquí) para que la
  * siguiente pantalla que llame `tryPort('tenancy')` en este proceso —el shell
  * de `(app)/layout.tsx`, el mapa, las tareas— ya lo encuentre. Esta función
  * arregla su carril y, de paso, deja de romper los ajenos.
  */
-const RUTA_PORT_TENANCY: string = '../../../../../../packages/tenancy/src/port';
-
 async function puertoDeEmpresas(): Promise<TenancyPort | null> {
   const registrado = tryPort('tenancy');
   if (registrado) return registrado;
 
   try {
-    const [{ registerPort }, modulo] = await Promise.all([
+    const [{ registerPort }, { tenancyPort }] = await Promise.all([
       import('@abraxa/db'),
-      import(RUTA_PORT_TENANCY) as Promise<{ tenancyPort?: TenancyPort }>,
+      import('../../../../../../packages/tenancy/src/port'),
     ]);
 
-    const impl = modulo.tenancyPort;
-    if (!impl) throw new Error('packages/tenancy/src/port no exportó `tenancyPort`.');
-
-    registerPort('tenancy', impl);
+    registerPort('tenancy', tenancyPort);
     return tryPort('tenancy');
   } catch (e) {
     if (!yaAvisadoSinPuerto) {

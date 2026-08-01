@@ -10,10 +10,19 @@
  * Los errores se devuelven como valor, no se lanzan: la pantalla necesita
  * poder enseñar «Ya existe un valor con esa clave, edítalo en vez de crear
  * otro» en vez de una página de error genérica.
+ *
+ * ── Pero no TODO error se puede enseñar ───────────────────────────────────
+ *
+ * Hasta el 2026-08-01 esto devolvía `e.message` de cualquier `PlatformError`.
+ * Los de validación están escritos a mano y dicen qué hacer; los `INTERNAL`
+ * arrastran el texto crudo de Postgres —«duplicate key value violates unique
+ * constraint "canonical_values_identity_idx"»— y ése salía en el aviso
+ * flotante del cliente. Ver `mensajeEsParaElCliente` en `@abraxa/vault`.
  */
 
 import { revalidatePath } from 'next/cache';
 import { PlatformError } from '@abraxa/db';
+import { FALLO_NUESTRO, mensajeEsParaElCliente } from '@abraxa/vault/api';
 import {
   aprobarValor,
   archivarDocumento,
@@ -46,9 +55,12 @@ async function ejecutar<T>(
     for (const r of rutas) revalidatePath(r);
     return { ok: true, mensaje, datos };
   } catch (e) {
-    if (PlatformError.is(e)) return { ok: false, mensaje: e.message };
+    if (PlatformError.is(e) && mensajeEsParaElCliente(e.code)) {
+      return { ok: false, mensaje: e.message };
+    }
+    // Todo lo demás se registra entero y se cuenta en una frase.
     console.error('[direccion] acción falló', e);
-    return { ok: false, mensaje: 'Algo falló de nuestro lado. Vuelve a intentarlo.' };
+    return { ok: false, mensaje: FALLO_NUESTRO };
   }
 }
 

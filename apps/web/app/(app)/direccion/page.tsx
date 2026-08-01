@@ -170,10 +170,8 @@ export default async function PanelDireccion() {
       {embeddings.ok ? null : (
         <Tarjeta className="flex items-start gap-2 p-3 text-xs text-[hsl(var(--muted-foreground))]">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-          <span>
-            La búsqueda por significado está en pausa ({embeddings.reason}). La búsqueda por
-            palabras sigue funcionando y los documentos se indexan solos cuando vuelva.
-          </span>
+          {/* `paraElCliente`, no `reason`: `reason` dice «OPENAI_API_KEY ausente». */}
+          <span>{embeddings.paraElCliente}</span>
         </Tarjeta>
       )}
 
