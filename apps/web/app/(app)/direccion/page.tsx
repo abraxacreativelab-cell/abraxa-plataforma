@@ -12,6 +12,7 @@ import {
 import {
   contarBorradores,
   detectGapsDetallado,
+  etiquetaDeClave,
   embeddingsStatus,
   listarDocumentos,
   listarValores,
@@ -138,19 +139,36 @@ export default async function PanelDireccion() {
         </Tarjeta>
       ) : null}
 
+      {/*
+        El giro sólo se nombra cuando de verdad se sabe.
+
+        Hasta el 2026-08-01 esto ponía «· aún sin definir tu giro» cuando
+        `industry_type` venía null — y viene null SIEMPRE hoy, incluso para la
+        empresa que terminó el Ritual completo y le contó a su agente que vende
+        tacos de trompo y hamburguesas (verificado contra producción). O sea:
+        justo después de contarlo todo, el panel contestaba que no sabía nada.
+        Es el mismo pecado que el ensayo señaló arriba, un piso más abajo.
+
+        Y la salida no puede ser una invitación a "definir tu giro", porque no
+        hay dónde: sería mandar al invitado a una puerta que no existe, que es
+        el hallazgo nº 1 del ensayo. Así que cuando no se sabe, no se menciona
+        y se dice lo que sí es cierto — la lista es lo básico de cualquier
+        negocio. Cuando se sabe, se nombra.
+      */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="text-sm font-semibold">Qué le falta a tu negocio</h2>
-          <span className="text-xs text-[hsl(var(--muted-foreground))]">
-            {taxonomia.name}
-            {datos.meta?.industryType ? null : ' · aún sin definir tu giro'}
-          </span>
+          {datos.meta?.industryType ? (
+            <span className="text-xs text-[hsl(var(--muted-foreground))]">{taxonomia.name}</span>
+          ) : null}
         </div>
 
         {totalHuecos === 0 ? (
           <Tarjeta className="flex items-center gap-2 p-4 text-sm">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            No falta nada de lo básico de tu giro. Tus agentes tienen con qué contestar.
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            {datos.meta?.industryType
+              ? 'No falta nada de lo básico de tu giro. Tus agentes tienen con qué contestar.'
+              : 'No falta nada de lo básico. Tus agentes tienen con qué contestar.'}
           </Tarjeta>
         ) : (
           <>
@@ -170,10 +188,8 @@ export default async function PanelDireccion() {
       {embeddings.ok ? null : (
         <Tarjeta className="flex items-start gap-2 p-3 text-xs text-[hsl(var(--muted-foreground))]">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-          <span>
-            La búsqueda por significado está en pausa ({embeddings.reason}). La búsqueda por
-            palabras sigue funcionando y los documentos se indexan solos cuando vuelva.
-          </span>
+          {/* `paraElCliente`, no `reason`: `reason` dice «OPENAI_API_KEY ausente». */}
+          <span>{embeddings.paraElCliente}</span>
         </Tarjeta>
       )}
 
@@ -249,7 +265,9 @@ function TarjetaHueco({ gap }: { gap: AreaGap }) {
         <ul className="mt-3 space-y-1.5">
           {gap.missingValues.map((v) => (
             <li key={v.key} className="flex items-baseline gap-2 text-sm">
-              <span className="font-mono text-[11px] text-[hsl(var(--primary))]">{v.key}</span>
+              {/* La clave cruda (`iva_pct`) es el identificador de plantilla,
+                  no un nombre. En una lista de pendientes no dice nada. */}
+              <span className="text-[hsl(var(--primary))]">{etiquetaDeClave(v.key)}</span>
               {v.hint ? (
                 <span className="text-xs text-[hsl(var(--muted-foreground))]">{v.hint}</span>
               ) : null}

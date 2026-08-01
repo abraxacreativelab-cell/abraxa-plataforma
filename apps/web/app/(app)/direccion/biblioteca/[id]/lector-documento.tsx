@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Archive, Eye, History, Layers, Pencil, Save } from 'lucide-react';
+// `@abraxa/vault/copy` y no `/api`: esto es un componente de CLIENTE y el
+// barril de la bóveda arrastra `node:crypto` al bundle del navegador.
+import { etiquetaDocType } from '@abraxa/vault/copy';
 import type { DocType, DocumentRow, VaultRow } from '@abraxa/vault/api';
 import { accionArchivarDocumento, accionGuardarDocumento } from '../../_lib/actions';
 import {
@@ -108,7 +111,7 @@ export function LectorDocumento({
         <Tarjeta className="overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-4 py-2.5">
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{documento.title}</span>
-            <Insignia tono="neutro">{documento.doc_type}</Insignia>
+            <Insignia tono="neutro">{etiquetaDocType(documento.doc_type)}</Insignia>
             {documento.status === 'draft' ? <Insignia tono="borrador">borrador</Insignia> : null}
             {documento.status === 'archived' ? (
               <Insignia tono="alerta">archivado</Insignia>
@@ -138,7 +141,7 @@ export function LectorDocumento({
                   <Selector value={tipo} onChange={(e) => setTipo(e.target.value as DocType)}>
                     {TIPOS.map((t) => (
                       <option key={t} value={t}>
-                        {t}
+                        {etiquetaDocType(t)}
                       </option>
                     ))}
                   </Selector>

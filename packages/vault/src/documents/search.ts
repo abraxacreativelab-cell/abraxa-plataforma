@@ -26,6 +26,7 @@ import type { TenantContext } from '@abraxa/db';
 import { requireVaultRead } from '../rbac';
 import type { SearchHit } from '../types';
 import { generateEmbedding, isEmbeddingsAvailable, toVectorLiteral } from './embeddings';
+import { BUSQUEDA_SOLO_POR_PALABRAS } from '../copy';
 
 export interface BuscarOpts {
   limite?: number;
@@ -37,6 +38,13 @@ export interface ResultadoBusqueda {
   hits: SearchHit[];
   /** `true` si la vía semántica no pudo correr. La UI lo dice, no lo esconde. */
   semanticaDegradada: boolean;
+  /**
+   * Qué decirle a quien buscó. Está escrito PARA él: las tres causas —sin
+   * llave, sin poder vectorizar la consulta, la función de SQL falló— se ven
+   * igual desde su silla («busqué peor de lo que sé buscar») y distinguirlas
+   * en pantalla sólo le daría tres formas de no entender lo mismo. La causa
+   * real se distingue en el log, que es donde alguien puede hacer algo.
+   */
   motivoDegradacion: string;
 }
 
@@ -93,7 +101,7 @@ async function buscarSemantica(
     return {
       hits: [],
       degradada: true,
-      motivo: 'El índice semántico no está disponible ahora mismo; se buscó sólo por palabras.',
+      motivo: BUSQUEDA_SOLO_POR_PALABRAS,
     };
   }
 
@@ -102,7 +110,7 @@ async function buscarSemantica(
     return {
       hits: [],
       degradada: true,
-      motivo: 'No se pudo interpretar la búsqueda por significado; se buscó sólo por palabras.',
+      motivo: BUSQUEDA_SOLO_POR_PALABRAS,
     };
   }
 
@@ -118,7 +126,7 @@ async function buscarSemantica(
     return {
       hits: [],
       degradada: true,
-      motivo: 'La búsqueda por significado falló; se buscó sólo por palabras.',
+      motivo: BUSQUEDA_SOLO_POR_PALABRAS,
     };
   }
 
