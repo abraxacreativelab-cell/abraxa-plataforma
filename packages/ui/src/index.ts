@@ -116,14 +116,47 @@ export {
   type AsyncState,
 } from './components/feedback/async-boundary';
 export { LockedArea, type LockedAreaProps } from './components/feedback/locked-area';
+export {
+  FronteraDeError,
+  PantallaDeFallo,
+  type FronteraDeErrorProps,
+  type PantallaDeFalloProps,
+} from './components/feedback/frontera-de-error';
 
 // ── Shell y navegación ──────────────────────────────────────────────────────
-export { AppShell, findActiveArea, type AppShellProps } from './components/shell/app-shell';
+export {
+  AppShell,
+  ENLACE_AL_PANEL,
+  ENLACE_A_AJUSTES,
+  findActiveArea,
+  primerDestinoDe,
+  type AppShellProps,
+} from './components/shell/app-shell';
 export { AccentScope, type AccentScopeProps } from './components/shell/accent-scope';
-export { Sidebar, type SidebarProps } from './components/shell/sidebar';
+export { Sidebar, type EnlaceFijo, type SidebarProps } from './components/shell/sidebar';
 export { SidebarArea, type SidebarAreaProps } from './components/shell/sidebar-area';
 export { Topbar, type TopbarProps } from './components/shell/topbar';
 export { MobileNav, type MobileNavProps } from './components/shell/mobile-nav';
+
+// ── El panel ────────────────────────────────────────────────────────────────
+export { PanelDeInicio, type PanelDeInicioProps } from './components/panel/panel-de-inicio';
+export { TarjetaDeArea, type TarjetaDeAreaProps } from './components/panel/tarjeta-de-area';
+export {
+  AnilloDeProgreso,
+  type AnilloDeProgresoProps,
+} from './components/panel/anillo-de-progreso';
+export {
+  areasQueAbreLaSiguienteFase,
+  hitosDelRitual,
+  llamadaDelPanel,
+  loQueYaSabe,
+  nombreDelAgente,
+  type EstadoDelPaso,
+  type HitoDelRitual,
+  type LlamadaDelPanel,
+  type PasoDelRitual,
+  type RitualEnPanel,
+} from './components/panel/lectura-del-ritual';
 
 // ── Registro de herramientas ────────────────────────────────────────────────
 export {
@@ -139,5 +172,15 @@ export {
 export { ToolOutlet } from './components/registry/tool-outlet';
 
 // ── Datos de navegación ─────────────────────────────────────────────────────
-export { MOCK_AREAS, MOCK_REQUIREMENTS, registerMockTools } from './components/nav/mock-areas';
+export {
+  AREAS_DE_ARRANQUE,
+  POR_QUE_NO_ABRE,
+  areasDeArranque,
+  motivoDeCierre,
+  registrarHerramientasDeArranque,
+  requisitosDeArranque,
+  type AreaDeArranque,
+  type MotivoDeCierre,
+  type SenalesDelRitual,
+} from './components/nav/areas-de-arranque';
 export { isNavigable, resolveAreas, type AreasResult } from './components/nav/resolve-areas';

@@ -4,13 +4,21 @@ import * as React from 'react';
 import { usePathname } from 'next/navigation';
 import type { AreaSummary } from '@abraxa/db/ports';
 import type { LoadFailure } from '../feedback/failure';
+import { FronteraDeError } from '../feedback/frontera-de-error';
 import { lookupTool, toolsForArea } from '../registry/tool-registry';
 import { isNavigable } from '../nav/resolve-areas';
-import { registerMockTools } from '../nav/mock-areas';
+import { registrarHerramientasDeArranque } from '../nav/areas-de-arranque';
 import { AccentScope } from './accent-scope';
 import { MobileNav } from './mobile-nav';
-import { Sidebar } from './sidebar';
+import { Sidebar, type EnlaceFijo } from './sidebar';
 import { Topbar } from './topbar';
+
+/** El panel. No es un área del negocio: es la puerta de entrada al producto. */
+export const ENLACE_AL_PANEL: EnlaceFijo = { href: '/panel', label: 'Tu panel', icon: 'resumen' };
+
+/** Ajustes. Va al pie porque se usa poco, pero tiene que EXISTIR: es donde el
+ *  invitado confirma con qué cuenta entró y por dónde cierra sesión. */
+export const ENLACE_A_AJUSTES: EnlaceFijo = { href: '/ajustes', label: 'Ajustes', icon: 'settings' };
 
 export interface AppShellProps {
   areas: AreaSummary[] | null;
@@ -21,11 +29,11 @@ export interface AppShellProps {
   brand?: string | null;
   businessName?: string | null;
   agentName?: string | null;
-  /** Aviso de desarrollo: "estás viendo el mock, no datos reales". */
+  /** Aviso de desarrollo: "estás viendo el catálogo de arranque, no H11". */
   notice?: string | null;
-  /** `true` cuando la navegación viene del mock: registra las herramientas de
-   *  respaldo para que el sidebar sea navegable antes de que existan H6, H9… */
-  mockTools?: boolean;
+  /** `true` cuando la navegación viene del catálogo de arranque: registra las
+   *  herramientas de respaldo para que el sidebar sea navegable antes de H11. */
+  fallbackTools?: boolean;
   children: React.ReactNode;
 }
 
@@ -35,8 +43,9 @@ export interface AppShellProps {
  * ════════════════════════════════════════════════════════════════════════════
  *
  *  Aquí cuelgan sus pantallas los otros 13 handoffs. Cada uno escribe sólo su
- *  contenido dentro de su carpeta y hereda el shell, el acento del área y los
- *  estados honestos sin coordinarse con nadie.
+ *  contenido dentro de su carpeta y hereda el shell, el acento del área, los
+ *  estados honestos y —desde hoy— la frontera de error, sin coordinarse con
+ *  nadie.
  *
  *  Dos ámbitos de acento anidados, a propósito:
  *
@@ -46,6 +55,13 @@ export interface AppShellProps {
  *
  *  Así, al moverse de Ventas a Dirección, el contenido cambia de verde a dorado
  *  entero, sin que ninguna pantalla sepa nada de colores.
+ *
+ *  ── La frontera de error va DENTRO del shell, no fuera ─────────────────────
+ *
+ *  Envuelve sólo a `{children}`. Es lo que hace que una pantalla que revienta
+ *  no se lleve consigo la barra lateral: el invitado ve una frase digna en el
+ *  lienzo y puede irse a otra sección con un clic, en vez de quedarse mirando
+ *  una pantalla blanca sin navegación.
  */
 export function AppShell({
   areas,
@@ -55,7 +71,7 @@ export function AppShell({
   businessName,
   agentName,
   notice,
-  mockTools = false,
+  fallbackTools = false,
   children,
 }: AppShellProps) {
   const pathname = usePathname() ?? '/';
@@ -64,7 +80,7 @@ export function AppShell({
   // Se registra durante el render y ANTES de que se pinte el sidebar, en el
   // servidor y en el cliente. `registerFallbackTools` no pisa lo que el handoff
   // dueño ya haya registrado, así que el orden de importación deja de importar.
-  if (mockTools) registerMockTools();
+  if (fallbackTools) registrarHerramientasDeArranque();
 
   // Cerrar el cajón al navegar. Si no, en móvil se queda encima del contenido
   // que el usuario acaba de pedir.
@@ -72,15 +88,6 @@ export function AppShell({
 
   const activa = React.useMemo(() => findActiveArea(areas, pathname), [areas, pathname]);
   const areaActual = areas?.find((a) => a.slug === activa) ?? null;
-
-  // El logotipo lleva a la primera área que el emprendedor puede abrir, no a
-  // `/`: dentro del producto, `/` es la landing de venta y sacarlo de su
-  // negocio de un clic sería absurdo.
-  const inicio = React.useMemo(() => {
-    const primera = areas?.find(isNavigable);
-    if (!primera) return '/';
-    return toolsForArea(primera.tools, primera.access)[0]?.href ?? `/${primera.slug}`;
-  }, [areas]);
 
   const barra = (
     <Sidebar
@@ -90,6 +97,8 @@ export function AppShell({
       activeSlug={activa}
       requirements={requirements}
       brand={brand}
+      enlacesFijos={[ENLACE_AL_PANEL]}
+      enlacesDePie={[ENLACE_A_AJUSTES]}
       onNavigate={() => setNavOpen(false)}
       onRetry={() => window.location.reload()}
     />
@@ -101,7 +110,11 @@ export function AppShell({
         businessName={businessName}
         agentName={agentName}
         areaLabel={areaActual?.label}
-        homeHref={inicio}
+        // El logotipo lleva al PANEL, no a `/`: dentro del producto `/` es la
+        // landing de venta, y sacar a alguien de su negocio de un clic sería
+        // absurdo. Antes apuntaba a la primera área abierta, así que con todo
+        // bloqueado el logotipo terminaba llevando justo a la landing.
+        homeHref={ENLACE_AL_PANEL.href}
         notice={notice}
         onOpenNav={() => setNavOpen(true)}
       />
@@ -140,7 +153,9 @@ export function AppShell({
             mueva el foco y no sólo el scroll.
           */}
           <div id="contenido" tabIndex={-1} className="min-w-0 focus:outline-none">
-            {children}
+            <FronteraDeError resetKey={pathname} contexto={areaActual?.label ?? null}>
+              {children}
+            </FronteraDeError>
           </div>
         </AccentScope>
       </div>
@@ -158,6 +173,11 @@ export function AppShell({
  * fuente confiable es lo que el handoff dueño registró.
  *
  * Gana la coincidencia más larga: `/ventas/contactos` le gana a `/ventas`.
+ *
+ * Un área CERRADA no reclama ruta: si lo hiciera, entrar a `/tareas` teñiría el
+ * shell del color de un área con candado y la barra superior anunciaría un área
+ * en la que el usuario no puede estar. Además sus `tools` van vacías, así que
+ * ni siquiera tiene rutas que reclamar.
  */
 export function findActiveArea(areas: AreaSummary[] | null, pathname: string): string | null {
   if (!areas?.length) return null;
@@ -165,6 +185,8 @@ export function findActiveArea(areas: AreaSummary[] | null, pathname: string): s
   let mejor: { slug: string; largo: number } | null = null;
 
   for (const area of areas) {
+    if (!isNavigable(area)) continue;
+
     const candidatos = [
       `/${area.slug}`,
       ...area.tools.map((k) => lookupTool(k)?.href).filter((h): h is string => Boolean(h)),
@@ -179,4 +201,9 @@ export function findActiveArea(areas: AreaSummary[] | null, pathname: string): s
   }
 
   return mejor?.slug ?? null;
+}
+
+/** El primer destino de un área, para quien necesite mandar a alguien ahí. */
+export function primerDestinoDe(area: AreaSummary): string {
+  return toolsForArea(area.tools, area.access)[0]?.href ?? `/${area.slug}`;
 }
