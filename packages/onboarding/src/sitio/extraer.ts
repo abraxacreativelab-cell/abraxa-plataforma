@@ -28,7 +28,6 @@ import { usePort } from '@abraxa/db';
 import type { TenantContext } from '@abraxa/db';
 import { log } from '../logger';
 import type { PropuestaDelSitio } from '../types';
-import { ayudaDe } from '../interview/ayudas';
 
 /**
  * Qué campos se le piden, cómo se llaman para el invitado y qué se le dice al
@@ -215,24 +214,4 @@ export async function extraerDeLaPagina(
     log.info(`no se pudo extraer de la página: ${String(err)}`);
     return [];
   }
-}
-
-/**
- * La propuesta, redactada como la contestaría él.
- *
- * Cuando confirma, esto se manda al Ritual como un turno del invitado: por eso
- * lleva su forma de hablar y no la de un formulario. El agente lo recibe, lo
- * marca con sus `[DATO:…]` y las fases se cierran solas — sin un camino de
- * escritura paralelo que pudiera saltarse las condiciones de cierre.
- */
-export function comoLoDiriaEl(propuestas: PropuestaDelSitio[]): string {
-  if (propuestas.length === 0) return '';
-
-  const frases = propuestas.map((p) => {
-    const ayuda = ayudaDe(p.clave);
-    const encabezado = ayuda ? p.etiqueta.toLowerCase() : p.clave;
-    return `${encabezado}: ${p.valor}`;
-  });
-
-  return `Esto es de mi página, ya lo revisé y está bien:\n${frases.map((f) => `- ${f}`).join('\n')}`;
 }

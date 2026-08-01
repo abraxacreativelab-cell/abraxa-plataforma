@@ -407,13 +407,6 @@ export function Ritual({ inicial }: { inicial: Foto }) {
 
   const turnos = enVuelo ? [...foto.transcript, enVuelo] : foto.transcript;
 
-  /**
-   * Narrar la última pregunta del agente, cuando aparece.
-   *
-   * `narrar()` ya ignora un texto que acaba de leer, así que un re-render no
-   * produce una segunda lectura. Y no se narra mientras se está grabando: el
-   * micrófono no se puede grabar a sí mismo.
-   */
   const ultimoDelAgente = React.useMemo(() => {
     for (let i = turnos.length - 1; i >= 0; i--) {
       const t = turnos[i];
@@ -422,10 +415,43 @@ export function Ritual({ inicial }: { inicial: Foto }) {
     return null;
   }, [turnos]);
 
+  /**
+   * Lo que YA estaba escrito al abrir la página no se lee en voz alta.
+   *
+   * Quien vuelve al día siguiente abre `/ritual` y encima está su conversación
+   * completa. Sin esto, la voz arrancaría leyéndole el último mensaje de ayer
+   * —que él ya leyó, y que puede ser el mapa entero— antes de que haya tocado
+   * nada. Se anota como leído sin sonar. La primera narración de verdad es la
+   * de la respuesta que pida HOY.
+   */
+  const inicialYaVista = React.useRef(
+    (() => {
+      for (let i = inicial.transcript.length - 1; i >= 0; i--) {
+        const t = inicial.transcript[i];
+        if (t?.role === 'assistant') return t.content;
+      }
+      return null;
+    })(),
+  );
+
+  /**
+   * Narrar la última pregunta del agente, cuando aparece.
+   *
+   * `narrar()` ignora un texto que acaba de leer, así que un re-render no
+   * produce una segunda lectura. Y no se narra mientras se está grabando: el
+   * micrófono no se puede grabar a sí mismo.
+   *
+   * Las dependencias son `voz.narrar` y `voz.grabando`, no `voz` entero: el
+   * hook devuelve un objeto nuevo en cada render y depender de él haría correr
+   * este efecto en todos ellos.
+   */
+  const { narrar: narrarConLaVoz, grabando: estaGrabando } = voz;
+
   React.useEffect(() => {
-    if (!ultimoDelAgente || ocupado || voz.grabando) return;
-    voz.narrar(ultimoDelAgente);
-  }, [ocupado, ultimoDelAgente, voz]);
+    if (!ultimoDelAgente || ocupado || estaGrabando) return;
+    if (ultimoDelAgente === inicialYaVista.current) return;
+    narrarConLaVoz(ultimoDelAgente);
+  }, [estaGrabando, narrarConLaVoz, ocupado, ultimoDelAgente]);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-5 py-8 sm:px-8">
@@ -450,6 +476,21 @@ export function Ritual({ inicial }: { inicial: Foto }) {
             pensando={ocupado || cerrando}
           />
         )}
+
+        {/*
+          El atajo de la página va AQUÍ y no en el pie, y es una decisión de
+          teléfono: el pie es pegajoso, y con los botones de categoría, el campo
+          de texto y encima esto, se comía media pantalla de un iPhone. Aquí
+          hace scroll con la conversación, que es de donde salió.
+        */}
+        {ofrecerSitio ? (
+          <Sitio
+            ocupado={ocupado || cerrando}
+            onLeer={leerSitio}
+            onConfirmar={confirmarSitio}
+            onOmitir={() => setSitioResuelto(true)}
+          />
+        ) : null}
 
         {completada && foto.mapa ? (
           <MapaDeNegocio mapa={foto.mapa} agente={foto.vista.agente} />
@@ -496,17 +537,6 @@ export function Ritual({ inicial }: { inicial: Foto }) {
        * como su agente de todos los días. Ver `guionDespuesDelRitual`.
        */}
       <footer className="sticky bottom-0 -mx-5 bg-[hsl(var(--background)/0.9)] px-5 pb-6 pt-3 backdrop-blur-xl sm:-mx-8 sm:px-8">
-        {ofrecerSitio ? (
-          <div className="mb-4">
-            <Sitio
-              ocupado={ocupado || cerrando}
-              onLeer={leerSitio}
-              onConfirmar={confirmarSitio}
-              onOmitir={() => setSitioResuelto(true)}
-            />
-          </div>
-        ) : null}
-
         <Compositor
           bautizo={bautizo}
           // Mientras se arma el mapa no hay turno que mandar: cualquier cosa

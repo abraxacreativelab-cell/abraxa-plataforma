@@ -36,6 +36,21 @@ import {
  *      movimiento tampoco pidió que le hablen — y que arranca APAGADO. Una
  *      página que se pone a hablar sola en una oficina es una página que se
  *      cierra.
+ *
+ *  ── El silencio del teléfono ──────────────────────────────────────────────
+ *
+ *  Lo respeta la plataforma, y hay que NO estorbarle. Un `<audio>` normal en
+ *  Safari de iOS obedece al interruptor de silencio del iPhone: si está en
+ *  silencio, no suena, y ni el navegador ni nosotros nos enteramos —no hay API
+ *  que lo diga—. La única forma de saltárselo sería `AVAudioSession` con
+ *  categoría de reproducción, que es de una app nativa y que aquí sería
+ *  exactamente lo que no se debe hacer: sonar en el bolsillo de alguien que
+ *  puso su teléfono en silencio a propósito.
+ *
+ *  Por eso `narrar()` no espera confirmación de que sonó ni la exige: el
+ *  invitado que tiene el teléfono en silencio vive la entrevista por escrito,
+ *  que es idéntica. Ver también `desbloquear()`, que es lo único que iOS pide
+ *  de nuestro lado.
  */
 
 /** Dónde se recuerda la preferencia. Es del navegador, no del negocio. */

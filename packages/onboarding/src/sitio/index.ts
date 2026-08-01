@@ -47,12 +47,7 @@ export {
   type ResultadoDeLectura,
 } from './leer';
 
-export {
-  comoLoDiriaEl,
-  extraerDeLaPagina,
-  jsonDeLaRespuesta,
-  propuestasDe,
-} from './extraer';
+export { extraerDeLaPagina, jsonDeLaRespuesta, propuestasDe } from './extraer';
 
 /**
  * "instagram" → "Instagram".

@@ -102,7 +102,6 @@ export { bautizarAgente, sembrarBoveda, sembrarGiro } from './synthesis/entrega'
 // ── Leer su página, sin volverse el proxy de nadie ──────────────────────────
 export {
   clasificarEnlace,
-  comoLoDiriaEl,
   esHostPrivado,
   esIpv4Privada,
   esIpv6Privada,
