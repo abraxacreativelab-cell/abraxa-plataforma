@@ -28,6 +28,10 @@ const ACCIONES: Record<string, Destino> = {
   iniciar: { metodo: 'POST', ruta: '/onboarding/ritual/iniciar' },
   turno: { metodo: 'POST', ruta: '/onboarding/ritual/turno' },
   pausa: { metodo: 'POST', ruta: '/onboarding/ritual/pausa' },
+  // «Pégame tu página y te ahorro preguntas.» El guardia de SSRF vive del lado
+  // de la API (packages/onboarding/src/sitio/), donde está el `fetch` que sale
+  // a internet — no aquí, que sólo reenvía con la identidad puesta.
+  sitio: { metodo: 'POST', ruta: '/onboarding/ritual/sitio' },
 };
 
 /**

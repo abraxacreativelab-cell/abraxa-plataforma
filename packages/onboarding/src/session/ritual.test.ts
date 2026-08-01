@@ -139,7 +139,8 @@ describe('reanudación real — criterio #2', () => {
     expect(corrida.history.map((h) => h.content)).toContain('Aura');
     expect(corrida.history[0]?.role).toBe('user');
 
-    expect(cuarta.vista.fase).toBe('dolor');
+    // 'proceso' cerró: la siguiente es 'gente' (el dolor pasó al final).
+    expect(cuarta.vista.fase).toBe('gente');
   });
 
   it('el historial que se le manda al modelo nunca empieza con el asistente', () => {
@@ -216,7 +217,7 @@ describe('el Ritual completo', () => {
       // `industry_type` corra de verdad y no por falta de filas.
       industry_templates: PLANTILLAS_DE_GIRO,
     });
-    agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO, PROCESO, DOLOR, GENTE, ENTREGA);
+    agente.guion(SALUDO, BAUTIZO, IDENTIDAD, MODELO, PROCESO, GENTE, DOLOR, ENTREGA);
 
     await iniciar(ctx);
     for (const dicho of [
@@ -224,8 +225,8 @@ describe('el Ritual completo', () => {
       'pan artesanal',
       'cobro por pedido semanal',
       'me escriben por WhatsApp',
+      'mi hermano entrega los lunes',
       'los domingos se me juntan',
-      'estoy solo',
     ]) {
       await responder(ctx, dicho);
     }
