@@ -157,6 +157,17 @@ router.post(
 router.post(
   '/ritual/sitio',
   manejar(async (req, res) => {
+    // ── El contexto va PRIMERO. Lo encontró routes.test.ts ─────────────────
+    //
+    // La primera versión validaba el cuerpo antes de resolver la identidad, y
+    // con eso una petición con cabeceras forjadas recibía 422 en vez de 401.
+    // Parece cosmético y no lo es: es el mismo oráculo contra el que existe
+    // este archivo. Un 422 le confirma a quien está probando que la ruta EXISTE
+    // y que llegó a mirar su cuerpo; el 401 no le dice nada. Autenticar antes de
+    // mirar un solo campo del cuerpo es la regla, y aquí no había motivo para
+    // romperla.
+    const ctx = await contextoDePeticion(req);
+
     const body = req.body as { url?: unknown } | undefined;
     const crudo = typeof body?.url === 'string' ? body.url.trim() : '';
 
@@ -166,7 +177,7 @@ router.post(
       throw new PlatformError('VALIDATION', 'Pégame la dirección de tu página o tu Instagram.');
     }
 
-    res.json(await leerSuSitio(await contextoDePeticion(req), crudo));
+    res.json(await leerSuSitio(ctx, crudo));
   }),
 );
 
