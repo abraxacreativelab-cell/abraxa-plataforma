@@ -7,6 +7,7 @@ import { Icon } from '../primitives/icon';
 import { Badge } from '../primitives/badge';
 import { cn } from '../../lib/cn';
 import { accentForArea } from '../../lib/accent';
+import { sinJerga } from '../../lib/castellano';
 import { toolsForArea } from '../registry/tool-registry';
 import { isNavigable } from '../nav/resolve-areas';
 
@@ -91,10 +92,10 @@ export function TarjetaDeArea({ area, requisito, brand, className }: TarjetaDeAr
         </ul>
       )}
 
-      {!abierta && requisito && (
-        <p className="mt-4 border-t border-border/50 pt-3 text-[12px] leading-snug text-muted-foreground/70">
+      {!abierta && falta && (
+        <p className="mt-4 border-t border-border/50 pt-3 text-pretty text-[12px] leading-snug text-muted-foreground/70">
           <span className="eyebrow mr-2">Se abre cuando</span>
-          {requisito}.
+          {falta}.
         </p>
       )}
     </>
