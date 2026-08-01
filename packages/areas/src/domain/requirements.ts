@@ -197,7 +197,10 @@ function evaluarUno(req: Requirement | null, s: Signals, p: Progress): Requireme
       requirement: { type: 'manual' },
       met: false,
       progress: null,
-      label: 'hay un requisito que este sistema no sabe leer (avísanos)',
+      // Sin jerga: el emprendedor no tiene por qué enterarse de que existe un
+      // "requisito ilegible". Lo que le toca saber es que la falla es nuestra y
+      // que no depende de él — y que el área sigue ahí, no desaparecida.
+      label: 'terminemos de ajustar cómo se abre — es cosa nuestra, y aquí te avisamos',
     };
   }
 

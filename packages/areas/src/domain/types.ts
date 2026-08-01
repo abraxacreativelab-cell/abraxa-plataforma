@@ -240,6 +240,23 @@ export interface AreaCard extends AreaSummary {
   unlockedAt: string | null;
   /** `true` si se puede entrar. Las bloqueadas se ven pero no se abren. */
   navigable: boolean;
+  /**
+   * `true` si el área todavía no tiene una pantalla propia — sólo su
+   * mini-onboarding.
+   *
+   * Existe para que la tarjeta pueda decirlo EN CASTELLANO: «todavía la estamos
+   * construyendo». La alternativa que había en el producto era peor de dos
+   * maneras a la vez: pintar la tarjeta idéntica a una que sí lleva a algún
+   * lado, o —como hacen otras pantallas— explicarle al cliente que «packages/crm
+   * está construido pero el registro vive en un archivo de H1». Ni una cosa ni
+   * la otra: lo que falta lo debemos nosotros, y así se dice.
+   *
+   * Se calcula en el servidor a partir de `tools`, que es el dato de la 090.
+   * `AreaCardView` lo AFINA en el navegador con el registro de herramientas de
+   * H5 —que sólo existe ahí— y por eso una clave del catálogo que nadie
+   * registró tampoco cuenta como pantalla.
+   */
+  enConstruccion: boolean;
 }
 
 /** Todo lo que el Mapa de Negocio necesita, de un viaje. */

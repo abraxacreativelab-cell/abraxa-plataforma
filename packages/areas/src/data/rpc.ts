@@ -173,6 +173,64 @@ export async function readScript(
   return normalizarGuion(preferida?.script);
 }
 
+/**
+ * La MECÁNICA de varias áreas de un tirón: sus requisitos evaluables, sus
+ * herramientas y su icono.
+ *
+ * La usa el sink de blueprints (`services/blueprint.ts`) y resuelve dos cosas
+ * que ni el Ritual ni la siembra pueden dar solos:
+ *
+ *  · `tools` — el agente maestro decide qué áreas necesita el negocio, pero no
+ *    tiene forma de saber qué pantallas existen. Sin esto, un área que el
+ *    blueprint pide y la plantilla del giro no trae nacería sin una sola
+ *    herramienta: una tarjeta que no lleva a ningún lado.
+ *  · `requirements` — el respaldo evaluable para cuando la condición que
+ *    propuso el agente no se puede traducir. Ver `domain/blueprint.ts`.
+ *
+ * Misma precedencia y misma vía que `readScript`: `adminDb()` porque
+ * `app.area_catalog` es catálogo de la PLATAFORMA —no tiene `tenant_id` y es
+ * idéntico para todos los clientes—, y la fila del giro le gana a la de `'*'`.
+ * No hay dato de nadie que pueda filtrarse por aquí.
+ */
+export async function readCatalogRules(
+  areaSlugs: readonly string[],
+  industryId: string | null,
+): Promise<Map<string, { requirements: unknown[]; tools: unknown[]; icon: string }>> {
+  const salida = new Map<string, { requirements: unknown[]; tools: unknown[]; icon: string }>();
+  if (areaSlugs.length === 0) return salida;
+
+  const giros = industryId ? [industryId, '*'] : ['*'];
+
+  const { data, error } = await adminDb()
+    .from('area_catalog')
+    .select('industry_id, area_slug, requirements, tools, icon')
+    .in('area_slug', [...areaSlugs])
+    .in('industry_id', giros);
+
+  const mapeado = mapearError(error as ErrorPostgrest | null, 'la lectura del catálogo de áreas');
+  if (mapeado) throw mapeado;
+
+  const filas = (data ?? []) as Array<{
+    industry_id: string;
+    area_slug: string;
+    requirements: unknown;
+    tools: unknown;
+    icon: unknown;
+  }>;
+
+  // Se escriben primero las de `'*'` y encima las del giro: la última gana, que
+  // es la precedencia que también aplica `areas_seed_tenant`.
+  for (const f of [...filas].sort((a, b) => Number(a.industry_id !== '*') - Number(b.industry_id !== '*'))) {
+    salida.set(f.area_slug, {
+      requirements: Array.isArray(f.requirements) ? f.requirements : [],
+      tools: Array.isArray(f.tools) ? f.tools : [],
+      icon: typeof f.icon === 'string' && f.icon ? f.icon : 'wrench',
+    });
+  }
+
+  return salida;
+}
+
 /** El guion que llega de la base, saneado. Un guion a medias no debe pintar
  *  `undefined` en la cara del emprendedor. */
 export function normalizarGuion(raw: unknown): AreaScript {

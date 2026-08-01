@@ -1,14 +1,19 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { PlatformError } from '@abraxa/db';
 import { areaOnboarding, type OnboardingView } from '@abraxa/areas';
-import { EmptyState } from '@abraxa/ui';
+import { Button, EmptyState } from '@abraxa/ui';
 import { contextoDelMapa, motivoSinContexto } from '../context';
 import { mapaDemo } from '../demo';
 import { Tutorial } from './ui/tutorial';
 
 export const metadata: Metadata = { title: 'Configurar área · ABRAXA Plataforma' };
+
+/** Igual que `/mapa`: depende de la sesión, así que nunca se prerenderiza. */
+export const dynamic = 'force-dynamic';
+
 
 /**
  * `/mapa/[slug]` — el mini-onboarding de un área (H11, handoff §6).
@@ -42,13 +47,16 @@ export default async function Page({ params }: { params: { slug: string } }) {
     return <Tutorial inicial={vista} />;
   }
 
+  const motivo = motivoSinContexto();
   return (
     <main className="mx-auto w-full max-w-2xl px-6 py-24">
-      <EmptyState
-        icon="lock"
-        title="No se puede abrir esta área todavía"
-        description={motivoSinContexto()}
-      />
+      <EmptyState icon="lock" title={motivo.titulo} description={motivo.descripcion}>
+        {motivo.accion && (
+          <Button asChild>
+            <Link href={motivo.accion.href}>{motivo.accion.texto}</Link>
+          </Button>
+        )}
+      </EmptyState>
     </main>
   );
 }

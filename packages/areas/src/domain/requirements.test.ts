@@ -81,7 +81,11 @@ describe('el requisito que no se entiende NO se cumple', () => {
   it('deja el área cerrada y lo dice, en vez de abrirla por omisión', () => {
     const r = evaluate([{ type: 'inventado_por_el_agente' }], negocio());
     expect(r.met).toBe(false);
-    expect(r.missing).toEqual(['hay un requisito que este sistema no sabe leer (avísanos)']);
+    // Y lo dice sin jerga: nombrarle un "requisito" que el "sistema" no sabe
+    // "leer" es contarle nuestra estructura interna. La falla es nuestra.
+    expect(r.missing).toEqual([
+      'terminemos de ajustar cómo se abre — es cosa nuestra, y aquí te avisamos',
+    ]);
   });
 
   it('no tumba el resto del mapa: es un área cerrada, no una excepción', () => {
