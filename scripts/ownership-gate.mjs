@@ -231,6 +231,19 @@ export function carrilDeRama(rama, ownership) {
   for (const [nombre, cfg] of Object.entries(ownership)) {
     if (Array.isArray(cfg.ramas) && cfg.ramas.includes(rama)) return nombre;
   }
+  // Ramas de La Fragua: `fragua/<carril>-<8hex>`. El constructor autónomo nombra así sus ramas y
+  // sin esto CADA PR suyo moría con `ci_failed:ownership-gate` — después de pagar planificación,
+  // construcción y revisión completas.
+  //
+  // Se exigen EXACTAMENTE 8 hex a propósito: si el largo del id cambiara, el gate dejaría de
+  // reconocer las ramas EN SILENCIO y volveríamos al mismo agujero. Hay una prueba negativa que
+  // fija ese contrato.
+  //
+  // Y el carril tiene que existir ya en `.ownership.json`: La Fragua NO recibe un carril propio con
+  // `**`, porque eso pondría dos dueños sobre cada archivo y `--check-overlap` —que corre en el PR
+  // de los 19 carriles— se pondría rojo para todos a la vez.
+  const fragua = /^fragua\/(.+)-[0-9a-f]{8}$/.exec(rama);
+  if (fragua && ownership[fragua[1]]) return fragua[1];
   return null;
 }
 

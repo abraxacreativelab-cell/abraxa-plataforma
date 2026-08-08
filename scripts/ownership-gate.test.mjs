@@ -495,6 +495,29 @@ describe('carrilDeRama — alias de rama', () => {
     expect(carrilDeRama('', ownership)).toBeNull();
   });
 
+  // A9.2 — La Fragua nombra sus ramas `fragua/<carril>-<8hex>`. Sin esta regla, CADA PR del
+  // constructor autónomo moría con `ci_failed:ownership-gate` DESPUÉS de pagar planificación,
+  // construcción y revisión completas. Reproducido:
+  //   node scripts/ownership-gate.mjs --handoff fragua/h15-crm-a1b2c3d4 --base HEAD  → exit 1
+  it('una rama de La Fragua resuelve al carril que lleva dentro', () => {
+    expect(carrilDeRama('fragua/h15-crm-a1b2c3d4', ownership)).toBe('h15-crm');
+    expect(carrilDeRama(`fragua/${CARRIL_ORQUESTADOR}-deadbeef`, ownership)).toBe(CARRIL_ORQUESTADOR);
+  });
+
+  it('una rama de La Fragua con un carril que no existe, o mal formada, no resuelve', () => {
+    // `plataforma` es el slug del proyecto, NO un carril: La Fragua no tiene carril propio, y darle
+    // uno con `**` pondría dos dueños sobre cada archivo y `--check-overlap` se pondría rojo para
+    // los 19 carriles a la vez.
+    expect(carrilDeRama('fragua/plataforma-a1b2c3d4', ownership)).toBeNull();
+    // Sin sufijo de id.
+    expect(carrilDeRama('fragua/h15-crm', ownership)).toBeNull();
+    // El sufijo tiene que ser EXACTAMENTE 8 hex. Esta prueba negativa existe para que, si algún día
+    // cambia el largo del id de corrida, el gate no deje de reconocer las ramas EN SILENCIO.
+    expect(carrilDeRama('fragua/h15-crm-ZZZZZZZZ', ownership)).toBeNull();
+    expect(carrilDeRama('fragua/h15-crm-a1b2c3d', ownership)).toBeNull();
+    expect(carrilDeRama('fragua/h15-crm-a1b2c3d45', ownership)).toBeNull();
+  });
+
   it('todo alias declarado incluye el nombre de su propio carril', () => {
     for (const [nombre, cfg] of Object.entries(ownership)) {
       if (!cfg.ramas) continue;

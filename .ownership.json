@@ -54,12 +54,14 @@
       "h0-voz-paths",
       "h0-panel-path",
       "h0-alias-h11",
-      "h0-alias-h4"
+      "h0-alias-h4",
+      "h0-alta-fragua"
     ],
     "paths": [
       "docs/**",
       "deploy/**",
       "scripts/**",
+      ".fragua.json",
       ".ownership.json",
       "eslint.config.mjs",
       "CONTRIBUTING.md",
@@ -70,13 +72,17 @@
       "venceEn": "2026-08-08",
       "pr": "h0-sesion-authoptions — el Ritual no veía la sesión ya emitida",
       "razon": "Se RETIRA la excepción anterior (h0-contexto-canonico, 2026-07-31): su PR mergeó y un permiso que nadie retira es un permiso permanente. La de hoy cubre UN archivo y no puede esperar: con H18 desplegado y una sesión de Google válida, apps/web/app/(onboarding)/ritual/lib/sesion.ts llamaba a getServerSession() SIN authOptions, así que el callback `session` —que vive en las opciones y es quien pone tenantSlug— nunca corría; la guarda veía tenantSlug undefined y devolvía null, indistinguible de 'no hay sesión'. Resultado: el invitado se autentica y la pantalla le sigue pidiendo entrar. Fallo silencioso, sin error ni log. Es un bloqueo TOTAL del producto el día de un evento con invitados reales, sobre un archivo cuyo propio comentario ya prescribía este cambio ('cuando H2 configure NextAuth de verdad, esto se cambia por su authOptions'). El dueño es h7-ritual y no está disponible; esperar significa no tener producto. Se toca SÓLO la función identidadDeLaSesion(), sin cambiar su firma ni su contrato.",
-      "paths": ["apps/web/app/(onboarding)/ritual/lib/sesion.ts"]
+      "paths": [
+        "apps/web/app/(onboarding)/ritual/lib/sesion.ts"
+      ]
     }
   },
-
   "h1-fundacion": {
     "label": "H1 · Fundación del monorepo",
-    "migrations": [1, 9],
+    "migrations": [
+      1,
+      9
+    ],
     "lockfile": true,
     "nota": [
       "El 2026-07-31 salieron de aquí cuatro rutas —`.ownership.json`, `scripts/**`,",
@@ -125,10 +131,12 @@
       "apps/web/app/**/page.tsx"
     ]
   },
-
   "h2-tenancy": {
     "label": "H2 · Tenancy",
-    "migrations": [10, 19],
+    "migrations": [
+      10,
+      19
+    ],
     "nota": [
       "Las dos exclusiones son de H16 (entitlements), emitido el 2026-07-31. H16 vive DENTRO",
       "de packages/tenancy porque lo que construye —qué funciones compra un plan y qué se",
@@ -145,17 +153,26 @@
       "!packages/tenancy/src/entitlements/**"
     ]
   },
-
   "h3-agents": {
     "label": "H3 · Agents",
-    "migrations": [20, 29],
-    "paths": ["packages/agents/**"]
+    "migrations": [
+      20,
+      29
+    ],
+    "paths": [
+      "packages/agents/**"
+    ]
   },
-
   "h4-vault": {
     "label": "H4 · Bóveda",
-    "migrations": [30, 39],
-    "ramas": ["h4-vault", "h4-vault-direccion"],
+    "migrations": [
+      30,
+      39
+    ],
+    "ramas": [
+      "h4-vault",
+      "h4-vault-direccion"
+    ],
     "nota": [
       "`h4-vault-direccion` se declara el 2026-08-01 por el mismo motivo mecánico que los alias",
       "de H0 y H11: el carril abrió un SEGUNDO PR —cablear la sesión de /direccion y quitarle la",
@@ -166,9 +183,11 @@
       "la rama del segundo PR de un carril necesita su alias, y pedirlo es un trámite de una línea",
       "para el orquestador."
     ],
-    "paths": ["packages/vault/**", "apps/web/app/(app)/direccion/**"]
+    "paths": [
+      "packages/vault/**",
+      "apps/web/app/(app)/direccion/**"
+    ]
   },
-
   "h5-design-system": {
     "label": "H5 · Design system y shell",
     "migrations": null,
@@ -210,10 +229,12 @@
       "apps/web/app/(app)/panel/**"
     ]
   },
-
   "h6-inbox": {
     "label": "H6 · Bandeja, WhatsApp y el puente agente↔inbox",
-    "migrations": [40, 49],
+    "migrations": [
+      40,
+      49
+    ],
     "paths": [
       "packages/inbox/**",
       "!packages/inbox/src/drivers/meta/**",
@@ -225,34 +246,56 @@
       "apps/web/app/(app)/bandeja/**"
     ]
   },
-
   "h7-ritual": {
     "label": "H7 · El Ritual de Fundación",
-    "migrations": [50, 59],
-    "paths": ["packages/onboarding/**", "apps/web/app/(onboarding)/**"]
+    "migrations": [
+      50,
+      59
+    ],
+    "paths": [
+      "packages/onboarding/**",
+      "apps/web/app/(onboarding)/**"
+    ]
   },
-
   "h8-flows": {
     "label": "H8 · Automatizaciones",
-    "migrations": [60, 69],
-    "paths": ["packages/flows/**", "apps/web/app/(app)/automatizaciones/**"]
+    "migrations": [
+      60,
+      69
+    ],
+    "paths": [
+      "packages/flows/**",
+      "apps/web/app/(app)/automatizaciones/**"
+    ]
   },
-
   "h9-work": {
     "label": "H9 · Tareas y proyectos",
-    "migrations": [70, 79],
-    "paths": ["packages/work/**", "apps/web/app/(app)/tareas/**"]
+    "migrations": [
+      70,
+      79
+    ],
+    "paths": [
+      "packages/work/**",
+      "apps/web/app/(app)/tareas/**"
+    ]
   },
-
   "h10-billing": {
     "label": "H10 · Landing, cobro y alta self-service",
-    "migrations": [80, 89],
-    "paths": ["packages/billing/**", "apps/web/app/(public)/**"]
+    "migrations": [
+      80,
+      89
+    ],
+    "paths": [
+      "packages/billing/**",
+      "apps/web/app/(public)/**"
+    ]
   },
-
   "h11-areas": {
     "label": "H11 · Áreas y gamificación",
-    "ramas": ["h11-areas", "h11-areas-mapa"],
+    "ramas": [
+      "h11-areas",
+      "h11-areas-mapa"
+    ],
     "nota": [
       "`h11-areas-mapa` se declara el 2026-08-01 por el mismo motivo mecánico que los alias de",
       "H0: el carril abrió un SEGUNDO PR —cablear /mapa a la sesión y proyectar el blueprint— y",
@@ -262,19 +305,32 @@
       "rama». Un alias NO reparte propiedad: los `paths` siguen siendo los mismos y",
       "`--check-overlap` no lo ve."
     ],
-    "migrations": [90, 99],
-    "paths": ["packages/areas/**", "apps/web/app/(app)/mapa/**"]
+    "migrations": [
+      90,
+      99
+    ],
+    "paths": [
+      "packages/areas/**",
+      "apps/web/app/(app)/mapa/**"
+    ]
   },
-
   "h12-meta": {
     "label": "H12 · Driver Meta (Instagram + Messenger)",
-    "migrations": [100, 104],
-    "paths": ["packages/inbox/src/drivers/meta/**", "packages/inbox/drivers/meta/**"]
+    "migrations": [
+      100,
+      104
+    ],
+    "paths": [
+      "packages/inbox/src/drivers/meta/**",
+      "packages/inbox/drivers/meta/**"
+    ]
   },
-
   "h13-email-sms": {
     "label": "H13 · Drivers email + SMS",
-    "migrations": [105, 109],
+    "migrations": [
+      105,
+      109
+    ],
     "paths": [
       "packages/inbox/src/drivers/email/**",
       "packages/inbox/src/drivers/sms/**",
@@ -282,16 +338,22 @@
       "packages/inbox/drivers/sms/**"
     ]
   },
-
   "h14-admin": {
     "label": "H14 · Panel de agencia",
-    "migrations": [110, 119],
-    "paths": ["apps/web/app/(admin)/**"]
+    "migrations": [
+      110,
+      119
+    ],
+    "paths": [
+      "apps/web/app/(admin)/**"
+    ]
   },
-
   "h15-crm": {
     "label": "H15 · CRM: contactos, identidades por canal, embudo y línea de tiempo",
-    "migrations": [120, 129],
+    "migrations": [
+      120,
+      129
+    ],
     "lockfile": true,
     "nota": [
       "ARBITRAJE del orquestador (2026-07-31), decidido desde main y no dentro del PR #9.",
@@ -318,12 +380,18 @@
       "rama es la cuarta copia de la misma función. Se importa `contextoDePeticion` de",
       "`@abraxa/db` — ver CONTRIBUTING.md §El aislamiento entre clientes."
     ],
-    "paths": ["packages/crm/**", "apps/web/app/(app)/contactos/**", "docs/handoffs/H15-crm.md"]
+    "paths": [
+      "packages/crm/**",
+      "apps/web/app/(app)/contactos/**",
+      "docs/handoffs/H15-crm.md"
+    ]
   },
-
   "h16-entitlements": {
     "label": "H16 · Entitlements y ciclo de vida del plan",
-    "migrations": [130, 139],
+    "migrations": [
+      130,
+      139
+    ],
     "nota": [
       "Subárbol dentro de packages/tenancy, con su exclusión declarada en h2-tenancy. Ver",
       "docs/handoffs/H16-entitlements.md §4. Se listan las dos formas de la ruta —con y sin",
@@ -340,10 +408,12 @@
       "apps/web/app/(app)/ajustes/plan/**"
     ]
   },
-
   "h17-integraciones": {
     "label": "H17 · Integraciones por tenant (credenciales de canal por empresa)",
-    "migrations": [140, 149],
+    "migrations": [
+      140,
+      149
+    ],
     "lockfile": true,
     "nota": [
       "Prerrequisito duro de H12 y H13: mientras las credenciales de canal sean variables del",
@@ -363,14 +433,22 @@
       "",
       "QUITARLO en cuanto el carril mergee, junto con su línea en `ownership-gate.test.mjs`."
     ],
-    "paths": ["packages/integrations/**", "apps/web/app/(app)/ajustes/integraciones/**"]
+    "paths": [
+      "packages/integrations/**",
+      "apps/web/app/(app)/ajustes/integraciones/**"
+    ]
   },
-
   "h18-identidad": {
     "label": "H18 · Identidad: NextAuth, sesión y el puente BFF→API",
-    "migrations": [150, 159],
+    "migrations": [
+      150,
+      159
+    ],
     "lockfile": true,
-    "ramas": ["h18-identidad", "h18-voz"],
+    "ramas": [
+      "h18-identidad",
+      "h18-voz"
+    ],
     "nota": [
       "⚠️ MINA DE TODO EL PROYECTO, medida en producción el 2026-08-01:",
       "**`apps/web/app/api/**` ESTÁ MUERTO.** nginx manda todo `/api/*` a Express (:3040) y le",
