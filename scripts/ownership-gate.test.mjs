@@ -285,13 +285,52 @@ describe('el mapa de propiedad', () => {
 
 describe('excepcionTransversal — la única escotilla, y con candado', () => {
   const h0 = ownership[CARRIL_ORQUESTADOR];
+  // NO HABER NINGUNA es el estado sano, y hasta hoy las pruebas no lo admitían: cuatro de ellas
+  // leían `h0.excepcionTransversal` sin preguntar si existía. O sea que retirar una excepción
+  // vencida —lo único que el candado te pide hacer— rompía la suite, y la suite es el gate `tests`
+  // de TODO el repositorio.
+  //
+  // No es hipotético y salió caro: la excepción de `h0-sesion-authoptions` venció el 2026-08-08, la
+  // prueba «sigue vigente» se puso roja sola a las 00:00Z del 09, y ese día las SIETE corridas de
+  // PLATAFORMA de la cohorte murieron con `gates_failed:tests` — en seis carriles distintos,
+  // tocando archivos distintos, ninguno relacionado. El recordatorio con dientes mordía al que
+  // venía a obedecerlo.
+  const excepcion = h0.excepcionTransversal ?? null;
 
-  it('sólo H0 declara una', () => {
+  it('nadie más que H0 puede declarar una', () => {
     const conExcepcion = Object.entries(ownership)
       .filter(([, c]) => c.excepcionTransversal)
       .map(([n]) => n);
-    expect(conExcepcion).toEqual([CARRIL_ORQUESTADOR]);
+    // Cero es válido; dos, o una en otro carril, no.
+    expect(conExcepcion.filter((n) => n !== CARRIL_ORQUESTADOR)).toEqual([]);
+    expect(conExcepcion.length).toBeLessThanOrEqual(1);
   });
+
+  it('un carril de construcción NO puede concederse una', () => {
+    const usurpador = {
+      paths: ['packages/inbox/**'],
+      excepcionTransversal: { paths: ['packages/vault/**'] },
+    };
+    expect(pathsEfectivos('h6-inbox', usurpador)).toEqual(['packages/inbox/**']);
+    expect(perteneceA('packages/vault/src/resolver.ts', pathsEfectivos('h6-inbox', usurpador))).toBe(
+      false,
+    );
+  });
+
+  it('sin excepción, H0 alcanza exactamente sus propias rutas y ni una más', () => {
+    if (excepcion) return;   // con una concedida, el alcance lo cubren las pruebas de abajo
+    const globs = pathsEfectivos(CARRIL_ORQUESTADOR, h0);
+    expect(globs).toEqual(h0.paths);
+    // El otro lado del candado, que no depende de qué excepción haya: los árboles ajenos siguen
+    // cerrados. Si esto se pone rojo sin excepción vigente, la escotilla se quedó abierta.
+    expect(perteneceA('packages/agents/src/service.ts', globs)).toBe(false);
+    expect(perteneceA('packages/vault/src/resolver.ts', globs)).toBe(false);
+    expect(perteneceA('apps/web/app/(onboarding)/ritual/lib/sesion.ts', globs)).toBe(false);
+  });
+});
+
+describe.skipIf(!ownership[CARRIL_ORQUESTADOR].excepcionTransversal)('la excepción concedida', () => {
+  const h0 = ownership[CARRIL_ORQUESTADOR];
 
   it('viene con fecha, vencimiento, PR y razón escrita, no sólo con rutas', () => {
     const e = h0.excepcionTransversal;
@@ -337,17 +376,6 @@ describe('excepcionTransversal — la única escotilla, y con candado', () => {
     expect(perteneceA('packages/vault/src/resolver.ts', globs)).toBe(false);
     expect(perteneceA('packages/tenancy/src/middleware/tenant.ts', globs)).toBe(false);
     expect(perteneceA('packages/inbox/src/ingest.ts', globs)).toBe(false);
-  });
-
-  it('un carril de construcción NO puede concederse una', () => {
-    const usurpador = {
-      paths: ['packages/inbox/**'],
-      excepcionTransversal: { paths: ['packages/vault/**'] },
-    };
-    expect(pathsEfectivos('h6-inbox', usurpador)).toEqual(['packages/inbox/**']);
-    expect(perteneceA('packages/vault/src/resolver.ts', pathsEfectivos('h6-inbox', usurpador))).toBe(
-      false,
-    );
   });
 
   it('la excepción NO transfiere propiedad: el dueño real no cambia', () => {
