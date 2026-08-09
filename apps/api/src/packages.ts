@@ -3,7 +3,7 @@
  *  EL CABLEADO CENTRAL. H1 lo escribió una vez. NADIE lo vuelve a editar.
  * ════════════════════════════════════════════════════════════════════════════
  *
- * Los 12 paquetes ya están importados y los 9 routers de backend ya están
+ * Los 13 paquetes ya están importados y los 10 routers de backend ya están
  * montados. Si estás construyendo un handoff y crees que necesitas tocar este
  * archivo, no lo necesitas: cuelga tus rutas del `router` que tu paquete ya
  * exporta y aparecerán solas bajo tu prefijo.
@@ -13,7 +13,7 @@
  */
 import type { Router } from 'express';
 
-// ── Los 12 paquetes, por su entrada `./meta` (no arrastra React ni Express) ──
+// ── Los 13 paquetes, por su entrada `./meta` (no arrastra React ni Express) ──
 import { meta as configMeta } from '@abraxa/config/meta';
 import { meta as dbMeta } from '@abraxa/db/meta';
 import { meta as tenancyMeta } from '@abraxa/tenancy/meta';
@@ -26,8 +26,9 @@ import { meta as flowsMeta } from '@abraxa/flows/meta';
 import { meta as workMeta } from '@abraxa/work/meta';
 import { meta as billingMeta } from '@abraxa/billing/meta';
 import { meta as areasMeta } from '@abraxa/areas/meta';
+import { meta as crmMeta } from '@abraxa/crm/meta';
 
-// ── Los 9 routers de backend. Importarlos también dispara su registerPort(). ──
+// ── Los 10 routers de backend. Importarlos también dispara su registerPort(). ──
 import { router as tenancyRouter } from '@abraxa/tenancy';
 import { router as agentsRouter } from '@abraxa/agents';
 import { router as vaultRouter } from '@abraxa/vault';
@@ -37,6 +38,7 @@ import { router as flowsRouter } from '@abraxa/flows';
 import { router as workRouter } from '@abraxa/work';
 import { router as billingRouter } from '@abraxa/billing';
 import { router as areasRouter } from '@abraxa/areas';
+import { router as crmRouter } from '@abraxa/crm';
 
 export interface PackageMeta {
   readonly name: string;
@@ -44,7 +46,7 @@ export interface PackageMeta {
   readonly ready: boolean;
 }
 
-/** Los 12. `apps/api` los importa todos: criterio #3 de H1. */
+/** Los 13. `apps/api` los importa todos: criterio #3 de H1. */
 export const PACKAGE_META: readonly PackageMeta[] = [
   configMeta,
   dbMeta,
@@ -58,6 +60,7 @@ export const PACKAGE_META: readonly PackageMeta[] = [
   workMeta,
   billingMeta,
   areasMeta,
+  crmMeta,
 ];
 
 /** Prefijo público → router del paquete dueño. */
@@ -71,4 +74,5 @@ export const MOUNTS: ReadonlyArray<readonly [string, Router]> = [
   ['/work', workRouter],
   ['/billing', billingRouter],
   ['/areas', areasRouter],
+  ['/crm', crmRouter],
 ];

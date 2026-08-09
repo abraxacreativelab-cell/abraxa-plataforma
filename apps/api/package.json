@@ -15,6 +15,7 @@
     "@abraxa/areas": "*",
     "@abraxa/billing": "*",
     "@abraxa/config": "*",
+    "@abraxa/crm": "*",
     "@abraxa/db": "*",
     "@abraxa/flows": "*",
     "@abraxa/inbox": "*",
