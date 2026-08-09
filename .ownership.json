@@ -55,7 +55,8 @@
       "h0-panel-path",
       "h0-alias-h11",
       "h0-alias-h4",
-      "h0-alta-fragua"
+      "h0-alta-fragua",
+      "h0-retirar-excepcion-vencida"
     ],
     "paths": [
       "docs/**",
@@ -66,16 +67,7 @@
       "eslint.config.mjs",
       "CONTRIBUTING.md",
       "packages/db/src/http/**"
-    ],
-    "excepcionTransversal": {
-      "fecha": "2026-08-01",
-      "venceEn": "2026-08-08",
-      "pr": "h0-sesion-authoptions — el Ritual no veía la sesión ya emitida",
-      "razon": "Se RETIRA la excepción anterior (h0-contexto-canonico, 2026-07-31): su PR mergeó y un permiso que nadie retira es un permiso permanente. La de hoy cubre UN archivo y no puede esperar: con H18 desplegado y una sesión de Google válida, apps/web/app/(onboarding)/ritual/lib/sesion.ts llamaba a getServerSession() SIN authOptions, así que el callback `session` —que vive en las opciones y es quien pone tenantSlug— nunca corría; la guarda veía tenantSlug undefined y devolvía null, indistinguible de 'no hay sesión'. Resultado: el invitado se autentica y la pantalla le sigue pidiendo entrar. Fallo silencioso, sin error ni log. Es un bloqueo TOTAL del producto el día de un evento con invitados reales, sobre un archivo cuyo propio comentario ya prescribía este cambio ('cuando H2 configure NextAuth de verdad, esto se cambia por su authOptions'). El dueño es h7-ritual y no está disponible; esperar significa no tener producto. Se toca SÓLO la función identidadDeLaSesion(), sin cambiar su firma ni su contrato.",
-      "paths": [
-        "apps/web/app/(onboarding)/ritual/lib/sesion.ts"
-      ]
-    }
+    ]
   },
   "h1-fundacion": {
     "label": "H1 · Fundación del monorepo",
