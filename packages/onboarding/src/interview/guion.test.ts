@@ -3,7 +3,7 @@
  * que es: una función que arma texto.
  */
 import { describe, expect, it } from 'vitest';
-import { guionDelTurno, loQueYaSabes } from './guion';
+import { guionDelTurno, guionDespuesDelRitual, loQueYaSabes } from './guion';
 import { ausenciaEnPalabras, loQueRecuerdo, mensajeDeRegreso } from './regreso';
 import type { EstadoNegocio } from '../types';
 
@@ -139,6 +139,69 @@ describe('el guion del turno', () => {
     expect(g).toContain('ÉL ACABA DE VOLVER');
     expect(g).toContain('hace 3 días');
     expect(g).toContain('sin repetir nada');
+  });
+});
+
+describe('el nombre del agente no es el del dueño', () => {
+  // Producción, 2026-08: el agente le dijo «Lupita» a Santiago porque el
+  // único nombre propio en el prompt era el que Santiago le puso AL AGENTE.
+  it('en el turno del Ritual, el nombre del agente se marca explícitamente como propio', () => {
+    const g = guionDelTurno('identidad', { agente: 'Lupita' });
+    expect(g).toContain('Él te puso Lupita');
+    expect(g).toContain('es el nombre del AGENTE');
+    expect(g).toContain('Nunca lo uses para dirigirte a él');
+  });
+
+  it('en el guion de después del Ritual pasa lo mismo, y "Aura" sigue apareciendo', () => {
+    const g = guionDespuesDelRitual({ agente: 'Aura' });
+    expect(g).toContain('Aura');
+    expect(g).toContain('Él te puso Aura');
+    expect(g).toContain('es el nombre del AGENTE');
+    expect(g).toContain('Nunca lo uses para dirigirte a él');
+  });
+
+  it('cuando se conoce el nombre del dueño, sale etiquetado como suyo en ambos guiones', () => {
+    const estado: EstadoNegocio = { agente: 'Lupita', dueno: 'Santiago' };
+
+    const turno = guionDelTurno('identidad', estado);
+    expect(turno).toContain('El dueño se llama Santiago');
+    expect(turno).toContain('Él te puso Lupita');
+
+    const despues = guionDespuesDelRitual(estado);
+    expect(despues).toContain('El dueño se llama Santiago');
+    expect(despues).toContain('Él te puso Lupita');
+  });
+
+  it('sin nombre del dueño, el guion se arma igual: no inventa nada y sabe cómo capturarlo', () => {
+    const conAgente = guionDelTurno('identidad', { agente: 'Lupita' });
+    expect(conAgente).not.toContain('undefined');
+    expect(conAgente).toContain('[DATO:dueno=');
+
+    const sinNada = guionDelTurno('bienvenida', {});
+    expect(sinNada).not.toContain('undefined');
+    expect(sinNada).toContain('[DATO:dueno=');
+
+    const despues = guionDespuesDelRitual({ agente: 'Lupita' });
+    expect(despues).not.toContain('undefined');
+    expect(despues).toContain('[DATO:dueno=');
+  });
+});
+
+describe('el turno termina preguntando cuando falta algo', () => {
+  it('con la fase incompleta, exige cerrar el turno con la pregunta y conserva el techo', () => {
+    const g = guionDelTurno('modelo', { agente: 'Nova', giro: 'yoga' });
+    expect(g).toContain('Termina SIEMPRE este turno con esa pregunta');
+    expect(g).toContain('Una pregunta por mensaje. Dos como máximo');
+  });
+
+  it('con la fase completa, el piso no aparece', () => {
+    const g = guionDelTurno('identidad', AVANZADO);
+    expect(g).not.toContain('Termina SIEMPRE este turno');
+  });
+
+  it('ni en síntesis ni después del Ritual aparece el piso: ahí ya no se pregunta', () => {
+    expect(guionDelTurno('sintesis', AVANZADO)).not.toContain('Termina SIEMPRE este turno');
+    expect(guionDespuesDelRitual(AVANZADO)).not.toContain('Termina SIEMPRE este turno');
   });
 });
 
