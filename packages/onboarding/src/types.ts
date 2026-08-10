@@ -77,6 +77,16 @@ export interface EstadoNegocio {
   // fase 0 — bienvenida
   /** El nombre que el emprendedor le puso a SU agente. */
   agente?: string;
+  /**
+   * El nombre del DUEÑO —la persona—, si él lo dijo.
+   *
+   * NO confundir con `agente`: en producción (2026-08) el agente llamó
+   * «Lupita» al dueño porque el suyo era el único nombre propio del prompt.
+   * Nunca es requisito de cierre de ninguna fase: se captura al vuelo con
+   * `[DATO:dueno=…]` cuando él se presenta, y si nunca lo dice el guion se
+   * arma igual sin este dato.
+   */
+  dueno?: string;
 
   // fase 1 — lo esencial
   /**

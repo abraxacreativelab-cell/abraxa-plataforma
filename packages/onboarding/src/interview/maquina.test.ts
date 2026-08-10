@@ -275,6 +275,26 @@ describe('acumulación de datos entre turnos', () => {
       { slug: 'rh', estado: 'bloqueada', razon: 'está solo' },
     ]);
   });
+
+  it('el nombre del dueño se captura en su propio campo, no en el del agente ni en extra', () => {
+    const r = aplicarTurno('identidad', {}, '[DATO:dueno=Santiago]');
+    expect(r.estado.dueno).toBe('Santiago');
+    expect(r.estado.extra?.dueno).toBeUndefined();
+  });
+
+  it('los alias con y sin ñ, y con guion bajo, aterrizan en el mismo campo', () => {
+    const conNe = aplicarTurno('identidad', {}, '[DATO:dueño=Santiago]');
+    expect(conNe.estado.dueno).toBe('Santiago');
+
+    const conGuionBajo = aplicarTurno('identidad', {}, '[DATO:nombre_dueno=Santiago]');
+    expect(conGuionBajo.estado.dueno).toBe('Santiago');
+  });
+
+  it('el nombre del agente y el del dueño quedan en campos distintos, aunque lleguen juntos', () => {
+    const r = aplicarTurno('identidad', {}, '[DATO:agente=Lupita][DATO:dueno=Santiago]');
+    expect(r.estado.agente).toBe('Lupita');
+    expect(r.estado.dueno).toBe('Santiago');
+  });
 });
 
 describe('el parser', () => {

@@ -330,6 +330,7 @@ export function guionDelTurno(
   opciones: OpcionesDelGuion = {},
 ): string {
   const nombre = estado.agente?.trim();
+  const dueno = estado.dueno?.trim();
   const ficha = FICHAS[fase];
   const indice = indiceDeFase(fase);
   const faltan = faltantesDe(fase, estado);
@@ -341,7 +342,10 @@ export function guionDelTurno(
 Estás entrevistando al DUEÑO de este negocio para entenderlo a fondo y entregarle su Mapa de
 Negocio. Son 7 fases. Vas en la ${indice + 1} de ${FASES.length}: **${ficha.titulo}**.
 
-${nombre ? `Él te puso ${nombre}. Ése es tu nombre; úsalo con naturalidad, no lo repitas en cada frase.` : 'Todavía no tienes nombre: él te lo va a poner en esta fase.'}`);
+${nombre ? `Él te puso ${nombre}. Ése es tu nombre; úsalo con naturalidad, no lo repitas en cada frase.
+**${nombre} es el nombre del AGENTE —el tuyo—, no el del dueño.** Nunca lo uses para dirigirte a él.` : 'Todavía no tienes nombre: él te lo va a poner en esta fase.'}
+
+${dueno ? `El dueño se llama ${dueno}. Cuando lo llames por su nombre, ése es el que usas —nunca el tuyo.` : 'El nombre del dueño todavía no lo sabes: no lo inventes ni uses el tuyo en su lugar. Si te lo dice, emítelo con [DATO:dueno=SuNombre] y desde entonces úsalo.'}`);
 
   partes.push(`--- LO QUE YA SABES DE ESTE NEGOCIO ---
 
@@ -370,6 +374,9 @@ ${faltan.map((f, i) => `  ${i === 0 ? '→' : '·'} ${f}`).join('\n')}
 
 **Pregunta AHORA por el primero de la lista** (el de la flecha), no por otro y no por dos a la
 vez. Ése es el que la pantalla está ayudando a contestar.
+
+**Termina SIEMPRE este turno con esa pregunta**, aunque antes confirmes o comentes algo. Un
+turno que se acaba sin pregunta deja la entrevista parada y a él adivinando qué sigue.
 
 Hasta que no tengas todo eso, la fase no avanza aunque emitas [FASE_COMPLETA:${fase}]. Yo lo
 verifico.`);
@@ -436,6 +443,7 @@ const COMO_ESCRIBES = `
  */
 export function guionDespuesDelRitual(estado: EstadoNegocio, resumen?: string | null): string {
   const nombre = estado.agente?.trim();
+  const dueno = estado.dueno?.trim();
 
   const partes: string[] = [];
 
@@ -445,7 +453,10 @@ Ya entrevistaste a este negocio y ya le entregaste su Mapa de Negocio. **Se acab
 preguntas de la entrevista.** Ahora eres su agente de todos los días: su dueño te escribe lo que
 sea de su negocio y tú contestas con lo que sabes de él.
 
-${nombre ? `Él te puso ${nombre}. Ése es tu nombre.` : 'Todavía no te puso nombre; si te lo pregunta, pídeselo.'}`);
+${nombre ? `Él te puso ${nombre}. Ése es tu nombre.
+**${nombre} es el nombre del AGENTE —el tuyo—, no el del dueño.** Nunca lo uses para dirigirte a él.` : 'Todavía no te puso nombre; si te lo pregunta, pídeselo.'}
+
+${dueno ? `El dueño se llama ${dueno}. Cuando lo llames por su nombre, ése es el que usas —nunca el tuyo.` : 'El nombre del dueño todavía no lo sabes: no lo inventes ni uses el tuyo en su lugar. Si te lo dice, emítelo con [DATO:dueno=SuNombre] y desde entonces úsalo.'}`);
 
   partes.push(`--- LO QUE SABES DE ESTE NEGOCIO ---
 
