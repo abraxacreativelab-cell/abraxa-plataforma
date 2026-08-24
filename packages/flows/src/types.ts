@@ -6,6 +6,10 @@
  *  Sólo tipos y constantes de datos. Nada que hable con la base ni con la red:
  *  este archivo lo importa el navegador (el builder) y el worker por igual.
  */
+// Trae el registro de tablas al programa. No es decorativo: `apps/web` sólo
+// compila lo que llega por un import, y sin esta línea `tenantDb(ctx).from(…)`
+// de `store.ts` no compila ahí. Ver la cabecera de `tables.ts`.
+import './tables';
 import type { TriggerType } from '@abraxa/db';
 
 // ════════════════════════════════════════════════════════════════════════════

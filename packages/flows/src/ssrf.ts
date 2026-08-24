@@ -151,6 +151,20 @@ export function esBloqueadaPorSsrf(url: string): boolean {
   const ip = normalizarIPv4(host);
   if (ip !== null) return ipv4Bloqueada(ip);
 
+  // ── Nombre de una sola etiqueta: `http://redis/`, `http://api/` ─────────
+  //
+  // Un host sin punto NO existe en el DNS público: sólo resuelve por el DNS
+  // interno o por los dominios de búsqueda del sistema. En una red de
+  // contenedores, `http://postgres/` es la base de datos y `http://api/` es la
+  // API — es la misma puerta que `localhost`, entrando por otro nombre.
+  //
+  // Salió de una prueba en rojo: Node parsea `http:///x` como host `"x"`, así
+  // que el caso "sin host" que se creía bloqueado no lo estaba. La URL rara no
+  // era el problema; el hueco que destapó, sí.
+  //
+  // Ninguna URL pública de un cliente se ve así: siempre trae un punto.
+  if (!host.includes('.')) return true;
+
   // Un nombre de dominio normal. Ver la nota de DNS rebinding en la cabecera.
   return false;
 }

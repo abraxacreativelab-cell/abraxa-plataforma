@@ -257,7 +257,10 @@ describe('suscribirseACorrida', () => {
     // Pintar sobre un componente desmontado es un error de React y un dato
     // sobre una pantalla que ya no existe.
     const t = relojFalso();
-    let resolver: ((f: RunSnapshot) => void) | null = null;
+    // Sin inicializar a `null` a propósito: si se inicializara, el análisis de
+    // flujo de TypeScript no vería la asignación de dentro del ejecutor de la
+    // promesa y estrecharía el tipo a `never` en la llamada de abajo.
+    let resolver!: (f: RunSnapshot) => void;
     let recibidas = 0;
 
     const cancelar = suscribirseACorrida('r1', () => (recibidas += 1), {
@@ -269,7 +272,7 @@ describe('suscribirseACorrida', () => {
     });
 
     cancelar();
-    resolver?.(foto('running'));
+    resolver(foto('running'));
     await esperar();
 
     expect(recibidas).toBe(0);

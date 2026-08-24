@@ -30,8 +30,25 @@ describe('esBloqueadaPorSsrf — lo que NO puede salir del worker', () => {
     ['esquema file', 'file:///etc/passwd'],
     ['esquema gopher', 'gopher://127.0.0.1/'],
     ['URL rota', 'no soy una url'],
-    ['sin host', 'http:///x'],
+    ['host vacío', 'http://'],
   ] as const;
+
+  // ── Nombres de una sola etiqueta ─────────────────────────────────────────
+  // Salieron de una prueba en rojo: se creía que `http:///x` era "sin host",
+  // y Node lo parsea como host `"x"`. En una red de contenedores esos nombres
+  // son servicios internos, así que el caso raro destapó un hueco real.
+  const unaEtiqueta = [
+    ['servicio de contenedor', 'http://redis/'],
+    ['la base de datos', 'http://postgres:5432/'],
+    ['la propia API', 'http://api/flows'],
+    ['las barras de más que Node normaliza', 'http:///x'],
+  ] as const;
+
+  for (const [que, url] of unaEtiqueta) {
+    it(`bloquea un host sin punto: ${que} (${url})`, () => {
+      expect(esBloqueadaPorSsrf(url)).toBe(true);
+    });
+  }
 
   for (const [que, url] of bloqueadas) {
     it(`bloquea ${que}`, () => {

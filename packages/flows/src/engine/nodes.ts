@@ -133,7 +133,7 @@ export async function ejecutarNodo(nodo: FlowNode, e: EntornoDeNodo): Promise<No
 
     // ── Mandar un mensaje ──────────────────────────────────────────────────
     case 'send_message':
-      return mandarMensaje(nodo, e, cfg);
+      return mandarMensaje(e, cfg);
 
     // ── CRM ────────────────────────────────────────────────────────────────
     case 'move_stage': {
@@ -355,7 +355,6 @@ async function destinatario(
 }
 
 async function mandarMensaje(
-  nodo: FlowNode,
   e: EntornoDeNodo,
   cfg: Record<string, unknown>,
 ): Promise<NodeResult> {

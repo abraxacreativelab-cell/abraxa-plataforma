@@ -105,6 +105,7 @@ export function corridaDemo(): RunSnapshot {
     triggerType: 'contact_created',
     isTest: true,
     error: null,
+    stepsTaken: hechos,
     startedAt: new Date(arrancoEn ?? 0).toISOString(),
     wakeAt: null,
     completedAt: termino ? new Date((arrancoEn ?? 0) + 4000).toISOString() : null,
