@@ -1,0 +1,118 @@
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  Un error de configuración NO se le enseña a un invitado.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  Hallazgo del 2026-08-01: cuando no había llave, el Ritual pintaba en la cara
+ *  del invitado, dentro de un recuadro rojo, este texto tal cual:
+ *
+ *    «No hay llave para 'anthropic'. Configura ANTHROPIC_API_KEY en el .env del
+ *     servidor, o dale al tenant su propia credencial en app.tenant_integrations.»
+ *
+ *  No es un detalle cosmético. `PlatformError.toResponse()` (packages/db,
+ *  errors.ts:56-59) devuelve `message` VERBATIM al navegador y nunca `details`
+ *  —está escrito ahí que `details` no se filtra—. O sea que `message` no es un
+ *  log: es copy de producto, y hay que escribirlo como tal. El detalle de
+ *  operación viaja en `details`, que se queda del lado del servidor.
+ *
+ *  Corre sin base y sin red: con `keyRef` en null nunca se toca `tenantDb`.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { PlatformError } from '@abraxa/db';
+import type { TenantContext } from '@abraxa/db';
+import { resetEnvCache } from '@abraxa/config';
+import { resolverLlave } from './keys';
+
+const ANTHROPIC_ORIGINAL = process.env.ANTHROPIC_API_KEY;
+const OPENROUTER_ORIGINAL = process.env.OPENROUTER_API_KEY;
+
+// `keyRef: null` corta antes de cualquier consulta, así que el contexto sólo
+// tiene que existir para satisfacer al tipo.
+const CTX = { tenantId: '00000000-0000-0000-0000-000000000000' } as unknown as TenantContext;
+
+beforeEach(() => {
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  resetEnvCache();
+});
+
+afterEach(() => {
+  if (ANTHROPIC_ORIGINAL === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = ANTHROPIC_ORIGINAL;
+
+  if (OPENROUTER_ORIGINAL === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = OPENROUTER_ORIGINAL;
+
+  resetEnvCache();
+});
+
+async function capturar(provider: 'anthropic' | 'openrouter'): Promise<PlatformError> {
+  try {
+    await resolverLlave(CTX, provider, null);
+  } catch (e) {
+    if (PlatformError.is(e)) return e;
+    throw e;
+  }
+  throw new Error('resolverLlave no lanzó y debía lanzar');
+}
+
+describe('resolverLlave — el mensaje que ve el invitado', () => {
+  it('sin llave sigue siendo PROVIDER_ERROR no reintentable', async () => {
+    const e = await capturar('anthropic');
+    expect(e.code).toBe('PROVIDER_ERROR');
+    expect(e.retryable).toBe(false);
+  });
+
+  it('el mensaje NO nombra variables de entorno, archivos ni tablas', async () => {
+    const e = await capturar('anthropic');
+
+    // Cada uno de estos apareció literalmente en la pantalla del invitado.
+    for (const filtracion of [
+      '.env',
+      'ANTHROPIC_API_KEY',
+      'OPENROUTER_API_KEY',
+      'tenant_integrations',
+      'app.',
+      'servidor',
+    ]) {
+      expect(e.message, `el mensaje al invitado todavía dice '${filtracion}'`).not.toContain(
+        filtracion,
+      );
+    }
+  });
+
+  it('el mensaje tampoco filtra el nombre interno del proveedor', async () => {
+    // 'anthropic' / 'openrouter' son detalle de arquitectura: al dueño de una
+    // taquería no le dicen nada y lo único que logran es dar miedo.
+    expect((await capturar('anthropic')).message.toLowerCase()).not.toContain('anthropic');
+    expect((await capturar('openrouter')).message.toLowerCase()).not.toContain('openrouter');
+  });
+
+  it('el mensaje es una frase en español para una persona, no un volcado', async () => {
+    const m = (await capturar('anthropic')).message;
+    expect(m.length).toBeGreaterThan(20);
+    expect(m).toMatch(/[.!]$/);
+    // Nada de nombres_con_guion_bajo ni MAYÚSCULAS_DE_VARIABLE.
+    expect(m).not.toMatch(/[A-Z]{4,}_[A-Z]{2,}/);
+  });
+
+  it('el detalle de operación NO se pierde: viaja en `details`', async () => {
+    const e = await capturar('anthropic');
+    // `details` nunca sale por HTTP (toResponse lo omite), así que aquí sí
+    // puede —y debe— estar lo que el operador necesita para arreglarlo.
+    expect(e.details?.provider).toBe('anthropic');
+    expect(String(e.details?.variable ?? '')).toBe('ANTHROPIC_API_KEY');
+  });
+
+  it('para openrouter el detalle nombra SU variable, no la de anthropic', async () => {
+    const e = await capturar('openrouter');
+    expect(e.details?.provider).toBe('openrouter');
+    expect(String(e.details?.variable ?? '')).toBe('OPENROUTER_API_KEY');
+  });
+
+  it('cuando SÍ hay llave de plataforma, la devuelve y no lanza', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-v1-de-mentiras';
+    resetEnvCache();
+    await expect(resolverLlave(CTX, 'openrouter', null)).resolves.toBe('sk-or-v1-de-mentiras');
+  });
+});

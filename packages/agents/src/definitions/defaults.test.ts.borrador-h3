@@ -1,0 +1,126 @@
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  La semilla tiene que nacer con una llave que EXISTA.
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  Hallazgo del 2026-08-01: los cinco agentes semilla estaban clavados en
+ *  `provider: 'anthropic'`, y el `.env` del servidor tiene `ANTHROPIC_API_KEY`
+ *  vacía y `OPENROUTER_API_KEY` con 73 caracteres. Consecuencia medida: el
+ *  PRIMER turno del Ritual de Fundación de todo tenant nuevo moría con
+ *  `PROVIDER_ERROR`, y con él los pasos 3, 4 y 5 del camino del invitado —sin
+ *  conversación no hay Mapa, sin Mapa no hay documento madre, sin documento no
+ *  hay valores que enseñar en la Bóveda—.
+ *
+ *  La semilla no puede seguir siendo una constante: tiene que mirar QUÉ LLAVE
+ *  HAY y nacer con ese proveedor. Es la diferencia entre un despliegue que
+ *  funciona y uno que depende de que alguien recuerde llenar una variable.
+ *
+ *  Estas pruebas corren sin base y sin red.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_MODEL_BY_ROLE, resetEnvCache } from '@abraxa/config';
+import { canonizarModelo, dialectoValido, esConocido } from '../capabilities';
+import { semillasPorDefecto } from './defaults';
+
+const ANTHROPIC_ORIGINAL = process.env.ANTHROPIC_API_KEY;
+const OPENROUTER_ORIGINAL = process.env.OPENROUTER_API_KEY;
+
+/**
+ * Se toca `process.env` campo por campo, nunca `process.env = {...}`: sustituir
+ * el objeto entero deja un `process.env` que ya no es el del proceso (la misma
+ * trampa anotada en `routes.test.ts`).
+ */
+function ponerLlaves(opts: { anthropic?: string; openrouter?: string }): void {
+  if (opts.anthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = opts.anthropic;
+
+  if (opts.openrouter === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = opts.openrouter;
+
+  resetEnvCache();
+}
+
+beforeEach(() => resetEnvCache());
+
+afterEach(() => {
+  if (ANTHROPIC_ORIGINAL === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = ANTHROPIC_ORIGINAL;
+
+  if (OPENROUTER_ORIGINAL === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = OPENROUTER_ORIGINAL;
+
+  resetEnvCache();
+});
+
+describe('semillasPorDefecto — el proveedor sale de la llave que hay', () => {
+  it('con SÓLO OpenRouter, ningún agente nace en anthropic', () => {
+    ponerLlaves({ openrouter: 'sk-or-v1-de-mentiras' });
+
+    const semillas = semillasPorDefecto();
+    expect(semillas).toHaveLength(5);
+    for (const s of semillas) {
+      expect(s.provider, `el rol '${s.role}' nació en un proveedor sin llave`).toBe('openrouter');
+    }
+  });
+
+  it('con SÓLO OpenRouter, los cinco ids respetan el dialecto y están en el catálogo', () => {
+    ponerLlaves({ openrouter: 'sk-or-v1-de-mentiras' });
+
+    for (const s of semillasPorDefecto()) {
+      // Dialecto: `vendor/modelo`. Sin esto `upsertDefinicion` lanza VALIDATION
+      // y el tenant nuevo no llega ni a tener fila.
+      expect(dialectoValido(s.model, s.provider), `'${s.model}' no es dialecto de ${s.provider}`).toBe(true);
+      // Catálogo: el id tiene que resolver a un modelo que conocemos, no al
+      // perfil conservador. Un `anthropic/claude-sonnet-4.5` inventado pasaría
+      // el dialecto y reventaría con 400 en el primer mensaje.
+      expect(esConocido(s.model, s.provider), `'${s.model}' no está en el catálogo`).toBe(true);
+    }
+  });
+
+  it('el id de OpenRouter es el MISMO modelo que el de Anthropic, no otro', () => {
+    ponerLlaves({ openrouter: 'sk-or-v1-de-mentiras' });
+
+    for (const s of semillasPorDefecto()) {
+      // `anthropic/claude-haiku-4.5` → `claude-haiku-4-5`. Si la traducción se
+      // equivoca de modelo, el maestro del emprendedor contesta con un modelo
+      // más tonto (o más caro) que el que dice la política.
+      expect(canonizarModelo(s.model, 'openrouter')).toBe(DEFAULT_MODEL_BY_ROLE[s.role]);
+    }
+  });
+
+  it('con llave de Anthropic manda Anthropic y los modelos son los de la política', () => {
+    ponerLlaves({ anthropic: 'sk-ant-de-mentiras', openrouter: 'sk-or-v1-de-mentiras' });
+
+    for (const s of semillasPorDefecto()) {
+      expect(s.provider).toBe('anthropic');
+      expect(s.model).toBe(DEFAULT_MODEL_BY_ROLE[s.role]);
+    }
+  });
+
+  it('una llave vacía NO cuenta como llave', () => {
+    // Es el caso real del servidor: la variable existe, con cadena vacía.
+    ponerLlaves({ anthropic: '', openrouter: 'sk-or-v1-de-mentiras' });
+
+    for (const s of semillasPorDefecto()) {
+      expect(s.provider, `'${s.role}' creyó que una cadena vacía era una llave`).toBe('openrouter');
+    }
+  });
+
+  it('sin ninguna llave no truena: cae en anthropic y deja que la llave se queje', () => {
+    ponerLlaves({});
+
+    const semillas = semillasPorDefecto();
+    expect(semillas).toHaveLength(5);
+    for (const s of semillas) {
+      expect(s.provider).toBe('anthropic');
+      expect(dialectoValido(s.model, s.provider)).toBe(true);
+    }
+  });
+
+  it('el nombre del maestro lo sigue poniendo el emprendedor', () => {
+    ponerLlaves({ openrouter: 'sk-or-v1-de-mentiras' });
+
+    const maestro = semillasPorDefecto('Lucero').find((s) => s.role === 'master');
+    expect(maestro?.name).toBe('Lucero');
+  });
+});
