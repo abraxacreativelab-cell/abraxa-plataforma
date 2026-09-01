@@ -56,8 +56,21 @@ function archivosRastreados() {
   return salida.split('\0').filter(Boolean);
 }
 
+// Este archivo y su allowlist quedan FUERA del barrido, y hay que decir por qué o parece un
+// agujero: el guardia contiene la aguja —`HEREDADAS` es literalmente la ruta que persigue— y el
+// allowlist la cita en cada motivo. Incluirlos convierte el gate en una tautología que se acusa a
+// sí misma, y peor: cada fila nueva del allowlist cambiaría la cuenta del propio allowlist, así que
+// no habría número estable que declarar. Lo que sí se comprueba es que la exclusión sea EXACTA —
+// dos archivos con nombre propio, no un glob— para que nadie esconda nada bajo ella.
+const EXCLUIDOS = new Set([
+  'scripts/check-rutas-heredadas.mjs',
+  'RUTAS-HEREDADAS.md',
+  'docs/RUTAS-HEREDADAS.md',
+]);
+
 /** Devuelve las ocurrencias de un archivo, cada una con su línea y si esa línea se ejecuta. */
 function ocurrencias(rutaRelativa) {
+  if (EXCLUIDOS.has(rutaRelativa)) return [];
   const absoluta = join(REPO, rutaRelativa);
   if (!existsSync(absoluta)) return [];
   let contenido;
@@ -117,7 +130,12 @@ function leerAllowlist() {
   return { ejecutable, historia };
 }
 
-const CLASES = new Set(['patron-guardia', 'comentario', 'prueba-guardia', 'dato-historico']);
+// `correccion-pendiente` es para la ruta vieja citada DENTRO del diff que la corrige: el día que
+// alguien aplique ese diff, la línea desaparece y el gate marca la fila como entrada muerta. Es la
+// única clase que se espera que caduque sola.
+const CLASES = new Set([
+  'patron-guardia', 'comentario', 'prueba-guardia', 'dato-historico', 'correccion-pendiente',
+]);
 
 function motivoValido(motivo) {
   return Boolean(motivo) && !/^TODO\b/i.test(motivo) && motivo.length >= 12;
@@ -153,7 +171,8 @@ if (SELLAR) {
     '',
     'Clases admitidas: `patron-guardia` (la ruta es el dato de una lista de archivo/denegación),',
     '`comentario` (prosa dentro de código que narra el defecto), `prueba-guardia` (una aserción que',
-    'exige que la ruta NO se use), `dato-historico` (un registro fechado).',
+    'exige que la ruta NO se use), `correccion-pendiente` (la ruta citada dentro del diff que la',
+    'corrige), `dato-historico` (un registro fechado).',
     '',
     '| archivo | sha | clase | motivo |',
     '|---|---|---|---|',
