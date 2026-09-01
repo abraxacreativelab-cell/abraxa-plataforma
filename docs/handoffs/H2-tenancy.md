@@ -53,7 +53,7 @@ no existe; el alta es un script con 9 empresas escritas a mano
 
 ## 4. Qué portar de GARDEN
 
-GARDEN vive en `/Volumes/FRAGUA/CLAUDE CODE/GARDEN`. **Consulta, no edites.**
+GARDEN vive en `<workspace>/GARDEN`. **Consulta, no edites.**
 
 | Archivo | Qué llevarte |
 |---|---|
@@ -188,7 +188,7 @@ Contexto: ABRAXA Plataforma es un sistema operativo para emprendedores. Cada uno
 empresa (un tenant). Tú construyes quién es cada quien, a qué tenant pertenece y qué puede
 tocar. Todo lo demás depende de esto.
 
-Portas código de GARDEN, que está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo
+Portas código de GARDEN, que está en "<workspace>/GARDEN" — consúltalo, NO lo
 edites. Lo más valioso ahí es src/api/middleware/tenant.ts: el RBAC por área está bien hecho
 y se lleva casi tal cual.
 

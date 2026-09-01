@@ -119,7 +119,7 @@ que ese puente exista.
 | **Escribes sólo en** | `packages/inbox/**` **excepto** `drivers/meta`, `drivers/email`, `drivers/sms` · `apps/web/app/(app)/bandeja/**` |
 | **Migraciones** | `040`–`049` |
 | **Rama** | `h6-inbox` |
-| **Worktree** | `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h6-inbox` |
+| **Worktree** | `<workspace>/PLATAFORMA-h6-inbox` |
 
 **Implementas:** `InboxPort` y `ChannelDriver` (sólo el de WhatsApp).
 **Consumes:** `AgentPort` (H3) para que el agente responda · `TenancyPort` (H2) · `VaultPort` (H4).
@@ -129,7 +129,7 @@ que ese puente exista.
 
 ## 5. Qué portar de GARDEN
 
-GARDEN está en `/Volumes/FRAGUA/CLAUDE CODE/GARDEN`. **Consulta, no edites.**
+GARDEN está en `<workspace>/GARDEN`. **Consulta, no edites.**
 
 | Archivo | Veredicto |
 |---|---|
@@ -332,7 +332,7 @@ ANTES DE ESCRIBIR NADA — freno duro. Pégalo tal cual; si imprime ESPERA, no e
 
 (
   set -u
-  W="/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h6-inbox"
+  W="<workspace>/PLATAFORMA-h6-inbox"
   cd "$W" || { echo "ESPERA · no existe el worktree $W"; exit 1; }
   ok=1; mal() { echo "  ✖ $1"; ok=0; }
   echo "freno de arranque · H6 · $(git rev-parse --abbrev-ref HEAD)"
@@ -365,7 +365,7 @@ packages/inbox/src existe desde el día uno y `test -d` siempre dijo LISTO aunqu
 Y verifica dos cosas más que el freno viejo no miraba: que tu worktree traiga origin/main (los
 worktrees se quedaron clavados dos commits atrás) y que exista node_modules (ninguno lo tenía).
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h6-inbox (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h6-inbox (tu worktree, rama
 h6-inbox ya activa). No hagas checkout ni switch.
 
 Vas a construir H6 — la bandeja, el driver de WhatsApp y la conexión agente↔inbox de
@@ -384,7 +384,7 @@ el tipo y NO SE USA EN NINGÚN LADO — la única aparición en todo el repo es 
 Los bots viven en un mundo y la bandeja en otro, desconectados. Nunca se cableó el puente.
 Ese puente es tu entregable principal.
 
-GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites. Llévate el
+GARDEN está en "<workspace>/GARDEN" — consúltalo, NO lo edites. Llévate el
 modelo de channels/threads/messages (ya es genérico multicanal), el driver de Evolution y el
 anti-duplicado de src/crm/inbox/service.ts:82-215, que está muy bien resuelto.
 

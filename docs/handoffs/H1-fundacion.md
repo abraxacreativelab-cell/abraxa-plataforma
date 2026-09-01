@@ -13,7 +13,7 @@ emprendedores. Un emprendedor de cualquier giro conecta su empresa y va desbloqu
 maestro** al que él mismo le pone nombre.
 
 Es un producto **nuevo y separado** de GARDEN, que es el sistema operativo interno de ABRAXA.
-GARDEN vive en `/Volumes/FRAGUA/CLAUDE CODE/GARDEN` y **no se toca**: es fuente de consulta y
+GARDEN vive en `<workspace>/GARDEN` y **no se toca**: es fuente de consulta y
 de código a portar, nada más.
 
 Tu trabajo **no es código de producto**. Es el andamiaje que permite que **4 o 5
@@ -313,7 +313,7 @@ Lee primero, completo:
 
 Contexto en una línea: ABRAXA Plataforma es un sistema operativo empresarial para
 emprendedores, producto nuevo y separado de GARDEN (que vive en
-"/Volumes/FRAGUA/CLAUDE CODE/GARDEN" y NO se toca — sólo se consulta).
+"<workspace>/GARDEN" y NO se toca — sólo se consulta).
 
 Tu entregable NO es código de producto. Es el andamiaje que permite que 4 o 5 conversaciones
 construyan en paralelo sin pisarse: los 12 paquetes ya cableados, los contratos cruzados

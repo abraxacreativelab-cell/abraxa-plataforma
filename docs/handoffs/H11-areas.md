@@ -159,7 +159,7 @@ ANTES DE ESCRIBIR NADA: verifica que H1, H5 y H7 hayan mergeado.
     && echo LISTO || echo "ESPERA"
 Si falta alguno, NO crees estructura. Lee tu handoff, prepara tu plan.
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h11-areas (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h11-areas (tu worktree, rama
 h11-areas ya activa). No hagas checkout ni switch.
 
 Vas a construir H11 — las áreas, el mapa de negocio y la gamificación de ABRAXA Plataforma.

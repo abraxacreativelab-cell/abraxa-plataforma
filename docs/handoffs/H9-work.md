@@ -198,7 +198,7 @@ ANTES DE ESCRIBIR NADA — freno duro. Pégalo tal cual; si imprime ESPERA, no e
 
 (
   set -u
-  W="/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h9-work"
+  W="<workspace>/PLATAFORMA-h9-work"
   cd "$W" || { echo "ESPERA · no existe el worktree $W"; exit 1; }
   ok=1; mal() { echo "  ✖ $1"; ok=0; }
   echo "freno de arranque · H9 · $(git rev-parse --abbrev-ref HEAD)"
@@ -230,7 +230,7 @@ packages/ui/src existe desde el día uno y `test -d` siempre dijo LISTO aunque n
 Y verifica dos cosas más que el freno viejo no miraba: que tu worktree traiga origin/main (los
 worktrees se quedaron clavados dos commits atrás) y que exista node_modules (ninguno lo tenía).
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h9-work (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h9-work (tu worktree, rama
 h9-work ya activa). No hagas checkout ni switch.
 
 Vas a construir H9 — Tareas y proyectos de ABRAXA Plataforma.
@@ -246,7 +246,7 @@ usa a diario, así que la calidad de detalle importa más que la cantidad de fun
 Tu trabajo es sobre todo de RESTA. GARDEN ya tiene un sistema de tareas nivel Notion — 7 vistas,
 filtros anidados, vistas guardadas compartibles, ~4,700 líneas, con la lógica pura ya testeada.
 Portas y simplificas a CUATRO vistas: por proyecto, por responsable, calendario y progreso.
-GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites.
+GARDEN está en "<workspace>/GARDEN" — consúltalo, NO lo edites.
 
 NO portes: timeline (Gantt), galería, ni el tablero-por-empresa (678 líneas). Aquí no existe
 "empresa" — el usuario tiene UNA sola.

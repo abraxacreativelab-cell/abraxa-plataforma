@@ -212,7 +212,7 @@ Dos cosas que GARDEN hizo mal y aquí no se repiten:
   2. El costo se estima con tablas hardcodeadas y estuvo roto meses sin que nadie lo notara.
      Aquí se lee el costo REAL de la respuesta de la API.
 
-GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites. Llévate
+GARDEN está en "<workspace>/GARDEN" — consúltalo, NO lo edites. Llévate
 src/core/agent-loop.ts y el patrón de src/vault/agent-inject.ts.
 
 Trabajas SÓLO en packages/agents/**. Migraciones 020–029. Rama h3-agents.

@@ -8,37 +8,68 @@
     {
       "name": "ownership-gate",
       "category": "governance",
-      "command": ["node", "scripts/ownership-gate.mjs"],
+      "command": [
+        "node",
+        "scripts/ownership-gate.mjs"
+      ],
       "timeoutMs": 120000
     },
     {
       "name": "ownership-overlap",
       "category": "governance",
-      "command": ["node", "scripts/ownership-gate.mjs", "--check-overlap"],
+      "command": [
+        "node",
+        "scripts/ownership-gate.mjs",
+        "--check-overlap"
+      ],
+      "timeoutMs": 120000
+    },
+    {
+      "name": "rutas-heredadas",
+      "category": "governance",
+      "command": [
+        "node",
+        "scripts/check-rutas-heredadas.mjs"
+      ],
       "timeoutMs": 120000
     },
     {
       "name": "typecheck",
       "category": "build",
-      "command": ["npm", "run", "typecheck"],
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
       "timeoutMs": 900000
     },
     {
       "name": "lint",
       "category": "quality",
-      "command": ["npm", "run", "lint"],
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
       "timeoutMs": 600000
     },
     {
       "name": "tests",
       "category": "test",
-      "command": ["npm", "test"],
+      "command": [
+        "npm",
+        "test"
+      ],
       "timeoutMs": 900000
     },
     {
       "name": "build",
       "category": "build",
-      "command": ["npm", "run", "build"],
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
       "timeoutMs": 1800000
     }
   ],
@@ -54,18 +85,50 @@
     "ciTimeoutMs": 2700000,
     "productionUrl": "https://mi.abraxa.club/",
     "deploy": [
-      ["bash", "-lc", "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@187.77.9.8 \"/opt/plataforma/desplegar.sh $(git rev-parse HEAD)\""]
+      [
+        "bash",
+        "-lc",
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@187.77.9.8 \"/opt/plataforma/desplegar.sh $(git rev-parse HEAD)\""
+      ]
     ],
     "verify": [
-      ["bash", "-lc", "test \"$(ssh -o BatchMode=yes root@187.77.9.8 'cat /opt/plataforma/.sha-desplegado')\" = \"$(git rev-parse HEAD)\""],
-      ["bash", "-lc", "ssh -o BatchMode=yes root@187.77.9.8 'curl -fsS -o /dev/null -w \"%{http_code}\" http://127.0.0.1:3040/health' | grep -qx 200"],
-      ["bash", "-lc", "ssh -o BatchMode=yes root@187.77.9.8 'curl -fsS -o /dev/null -w \"%{http_code}\" http://127.0.0.1:3041/' | grep -qx 200"],
-      ["bash", "-lc", "test \"$(ssh -o BatchMode=yes root@187.77.9.8 'pm2 jlist' | python3 -c \"import json,sys; print(sum(1 for p in json.load(sys.stdin) if p['name'].startswith('plat-') and p['pm2_env']['status']=='online'))\")\" = 3"],
-      ["bash", "-lc", "curl -fsS -o /dev/null -w \"%{http_code}\" https://mi.abraxa.club/ | grep -qx 200"],
-      ["bash", "-lc", "curl -fsS https://mi.abraxa.club/health | grep -q '\"ok\":true'"]
+      [
+        "bash",
+        "-lc",
+        "test \"$(ssh -o BatchMode=yes root@187.77.9.8 'cat /opt/plataforma/.sha-desplegado')\" = \"$(git rev-parse HEAD)\""
+      ],
+      [
+        "bash",
+        "-lc",
+        "ssh -o BatchMode=yes root@187.77.9.8 'curl -fsS -o /dev/null -w \"%{http_code}\" http://127.0.0.1:3040/health' | grep -qx 200"
+      ],
+      [
+        "bash",
+        "-lc",
+        "ssh -o BatchMode=yes root@187.77.9.8 'curl -fsS -o /dev/null -w \"%{http_code}\" http://127.0.0.1:3041/' | grep -qx 200"
+      ],
+      [
+        "bash",
+        "-lc",
+        "test \"$(ssh -o BatchMode=yes root@187.77.9.8 'pm2 jlist' | python3 -c \"import json,sys; print(sum(1 for p in json.load(sys.stdin) if p['name'].startswith('plat-') and p['pm2_env']['status']=='online'))\")\" = 3"
+      ],
+      [
+        "bash",
+        "-lc",
+        "curl -fsS -o /dev/null -w \"%{http_code}\" https://mi.abraxa.club/ | grep -qx 200"
+      ],
+      [
+        "bash",
+        "-lc",
+        "curl -fsS https://mi.abraxa.club/health | grep -q '\"ok\":true'"
+      ]
     ],
     "rollback": [
-      ["bash", "-lc", "ssh -o BatchMode=yes root@187.77.9.8 '/opt/plataforma/desplegar.sh --reversa'"]
+      [
+        "bash",
+        "-lc",
+        "ssh -o BatchMode=yes root@187.77.9.8 '/opt/plataforma/desplegar.sh --reversa'"
+      ]
     ]
   }
 }

@@ -5,7 +5,7 @@
 > Rama: `h18-identidad` · Migraciones: `150`–`159`
 > Directorios: `packages/auth/**`, `apps/web/app/api/**` y `apps/web/app/(app)/ajustes/**`
 > (excepto `ajustes/plan` y `ajustes/integraciones`)
-> Worktree: `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h18-identidad`
+> Worktree: `<workspace>/PLATAFORMA-h18-identidad`
 
 ---
 
@@ -138,7 +138,7 @@ Tu trabajo es **llamarlas**, no reimplementarlas.
 | **Escribes sólo en** | `packages/auth/**` · `apps/web/app/api/**` · `apps/web/app/(app)/ajustes/**` **excepto** `ajustes/plan` y `ajustes/integraciones` |
 | **Migraciones** | `150`–`159`, ni una fuera |
 | **Rama** | `h18-identidad` — igual que tu llave en `.ownership.json` |
-| **Worktree** | `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h18-identidad` |
+| **Worktree** | `<workspace>/PLATAFORMA-h18-identidad` |
 | **No toques** | `apps/web/app/layout.tsx` ni `app/(app)/layout.tsx` (H5) · `packages/tenancy/**` (H2) · `packages/db/**` (H1) · el lockfile |
 
 **Consumes:** `TenancyPort` (H2) — `canSignIn`, `primaryTenantSlugFor`, `contextFor` — contra la
@@ -465,9 +465,9 @@ tiempo para leer tu handoff y los tres archivos de los que sale todo tu carril:
 packages/tenancy/src/middleware/tenant.ts, .../middleware/proxy.ts y
 apps/web/app/(app)/direccion/_lib/session.ts.
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h18-identidad. Si no existe:
-  git worktree add "/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h18-identidad" -b h18-identidad origin/main
-  cd "/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h18-identidad" && npm ci
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h18-identidad. Si no existe:
+  git worktree add "<workspace>/PLATAFORMA-h18-identidad" -b h18-identidad origin/main
+  cd "<workspace>/PLATAFORMA-h18-identidad" && npm ci
 No hagas checkout ni switch en otro directorio.
 
 Vas a construir H18 — la identidad de ABRAXA Plataforma: NextAuth con Google y magic link, la

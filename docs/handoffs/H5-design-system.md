@@ -53,7 +53,7 @@ otros handoffs. Tú das el `layout.tsx` raíz y el shell; ellos llenan su carpet
 
 ## 4. Qué portar de GARDEN
 
-GARDEN está en `/Volumes/FRAGUA/CLAUDE CODE/GARDEN`. **Consulta, no edites.**
+GARDEN está en `<workspace>/GARDEN`. **Consulta, no edites.**
 
 | Archivo | Líneas | Qué llevarte |
 |---|---|---|
@@ -176,7 +176,7 @@ Contexto: defines cómo se ve todo el producto y construyes el esqueleto donde l
 handoffs cuelgan sus pantallas. Si lo haces bien, cada uno sólo escribe su contenido y todo se
 ve coherente sin que se coordinen entre sí.
 
-GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites. Su lenguaje
+GARDEN está en "<workspace>/GARDEN" — consúltalo, NO lo edites. Su lenguaje
 visual ya está resuelto y es bueno; llévatelo:
   garden-os/app/globals.css      (372 líneas, todo el sistema de tokens)
   garden-os/lib/brand.ts         (accentVars() garantiza contraste WCAG AA automáticamente)

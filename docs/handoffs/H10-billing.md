@@ -296,7 +296,7 @@ ANTES DE ESCRIBIR NADA — freno duro. Pégalo tal cual; si imprime ESPERA, no e
 
 (
   set -u
-  W="/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h10-billing"
+  W="<workspace>/PLATAFORMA-h10-billing"
   cd "$W" || { echo "ESPERA · no existe el worktree $W"; exit 1; }
   ok=1; mal() { echo "  ✖ $1"; ok=0; }
   echo "freno de arranque · H10 · $(git rev-parse --abbrev-ref HEAD)"
@@ -327,7 +327,7 @@ packages/tenancy/src existe desde el día uno y `test -d` siempre dijo LISTO aun
 Y verifica dos cosas más que el freno viejo no miraba: que tu worktree traiga origin/main (los
 worktrees se quedaron clavados dos commits atrás) y que exista node_modules (ninguno lo tenía).
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h10-billing (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h10-billing (tu worktree, rama
 h10-billing ya activa). No hagas checkout ni switch.
 
 Vas a construir H10 — la landing, el cobro y el alta self-service de ABRAXA Plataforma.
