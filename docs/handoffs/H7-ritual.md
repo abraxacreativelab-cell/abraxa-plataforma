@@ -274,7 +274,7 @@ ANTES DE ESCRIBIR NADA — freno duro. Pégalo tal cual; si imprime ESPERA, no e
 
 (
   set -u
-  W="/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h7-ritual"
+  W="<workspace>/PLATAFORMA-h7-ritual"
   cd "$W" || { echo "ESPERA · no existe el worktree $W"; exit 1; }
   ok=1; mal() { echo "  ✖ $1"; ok=0; }
   echo "freno de arranque · H7 · $(git rev-parse --abbrev-ref HEAD)"
@@ -309,7 +309,7 @@ packages/vault/src existe desde el día uno y `test -d` siempre dijo LISTO aunqu
 Y verifica dos cosas más que el freno viejo no miraba: que tu worktree traiga origin/main (los
 worktrees se quedaron clavados dos commits atrás) y que exista node_modules (ninguno lo tenía).
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h7-ritual (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h7-ritual (tu worktree, rama
 h7-ritual ya activa). No hagas checkout ni switch.
 
 Vas a construir H7 — el Ritual de Fundación de ABRAXA Plataforma. Estás en la ruta crítica.
@@ -326,7 +326,7 @@ Mapa de Negocio. Puede parar cuando quiera y volver mañana — como un videojue
 
 Buena noticia: el motor ya existe. GARDEN tiene 2,188 líneas de máquina de entrevista de 7
 fases funcionando en abraxa/extensions/abraxa-bookkeeper/. NO la reescribas: parametrízala.
-GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites.
+GARDEN está en "<workspace>/GARDEN" — consúltalo, NO lo edites.
 
 Lo que hay que des-inperiar: las áreas hardcodeadas de una inmobiliaria, el prompt que se
 autodescribe como "property management", y la persona de "Karen". Decisión de producto: Karen

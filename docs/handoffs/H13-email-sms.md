@@ -123,7 +123,7 @@ ANTES DE ESCRIBIR NADA: verifica que H1 y H6 hayan mergeado.
   test -f packages/db/ports.ts && test -d packages/inbox/src && echo LISTO || echo "ESPERA"
 Si falta alguno, NO crees estructura. Lee tu handoff, prepara tu plan.
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h13-email-sms (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h13-email-sms (tu worktree, rama
 h13-email-sms ya activa). No hagas checkout ni switch.
 
 Vas a construir H13 — los drivers de email (Resend + IMAP) y SMS (Twilio) para

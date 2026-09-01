@@ -56,7 +56,8 @@
       "h0-alias-h11",
       "h0-alias-h4",
       "h0-alta-fragua",
-      "h0-retirar-excepcion-vencida"
+      "h0-retirar-excepcion-vencida",
+      "fix/desclavar-rutas-fragua-20260901"
     ],
     "paths": [
       "docs/**",

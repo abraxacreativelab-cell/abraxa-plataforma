@@ -55,7 +55,7 @@ Sin esto, los agentes alucinan números y el producto no sirve. Es el cimiento s
 
 ## 4. Qué portar de GARDEN — aquí está lo más valioso
 
-GARDEN está en `/Volumes/FRAGUA/CLAUDE CODE/GARDEN`. **Consulta, no edites.**
+GARDEN está en `<workspace>/GARDEN`. **Consulta, no edites.**
 
 | Archivo | Líneas | Veredicto |
 |---|---|---|
@@ -236,7 +236,7 @@ actualizados". El emprendedor define UNA vez los números de su negocio y se pro
 sus contratos, sus mensajes y los prompts de sus agentes. Sin esto, los agentes inventan
 cifras y el producto no sirve.
 
-GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites. Aquí está lo
+GARDEN está en "<workspace>/GARDEN" — consúltalo, NO lo edites. Aquí está lo
 más valioso que vas a portar:
   src/vault/resolver.ts        (219 líneas, 100% genérico, cópialo casi tal cual)
   src/vault/agent-inject.ts    (33 líneas, patrón oro)

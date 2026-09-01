@@ -258,7 +258,7 @@ H6 y H15 hayan mergeado. Pégalo tal cual; si imprime ESPERA, no escribas una l�
 
 (
   set -u
-  W="/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h8-flows"
+  W="<workspace>/PLATAFORMA-h8-flows"
   cd "$W" || { echo "ESPERA · no existe el worktree $W"; exit 1; }
   ok=1; mal() { echo "  ✖ $1"; ok=0; }
   echo "freno de arranque · H8 · $(git rev-parse --abbrev-ref HEAD)"
@@ -297,7 +297,7 @@ packages/agents/src existe desde el día uno y `test -d` siempre dijo LISTO aunq
 Y verifica dos cosas más que el freno viejo no miraba: que tu worktree traiga origin/main (los
 worktrees se quedaron clavados dos commits atrás) y que exista node_modules (ninguno lo tenía).
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h8-flows (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h8-flows (tu worktree, rama
 h8-flows ya activa). No hagas checkout ni switch.
 
 Vas a construir H8 — las Automatizaciones de ABRAXA Plataforma: motor, builder visual tipo n8n
@@ -317,7 +317,7 @@ Buena noticia: en GARDEN esto está casi todo hecho y es bueno. El motor no tien
 referencia a Inperio: idempotencia, pausa y reanudación cuando el canal cae, anti-loop,
 clasificación de errores transitorios vs permanentes. Y el asistente IA valida con zod Y
 semánticamente contra el catálogo real del tenant. GARDEN está en
-"/Volumes/FRAGUA/CLAUDE CODE/GARDEN" — consúltalo, NO lo edites.
+"<workspace>/GARDEN" — consúltalo, NO lo edites.
 
 Tres cosas que hay que AGREGAR sobre el original:
   1. Ejecución observable de verdad. GARDEN hace polling de 10s y se siente muerto. Aquí es

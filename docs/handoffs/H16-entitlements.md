@@ -4,7 +4,7 @@
 > Rama: `h16-entitlements` · Migraciones: `130`–`139`
 > Directorios: `packages/tenancy/entitlements/**`, `packages/tenancy/src/entitlements/**`
 > y `apps/web/app/(app)/ajustes/plan/**`
-> Worktree: `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h16-entitlements`
+> Worktree: `<workspace>/PLATAFORMA-h16-entitlements`
 
 ---
 
@@ -157,7 +157,7 @@ suficiente volumen para que la cola tenga latencia. Se cierra ahora, cuando la c
 | **Escribes sólo en** | `packages/tenancy/entitlements/**` · `packages/tenancy/src/entitlements/**` · `apps/web/app/(app)/ajustes/plan/**` |
 | **Migraciones** | `130`–`139`, ni una fuera |
 | **Rama** | `h16-entitlements` — igual que tu llave en `.ownership.json` |
-| **Worktree** | `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h16-entitlements` |
+| **Worktree** | `<workspace>/PLATAFORMA-h16-entitlements` |
 | **No toques** | el resto de `packages/tenancy/**` (es de H2) · `packages/db/**` · `apps/worker/src/index.ts` · el lockfile |
 
 **Vives dentro del paquete de H2 pero en un subárbol que es tuyo.** `.ownership.json` le puso a
@@ -568,9 +568,9 @@ Si falta alguno, NO crees estructura, NO instales dependencias y NO escribas mig
 Usa el tiempo para leer tu handoff completo y estudiar los dos archivos de los que sale
 todo tu carril: packages/tenancy/src/services/plans.ts y packages/agents/src/ledger/budget.ts.
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h16-entitlements. Si no existe:
-  git worktree add "/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h16-entitlements" -b h16-entitlements origin/main
-  cd "/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h16-entitlements" && npm ci
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h16-entitlements. Si no existe:
+  git worktree add "<workspace>/PLATAFORMA-h16-entitlements" -b h16-entitlements origin/main
+  cd "<workspace>/PLATAFORMA-h16-entitlements" && npm ci
 No hagas checkout ni switch en otro directorio: hay más de diez conversaciones sobre este repo.
 
 Vas a construir H16 — entitlements y ciclo de vida del plan de ABRAXA Plataforma.

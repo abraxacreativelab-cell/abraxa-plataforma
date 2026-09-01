@@ -120,7 +120,7 @@ ANTES DE ESCRIBIR NADA: verifica que H1, H2, H3 y H5 hayan mergeado.
     && test -d packages/ui/src && echo LISTO || echo "ESPERA"
 Si falta alguno, NO crees estructura. Lee tu handoff, prepara tu plan.
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h14-admin (tu worktree, rama
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h14-admin (tu worktree, rama
 h14-admin ya activa). No hagas checkout ni switch.
 
 Vas a construir H14 — el panel de agencia de ABRAXA Plataforma.

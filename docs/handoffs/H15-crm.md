@@ -3,7 +3,7 @@
 > **Ola 2·bis.** Prerrequisito de media Ola 3. Requiere H1 mergeado; no requiere a nadie más.
 > Rama: `h15-crm` · Migraciones: `120`–`129`
 > Directorios: `packages/crm/**` y `apps/web/app/(app)/contactos/**`
-> Worktree: `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h15-crm`
+> Worktree: `<workspace>/PLATAFORMA-h15-crm`
 
 > **Este documento se escribió DESPUÉS de construir el carril**, no antes. El prompt de arranque
 > decía que si el handoff no existía al llegar, había que usar la especificación del prompt y
@@ -101,7 +101,7 @@ Aquí el contacto tiene una etapa por embudo: `app.contact_stages`, PK
 | **Escribes sólo en** | `packages/crm/**` · `apps/web/app/(app)/contactos/**` |
 | **Migraciones** | `120`–`129` |
 | **Rama** | `h15-crm` |
-| **Worktree** | `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h15-crm` |
+| **Worktree** | `<workspace>/PLATAFORMA-h15-crm` |
 
 **Implementa:** `ContactsPort` (en `packages/crm/src/port.ts` — ver §9 sobre por qué no está en
 `packages/db/ports.ts`).
@@ -482,7 +482,7 @@ Lo que **no** se pudo verificar sin base viva y queda para el orquestador al apl
 ## 11. Prompt de arranque
 
 ```
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h15-crm (worktree, rama h15-crm
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h15-crm (worktree, rama h15-crm
 ya activa). No hagas checkout ni switch: hay 14 conversaciones más sobre el mismo repo.
 
 Vas a construir H15 — el CRM de ABRAXA Plataforma: contactos, identidades por canal, embudo y
@@ -502,7 +502,7 @@ La decisión que lo separa de GARDEN: un contacto es una PERSONA y sus direccion
 GARDEN tiene `email` y `phone` como columnas planas (src/crm/types.ts:66) y por eso una persona
 con dos teléfonos son dos contactos, Instagram no cabe en ninguna columna, y la deduplicación es
 un Set en memoria que sólo corre al importar CSV. Aquí: app.contact_identities con
-UNIQUE (tenant_id, channel, identifier). GARDEN está en "/Volumes/FRAGUA/CLAUDE CODE/GARDEN" —
+UNIQUE (tenant_id, channel, identifier). GARDEN está en "<workspace>/GARDEN" —
 consúltalo, NO lo edites.
 
 Cuatro cosas que no se negocian:

@@ -4,7 +4,7 @@
 > **Prerrequisito duro de H12 y H13.** Sin esto, dos clientes comparten el mismo WhatsApp.
 > Rama: `h17-integraciones` · Migraciones: `140`–`149`
 > Directorios: `packages/integrations/**` y `apps/web/app/(app)/ajustes/integraciones/**`
-> Worktree: `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h17-integraciones`
+> Worktree: `<workspace>/PLATAFORMA-h17-integraciones`
 
 ---
 
@@ -111,7 +111,7 @@ le llegan las conversaciones de otro a su teléfono.
 | **Escribes sólo en** | `packages/integrations/**` · `apps/web/app/(app)/ajustes/integraciones/**` |
 | **Migraciones** | `140`–`149`, ni una fuera |
 | **Rama** | `h17-integraciones` — igual que tu llave en `.ownership.json` |
-| **Worktree** | `/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h17-integraciones` |
+| **Worktree** | `<workspace>/PLATAFORMA-h17-integraciones` |
 | **No toques** | `packages/inbox/**` (H6, H12, H13) · `packages/db/**` (H1) · el lockfile |
 
 **Implementas:** `IntegrationsPort`, declarado en `packages/integrations/src/port.ts` — **no** en
@@ -445,9 +445,9 @@ packages/ existen desde el stub de H1 y no prueban nada.
 Si falta alguno, NO crees estructura, NO instales dependencias y NO escribas migraciones.
 Usa el tiempo para leer tu handoff y los handoffs de H12 y H13, que son tus clientes.
 
-Trabaja SIEMPRE desde /Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h17-integraciones. Si no existe:
-  git worktree add "/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h17-integraciones" -b h17-integraciones origin/main
-  cd "/Volumes/FRAGUA/CLAUDE CODE/PLATAFORMA-h17-integraciones" && npm ci
+Trabaja SIEMPRE desde <workspace>/PLATAFORMA-h17-integraciones. Si no existe:
+  git worktree add "<workspace>/PLATAFORMA-h17-integraciones" -b h17-integraciones origin/main
+  cd "<workspace>/PLATAFORMA-h17-integraciones" && npm ci
 No hagas checkout ni switch en otro directorio.
 
 Vas a construir H17 — las integraciones por tenant de ABRAXA Plataforma: las credenciales de
